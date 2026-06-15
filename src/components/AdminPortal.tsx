@@ -91,7 +91,7 @@ export default function AdminPortal({
   const [smDate, setSmDate] = useState('');
   const [smFrom, setSmFrom] = useState('');
   const [smTo, setSmTo] = useState('');
-  const [smSkipFriday, setSmSkipFriday] = useState(true);
+  const [smRestDays, setSmRestDays] = useState<number[]>([5]); // Default: Friday (5) as off-day
 
   // CRUD Admins and Sub-admin states
   const [subAdmins, setSubAdmins] = useState<any[]>([]);
@@ -373,11 +373,14 @@ export default function AdminPortal({
 
       while (current <= end) {
         const dow = current.getDay();
-        if (!(smSkipFriday && dow === 5)) {
-          const dateStr = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(
-            current.getDate()
-          ).padStart(2, '0')}`;
-          if (!updatedSchedule[dateStr]) updatedSchedule[dateStr] = {};
+        const dateStr = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(
+          current.getDate()
+        ).padStart(2, '0')}`;
+        if (!updatedSchedule[dateStr]) updatedSchedule[dateStr] = {};
+        
+        if (smRestDays.includes(dow)) {
+          updatedSchedule[dateStr][smEmployee] = { shiftType: 'A', note: 'راحة أسبوعية' };
+        } else {
           updatedSchedule[dateStr][smEmployee] = { shiftType: smShiftType, note: smNote };
         }
         current.setDate(current.getDate() + 1);
@@ -2640,15 +2643,48 @@ export default function AdminPortal({
                       />
                     </div>
                   </div>
-                  <label className="flex items-center gap-1.5 text-xs text-slate-600 font-bold cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={smSkipFriday}
-                      onChange={(e) => setSmSkipFriday(e.target.checked)}
-                      className="rounded text-sky-600"
-                    />
-                    <span>تجاهل وعطل البصمة يوم الجمعة</span>
-                  </label>
+                  <div id="sm-rest-days-container" className="flex flex-col gap-1.5 mt-1 border-t border-slate-100 pt-2.5">
+                    <span className="text-[11px] font-bold text-slate-600">
+                      تخصيص أيام الراحة الأسبوعية للموظف (سيتم تعيينها كإجازة تمنع البصمة):
+                    </span>
+                    <div className="grid grid-cols-4 gap-1">
+                      {[
+                        { label: 'السبت', val: 6 },
+                        { label: 'الأحد', val: 0 },
+                        { label: 'الاثنين', val: 1 },
+                        { label: 'الثلاثاء', val: 2 },
+                        { label: 'الأربعاء', val: 3 },
+                        { label: 'الخميس', val: 4 },
+                        { label: 'الجمعة', val: 5 },
+                      ].map((day) => {
+                        const isSelected = smRestDays.includes(day.val);
+                        return (
+                          <button
+                            id={`sm-rest-day-btn-${day.val}`}
+                            key={day.val}
+                            type="button"
+                            onClick={() => {
+                              if (isSelected) {
+                                setSmRestDays(smRestDays.filter(d => d !== day.val));
+                              } else {
+                                setSmRestDays([...smRestDays, day.val]);
+                              }
+                            }}
+                            className={`py-1 rounded-md font-bold text-[10px] text-center border transition-all ${
+                              isSelected
+                                ? 'bg-sky-600 border-sky-700 text-white shadow-xs'
+                                : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                            }`}
+                          >
+                            {day.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <span className="text-[9px] text-slate-400">
+                      * خلال الفترة المذكورة، سيتم إسناد "إجازة" للأيام المختارة أعلاه، بينما تسند نوبة الدوام لباقي الأيام.
+                    </span>
+                  </div>
                 </div>
               )}
 
