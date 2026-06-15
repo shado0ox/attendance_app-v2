@@ -1,0 +1,6 @@
+{
+  "name": "نظام إدارة الدوام",
+  "description": "تطبيق الدخول والحضور والانصراف مع نظام بوابة للموظفين وإدارة الأقسام والشيفتات والمسكن وربط Firebase",
+  "requestFramePermissions": ["geolocation", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
