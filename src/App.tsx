@@ -17,7 +17,8 @@ const defaultDepartments = [
 
 const defaultShiftTypes = [
   { id: 'S', name: 'صباحي', start: '07:00', end: '15:00', type: 'morning' },
-  { id: 'E', name: 'مسائي', start: '15:00', end: '23:00', type: 'evening' }
+  { id: 'E', name: 'مسائي', start: '15:00', end: '23:00', type: 'evening' },
+  { id: 'D', name: 'كامل (صباحي + مسائي)', start: '08:00', end: '22:00', type: 'double' }
 ];
 
 const defaultEmployees = [
@@ -335,6 +336,8 @@ export default function App() {
           appSettings={appSettings}
           departments={appData.departments}
           employees={appData.employees}
+          shiftTypes={appData.shiftTypes}
+          schedule={appData.schedule}
           onLogout={handleLogout}
           onOpenChangePassword={handleOpenChangePassword}
         />

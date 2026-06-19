@@ -6,7 +6,7 @@ import {
   Crosshair, MessageCircle, UploadCloud, Loader, AlertTriangle, Edit
 } from 'lucide-react';
 import { db, OperationType, handleFirestoreError } from '../firebase';
-import { collection, doc, updateDoc, deleteDoc, addDoc, getDocs } from 'firebase/firestore';
+import { collection, doc, updateDoc, deleteDoc, addDoc, getDocs, query, where } from 'firebase/firestore';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
@@ -140,6 +140,8 @@ export default function AdminPortal({
   const [stName, setStName] = useState('');
   const [stStart, setStStart] = useState('08:00');
   const [stEnd, setStEnd] = useState('16:00');
+  const [stStart2, setStStart2] = useState('17:00');
+  const [stEnd2, setStEnd2] = useState('21:00');
   const [stType, setStType] = useState('morning');
 
   // WhatsApp helper
@@ -250,8 +252,16 @@ export default function AdminPortal({
       const isFri = date.getDay() === 5;
       departments.forEach((dept) => {
         const deptEmps = employees.filter((e) => e.dept === dept.id);
-        const morningWorkers = deptEmps.filter((e) => schedule[dateStr]?.[e.id]?.shiftType === 'S');
-        const eveningWorkers = deptEmps.filter((e) => schedule[dateStr]?.[e.id]?.shiftType === 'E');
+        const morningWorkers = deptEmps.filter((e) => {
+          const sType = schedule[dateStr]?.[e.id]?.shiftType;
+          const stObj = (shiftTypes || []).find((t: any) => t.id === sType);
+          return sType === 'S' || stObj?.type === 'double';
+        });
+        const eveningWorkers = deptEmps.filter((e) => {
+          const sType = schedule[dateStr]?.[e.id]?.shiftType;
+          const stObj = (shiftTypes || []).find((t: any) => t.id === sType);
+          return sType === 'E' || stObj?.type === 'double';
+        });
 
         if (isFri) {
           if (dept.friday === 'off') return;
@@ -455,6 +465,8 @@ export default function AdminPortal({
       name: stName.trim(),
       start: stStart,
       end: stEnd,
+      start2: stType === 'double' ? stStart2 : null,
+      end2: stType === 'double' ? stEnd2 : null,
       type: stType
     };
 
@@ -548,6 +560,60 @@ export default function AdminPortal({
 
           updatedSch[matchedReq.date][matchedReq.empId] = { shiftType: originalShift2.shiftType, note: `بديل لـ ${matchedReq.swapWithEmpName}` };
           updatedSch[matchedReq.date][matchedReq.swapWithEmpId] = { shiftType: originalShift1.shiftType, note: `بديل لـ ${matchedReq.empName}` };
+        } else if (matchedReq.type === 'attendance_adjustment') {
+          // Update or insert dynamic attendance record approved by management
+          const q = query(
+            collection(db, 'attendance'),
+            where('empId', '==', matchedReq.empId),
+            where('date', '==', matchedReq.date)
+          );
+          const snap = await getDocs(q);
+          const formattedCheckIn = matchedReq.checkInTime || '08:00';
+          const formattedCheckOut = matchedReq.checkOutTime || '16:00';
+
+          // Correctly calculate timestamps so duration can be calculated in reports
+          const [inH, inM] = formattedCheckIn.split(':').map(Number);
+          const [outH, outM] = formattedCheckOut.split(':').map(Number);
+
+          const inDateObj = new Date(matchedReq.date);
+          inDateObj.setHours(inH || 8, inM || 0, 0, 0);
+
+          const outDateObj = new Date(matchedReq.date);
+          outDateObj.setHours(outH || 16, outM || 0, 0, 0);
+
+          const checkInTimestamp = isNaN(inDateObj.getTime()) ? Date.now() : inDateObj.getTime();
+          const checkOutTimestamp = isNaN(outDateObj.getTime()) ? Date.now() : outDateObj.getTime();
+
+          if (!snap.empty) {
+            const attendanceDocRef = doc(db, 'attendance', snap.docs[0].id);
+            await updateDoc(attendanceDocRef, {
+              checkIn: formattedCheckIn,
+              checkInTs: checkInTimestamp,
+              checkOut: formattedCheckOut,
+              checkOutTs: checkOutTimestamp,
+              note: 'تم البصم بموافقة الإدارة',
+              status: 'present',
+              source: 'الإدارة'
+            });
+          } else {
+            const empObj = employees.find((e) => e.id === matchedReq.empId);
+            const deptName = empObj?.dept || '';
+
+            await addDoc(collection(db, 'attendance'), {
+              empId: matchedReq.empId,
+              empName: matchedReq.empName,
+              dept: deptName,
+              date: matchedReq.date,
+              checkIn: formattedCheckIn,
+              checkInTs: checkInTimestamp,
+              checkOut: formattedCheckOut,
+              checkOutTs: checkOutTimestamp,
+              status: 'present',
+              note: 'تم البصم بموافقة الإدارة',
+              source: 'الإدارة',
+              createdAt: Date.now()
+            });
+          }
         }
 
         onUpdateAppData({ ...appData, schedule: updatedSch });
@@ -646,12 +712,16 @@ export default function AdminPortal({
       let shiftLabel = 'إجازة';
       let icon = '⬜';
 
-      if (entry?.shiftType === 'S') {
-        shiftLabel = 'صباحي';
-        icon = '🌅';
-      } else if (entry?.shiftType === 'E') {
-        shiftLabel = 'مسائي';
-        icon = '🌙';
+      const st = (shiftTypes || []).find((t: any) => t.id === entry?.shiftType);
+      if (st) {
+        shiftLabel = st.name;
+        if (st.type === 'double') {
+          icon = '🔄';
+        } else if (st.type === 'morning' || st.id === 'S') {
+          icon = '🌅';
+        } else {
+          icon = '🌙';
+        }
       }
 
       msg += `${icon} ${DAYS_AR[dow]} [${dateStr.split('-')[2]}]: *${shiftLabel}* ${
@@ -1128,6 +1198,9 @@ export default function AdminPortal({
                                   } else if (_st.id === 'E') {
                                     badgeStyle = 'text-indigo-700 bg-indigo-50 border border-indigo-200/50 font-bold';
                                     badgeLabel = `🌙 ${_st.name.replace('شيفت', '').trim()}`;
+                                  } else if (_st.type === 'double') {
+                                    badgeStyle = 'text-amber-700 bg-amber-50 border border-amber-200/50 font-bold';
+                                    badgeLabel = `🔄 ${_st.name.replace('شيفت', '').trim()}`;
                                   } else {
                                     badgeStyle = 'text-sky-700 bg-sky-50 border border-sky-200/50 font-bold';
                                     badgeLabel = `⏱️ ${_st.name.replace('شيفت', '').trim()}`;
@@ -1320,6 +1393,9 @@ export default function AdminPortal({
                                 } else if (st.id === 'E') {
                                   badgeStyle = 'text-indigo-700 bg-indigo-50 border border-indigo-200/60 font-bold';
                                   badgeLabel = `🌙 ${st.name}`;
+                                } else if (st.type === 'double') {
+                                  badgeStyle = 'text-amber-700 bg-amber-50 border border-amber-200/60 font-bold animate-pulse';
+                                  badgeLabel = `🔄 ${st.name} (كامل)`;
                                 } else {
                                   badgeStyle = 'text-sky-700 bg-sky-50 border border-sky-300/30 font-bold';
                                   badgeLabel = `⏱️ ${st.name}`;
@@ -1493,12 +1569,13 @@ export default function AdminPortal({
                       onClick={() => {
                         // EXPORT CSV
                         let csv = '\uFEFF';
-                        csv += 'التاريخ,الموظف,القسم,الحضور,الانصراف,المدة\n';
+                        csv += 'التاريخ,الموظف,القسم,الحضور,الانصراف,المدة,مصدر البصمة\n';
                         attendanceRecords.forEach((r) => {
                           const deptObj = departments.find((d) => d.id === r.dept);
+                          const fSource = r.source || (r.note?.includes('الإدارة') || r.note?.includes('الادارة') ? 'الإدارة' : 'المقر');
                           csv += `${r.date},${r.empName},${deptObj ? deptObj.name : r.dept},${r.checkIn},${r.checkOut || 'لم يسجل'},${
                             r.checkOutTs && r.checkInTs ? Math.round((r.checkOutTs - r.checkInTs) / 60000) + ' د' : ''
-                          }\n`;
+                          },${fSource}\n`;
                         });
                         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
                         const link = document.createElement('a');
@@ -1527,6 +1604,7 @@ export default function AdminPortal({
                         <th className="p-3 font-extrabold">الحضور</th>
                         <th className="p-3 font-extrabold">الانصراف</th>
                         <th className="p-3 font-extrabold">مدة العمل</th>
+                        <th className="p-3 font-extrabold">مكان البصمة</th>
                         <th className="p-3 font-extrabold text-center">الإجراءات</th>
                       </tr>
                     </thead>
@@ -1550,6 +1628,8 @@ export default function AdminPortal({
                             duration = `${Math.floor(diffMins / 60)}ساعة ${diffMins % 60}د`;
                           }
 
+                          const fSource = rec.source || (rec.note?.includes('الإدارة') || rec.note?.includes('الادارة') ? 'الإدارة' : 'المقر');
+
                           return (
                             <tr key={rec.id} className="border-b last:border-0 hover:bg-sky-50/20 text-slate-700 text-xs">
                               <td className="p-3 font-bold">{rec.date}</td>
@@ -1558,6 +1638,17 @@ export default function AdminPortal({
                               <td className="p-3 font-bold text-emerald-600">{rec.checkIn}</td>
                               <td className="p-3 text-slate-600 font-bold">{rec.checkOut || '—'}</td>
                               <td className="p-3 font-extrabold text-sky-600">{duration}</td>
+                              <td className="p-3">
+                                {fSource === 'الإدارة' ? (
+                                  <span className="inline-block bg-purple-50 text-purple-700 border border-purple-100 rounded-lg px-2.5 py-0.5 font-extrabold text-[10px]">
+                                    💼 الإدارة
+                                  </span>
+                                ) : (
+                                  <span className="inline-block bg-sky-50 text-sky-700 border border-sky-100 rounded-lg px-2.5 py-0.5 font-extrabold text-[10px]">
+                                    📍 المقر
+                                  </span>
+                                )}
+                              </td>
                               <td className="p-3 text-center">
                                 <button
                                   onClick={() => {
@@ -1582,7 +1673,7 @@ export default function AdminPortal({
 
                       {attendanceRecords.length === 0 && (
                         <tr>
-                          <td colSpan={7} className="p-10 text-center text-slate-400 font-medium">
+                          <td colSpan={8} className="p-10 text-center text-slate-400 font-medium">
                             لا توجد سجلات حضور صالحة للمواصفات المحددة حالياً.
                           </td>
                         </tr>
@@ -1892,6 +1983,7 @@ export default function AdminPortal({
                     let typeLabel = 'طلب إجازة';
                     if (req.type === 'shift_change') typeLabel = 'تغيير شيفت الدوام';
                     if (req.type === 'swap') typeLabel = `تبديل شيفت مع ${req.swapWithEmpName}`;
+                    if (req.type === 'attendance_adjustment') typeLabel = 'تعديل لقطات البصمة';
 
                     return (
                       <div key={req.id} className="p-4 border border-sky-50 rounded-xl bg-slate-50/50 flex justify-between items-start flex-wrap gap-3 text-xs">
@@ -1900,6 +1992,11 @@ export default function AdminPortal({
                           <div className="text-[10px] text-slate-400 mt-1">
                             نوع الطلب: <strong className="font-extrabold text-sky-700">{typeLabel}</strong> | التاريخ:{' '}
                             <strong className="font-extrabold">{req.date}</strong>
+                            {req.type === 'attendance_adjustment' && (
+                              <span className="block mt-1 bg-sky-50 text-sky-800 p-1.5 rounded border border-sky-100">
+                                ⏱️ الفترات المطلوبة للبصمة: حضور <strong className="font-black text-slate-900">({req.checkInTime || '-'})</strong> • انصراف <strong className="font-black text-slate-900">({req.checkOutTime || '-'})</strong>
+                              </span>
+                            )}
                           </div>
                           {req.note && <div className="p-2 bg-white rounded mt-1.5 border leading-relaxed text-[11px]">{req.note}</div>}
                           
@@ -1965,6 +2062,8 @@ export default function AdminPortal({
                     setStName('');
                     setStStart('08:00');
                     setStEnd('16:00');
+                    setStStart2('17:00');
+                    setStEnd2('21:00');
                     setStType('morning');
                     setShiftTypeModalOpen(true);
                   }}
@@ -1986,9 +2085,42 @@ export default function AdminPortal({
                           </span>
                           <div>
                             <h4 className="font-extrabold text-slate-800 text-xs">{st.name}</h4>
-                            <span className="inline-block mt-1 px-2.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-extrabold rounded-full">
-                              🕒 {st.start} إلى {st.end}
-                            </span>
+                            <div className="flex flex-col gap-1 mt-1">
+                              {st.type === 'double' ? (
+                                <>
+                                  <div className="flex items-center gap-1.5 text-[10px] text-slate-600 font-extrabold">
+                                    <span className="text-amber-600">🌅 الصباحية:</span>
+                                    <span>{st.start} إلى {st.end}</span>
+                                    <span className="text-[9px] bg-amber-50 text-amber-700 px-1 rounded-sm">
+                                      ({(() => {
+                                        const [sh, sm] = st.start.split(':').map(Number);
+                                        const [eh, em] = st.end.split(':').map(Number);
+                                        let diff = (eh * 60 + em) - (sh * 60 + sm);
+                                        if (diff < 0) diff += 24 * 60;
+                                        return `${Math.round(diff / 60)} س`;
+                                      })()})
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 text-[10px] text-slate-600 font-extrabold">
+                                    <span className="text-indigo-600">🌙 المسائية:</span>
+                                    <span>{st.start2 || '17:00'} إلى {st.end2 || '21:00'}</span>
+                                    <span className="text-[9px] bg-indigo-50 text-indigo-700 px-1 rounded-sm">
+                                      ({(() => {
+                                        const [sh, sm] = (st.start2 || '17:00').split(':').map(Number);
+                                        const [eh, em] = (st.end2 || '21:00').split(':').map(Number);
+                                        let diff = (eh * 60 + em) - (sh * 60 + sm);
+                                        if (diff < 0) diff += 24 * 60;
+                                        return `${Math.round(diff / 60)} س`;
+                                      })()})
+                                    </span>
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="inline-block px-2.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-extrabold rounded-full max-w-max">
+                                  🕒 {st.start} إلى {st.end}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                         <div className="flex gap-1">
@@ -1999,6 +2131,8 @@ export default function AdminPortal({
                               setStName(st.name);
                               setStStart(st.start);
                               setStEnd(st.end);
+                              setStStart2(st.start2 || '17:00');
+                              setStEnd2(st.end2 || '21:00');
                               setStType(st.type || 'morning');
                               setShiftTypeModalOpen(true);
                             }}
@@ -2017,16 +2151,29 @@ export default function AdminPortal({
 
                       <div className="grid grid-cols-2 gap-2 text-center text-[10px] font-semibold">
                         <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-slate-700">
-                          نطاق الشيفت: <span className="font-extrabold text-indigo-700">{st.type === 'morning' ? 'دوام صباحي' : 'دوام مسائي / ليلي'}</span>
+                          نطاق الشيفت: <span className="font-extrabold text-indigo-700">
+                            {st.type === 'double' ? 'شيفت يجمع فترتين' : (st.type === 'morning' ? 'دوام صباحي' : 'دوام مسائي / ليلي')}
+                          </span>
                         </div>
                         <div className="p-2.5 bg-sky-50 border border-sky-100 rounded-lg text-sky-800">
-                          المدة الإجمالية: <span className="font-extrabold">
+                          المدة الإجمالية: <span className="font-extrabold text-sky-600">
                             {(() => {
                               const [sh, sm] = st.start.split(':').map(Number);
                               const [eh, em] = st.end.split(':').map(Number);
                               let diff = (eh * 60 + em) - (sh * 60 + sm);
                               if (diff < 0) diff += 24 * 60; // overnight check
-                              return `${Math.round(diff / 60)} سَاعة`;
+                              
+                              if (st.type === 'double') {
+                                const [sh2, sm2] = (st.start2 || '17:00').split(':').map(Number);
+                                const [eh2, em2] = (st.end2 || '21:00').split(':').map(Number);
+                                let diff2 = (eh2 * 60 + em2) - (sh2 * 60 + sm2);
+                                if (diff2 < 0) diff2 += 24 * 60;
+                                diff += diff2;
+                              }
+                              
+                              const hours = Math.floor(diff / 60);
+                              const mins = diff % 60;
+                              return mins > 0 ? `${hours} س و ${mins} د` : `${hours} سَاعات`;
                             })()}
                           </span>
                         </div>
@@ -2182,6 +2329,27 @@ export default function AdminPortal({
                       className="px-3 py-2 text-xs border rounded-lg focus:outline-none focus:border-sky-500 font-extrabold"
                     />
                   </div>
+                </div>
+
+                <div className="flex items-center gap-2 bg-sky-50 bg-opacity-30 p-3.5 rounded-xl border border-sky-100/50">
+                  <input
+                    type="checkbox"
+                    id="preventOutCheckout"
+                    checked={!!appSettings?.officeLocation?.preventOutCheckout}
+                    onChange={(e) =>
+                      onUpdateSettings({
+                        ...appSettings,
+                        officeLocation: {
+                          ...appSettings.officeLocation,
+                          preventOutCheckout: e.target.checked
+                        }
+                      })
+                    }
+                    className="w-4 h-4 text-sky-600 border-gray-300 rounded focus:ring-sky-500 cursor-pointer"
+                  />
+                  <label htmlFor="preventOutCheckout" className="text-xs font-extrabold text-slate-700 cursor-pointer select-none">
+                    🔒 تفعيل خدمة عدم تسجيل انصراف خارج الموقع (التحقق من بقاء الموظف ضمن النطاق المسموح جغرافياً عند تسجيل الانصراف)
+                  </label>
                 </div>
 
                 <div className="flex gap-2 flex-wrap items-center mt-1">
@@ -2693,11 +2861,11 @@ export default function AdminPortal({
                 <select
                   value={smShiftType}
                   onChange={(e) => setSmShiftType(e.target.value)}
-                  className="px-3 py-2 text-xs border rounded-lg focus:outline-none bg-white font-medium"
+                  className="px-3 py-2 text-xs border rounded-lg focus:outline-none bg-white font-medium text-slate-800"
                 >
                   {(shiftTypes || []).map((st: any) => (
                     <option key={st.id} value={st.id}>
-                      {st.id === 'S' ? '🌅' : st.id === 'E' ? '🌙' : '⏱️'} {st.name} — ({st.start} حتى {st.end})
+                      {st.id === 'S' ? '🌅' : st.id === 'E' ? '🌙' : st.type === 'double' ? '🔄' : '⏱️'} {st.name} {st.type === 'double' ? '— (كامل: صباحي ومسائي)' : ''} — ({st.start} حتى {st.end})
                     </option>
                   ))}
                   <option value="A">🏝️ إجازة / راحة أسبوعية</option>
@@ -2947,7 +3115,7 @@ export default function AdminPortal({
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-bold text-slate-600">بداية الشيفت</label>
+                  <label className="text-xs font-bold text-slate-600">بداية الشيفت (أو الصباحي)</label>
                   <input
                     type="time"
                     value={stStart}
@@ -2956,7 +3124,7 @@ export default function AdminPortal({
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-bold text-slate-600">نهاية الشيفت</label>
+                  <label className="text-xs font-bold text-slate-600">نهاية الشيفت (أو الصباحي)</label>
                   <input
                     type="time"
                     value={stEnd}
@@ -2975,8 +3143,38 @@ export default function AdminPortal({
                 >
                   <option value="morning">🌅 دوام صباحي</option>
                   <option value="evening">🌙 دوام مسائي / ليلي</option>
+                  <option value="double">🔄 شيفت يجمع فترة صباحي وفترة مسائي</option>
                 </select>
               </div>
+
+              {stType === 'double' && (
+                <div className="p-3 bg-sky-50/50 border border-sky-100 rounded-xl flex flex-col gap-2.5">
+                  <span className="text-[10px] font-extrabold text-sky-800">🌙 مواقيت الفترة المسائية (الشيفت الثاني):</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex flex-col gap-0.5">
+                      <label className="text-[9px] font-bold text-slate-500">بداية المسائي</label>
+                      <input
+                        type="time"
+                        value={stStart2}
+                        onChange={(e) => setStStart2(e.target.value)}
+                        className="px-2.5 py-1.5 text-xs border rounded-lg focus:outline-none font-mono bg-white"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="text-[9px] font-bold text-slate-500">نهاية المسائي</label>
+                      <input
+                        type="time"
+                        value={stEnd2}
+                        onChange={(e) => setStEnd2(e.target.value)}
+                        className="px-2.5 py-1.5 text-xs border rounded-lg focus:outline-none font-mono bg-white"
+                      />
+                    </div>
+                  </div>
+                  <div className="text-[9px] text-slate-400 font-medium">
+                    * سيظهر النظام للموظف في واجهته ساعات عمل الصباح وساعات عمل المساء لحساب فترات البصم والمدد بدقة.
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-2 justify-end mt-2 pt-2 border-t text-xs">
                 <button
@@ -3237,6 +3435,11 @@ export default function AdminPortal({
                                 textStyle = '#b45309';
                                 borderStyleColor = '#fde68a';
                                 icon = '🌙';
+                              } else if (st.type === 'double') {
+                                bgStyle = '#ffedd5';
+                                textStyle = '#c2410c';
+                                borderStyleColor = '#fed7aa';
+                                icon = '🔄';
                               } else {
                                 bgStyle = '#e0f2fe';
                                 textStyle = '#0369a1';

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle } from 'lucide-react';
 import { db, auth, OperationType, handleFirestoreError } from '../firebase';
 import { collection, query, where, limit, getDocs, addDoc, updateDoc, doc } from 'firebase/firestore';
@@ -8,6 +8,8 @@ interface EmployeePortalProps {
   appSettings: any;
   departments: any[];
   employees: any[];
+  shiftTypes?: any[];
+  schedule?: any;
   onLogout: () => void;
   onOpenChangePassword: () => void;
 }
@@ -17,6 +19,8 @@ export default function EmployeePortal({
   appSettings,
   departments,
   employees,
+  shiftTypes = [],
+  schedule = {},
   onLogout,
   onOpenChangePassword
 }: EmployeePortalProps) {
@@ -54,6 +58,220 @@ export default function EmployeePortal({
   const [reqNote, setReqNote] = useState('');
   const [reqSwapEmpId, setReqSwapEmpId] = useState('');
   const [reqTargetShift, setReqTargetShift] = useState('S');
+  const [reqCheckInTime, setReqCheckInTime] = useState('08:00');
+  const [reqCheckOutTime, setReqCheckOutTime] = useState('16:00');
+
+  // Auto Punch / Geofencing states
+  const [autoCheckIn, setAutoCheckIn] = useState<boolean>(() => {
+    return localStorage.getItem(`autoCheckIn_${employee.id}`) === 'true';
+  });
+  const [autoCheckOut, setAutoCheckOut] = useState<boolean>(() => {
+    return localStorage.getItem(`autoCheckOut_${employee.id}`) === 'true';
+  });
+  const [autoStatusText, setAutoStatusText] = useState<string>('غير مفعلة');
+  const [currentDistance, setCurrentDistance] = useState<number | null>(null);
+  const [autoLogs, setAutoLogs] = useState<string[]>([]);
+
+  const stateRef = useRef({
+    attendanceStatus,
+    todayRecord,
+    autoCheckIn,
+    autoCheckOut,
+    employee,
+    appSettings
+  });
+
+  useEffect(() => {
+    stateRef.current = {
+      attendanceStatus,
+      todayRecord,
+      autoCheckIn,
+      autoCheckOut,
+      employee,
+      appSettings
+    };
+  }, [attendanceStatus, todayRecord, autoCheckIn, autoCheckOut, employee, appSettings]);
+
+  const executePunchInBackground = async (lat: number, lng: number, period: 'first' | 'second') => {
+    try {
+      const todayStr = getTodayStr();
+      const formattedTime = new Date().toLocaleTimeString('ar-SA', {
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+
+      if (period === 'second') {
+        const tr = stateRef.current.todayRecord;
+        if (!tr) return;
+        const recordRef = doc(db, 'attendance', tr.id);
+        const updateData = {
+          checkIn2: formattedTime,
+          checkInTs2: Date.now(),
+          checkInLat2: lat,
+          checkInLng2: lng,
+          note: (tr.note ? tr.note + ' ' : '') + '[حضور تلقائي عبر GPS]',
+          source: 'المقر (تلقائي)'
+        };
+        await updateDoc(recordRef, updateData);
+        setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ✅ تم الحضور التلقائي للفترة الثانية.`, ...prev.slice(0, 4)]);
+      } else {
+        const payload = {
+          empId: employee.id,
+          empName: employee.name,
+          dept: employee.dept || '',
+          date: todayStr,
+          checkIn: formattedTime,
+          checkInTs: Date.now(),
+          checkOut: null,
+          checkOutTs: null,
+          status: 'present',
+          source: 'المقر (تلقائي)',
+          note: 'حضور تلقائي عبر GPS',
+          checkInLat: lat,
+          checkInLng: lng,
+          createdAt: Date.now()
+        };
+        await addDoc(collection(db, 'attendance'), payload);
+        setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ✅ تم تسجيل حضورك التلقائي بنجاح.`, ...prev.slice(0, 4)]);
+      }
+      await loadAttendanceStatus();
+    } catch (e: any) {
+      console.error('Error auto-punch checkin:', e);
+      setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ❌ فشل البصم التلقائي: ${e.message}`, ...prev.slice(0, 4)]);
+    }
+  };
+
+  const executePunchOutBackground = async () => {
+    try {
+      const tr = stateRef.current.todayRecord;
+      if (!tr?.id) return;
+      const formattedTime = new Date().toLocaleTimeString('ar-SA', {
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+
+      const isDouble = isTodayRecordShiftDouble();
+      const isPeriod2 = isDouble && tr.checkOut;
+
+      const recordRef = doc(db, 'attendance', tr.id);
+      const updateData = isPeriod2 ? {
+        checkOut2: formattedTime,
+        checkOutTs2: Date.now(),
+        note: (tr.note ? tr.note + ' ' : '') + '[انصراف تلقائي عبر GPS]',
+        source: tr.source || 'المقر (تلقائي)'
+      } : {
+        checkOut: formattedTime,
+        checkOutTs: Date.now(),
+        note: (tr.note ? tr.note + ' ' : '') + '[انصراف تلقائي عبر GPS]',
+        source: tr.source || 'المقر (تلقائي)'
+      };
+
+      await updateDoc(recordRef, updateData);
+      setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ✅ تم الانصراف التلقائي بنجاح.`, ...prev.slice(0, 4)]);
+      await loadAttendanceStatus();
+    } catch (e: any) {
+      console.error('Error auto-punch checkout:', e);
+      setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ❌ فشل الانصراف التلقائي: ${e.message}`, ...prev.slice(0, 4)]);
+    }
+  };
+
+  // Persist autoPunch toggles
+  useEffect(() => {
+    localStorage.setItem(`autoCheckIn_${employee.id}`, String(autoCheckIn));
+  }, [autoCheckIn, employee.id]);
+
+  useEffect(() => {
+    localStorage.setItem(`autoCheckOut_${employee.id}`, String(autoCheckOut));
+  }, [autoCheckOut, employee.id]);
+
+  // Geofencing Background Watcher Worker
+  useEffect(() => {
+    const currentAutoCheckIn = stateRef.current.autoCheckIn;
+    const currentAutoCheckOut = stateRef.current.autoCheckOut;
+
+    if (!currentAutoCheckIn && !currentAutoCheckOut) {
+      setAutoStatusText('البصمة التلقائي عبر الـ GPS غير مفعلة');
+      setCurrentDistance(null);
+      return;
+    }
+
+    const loc = stateRef.current.appSettings?.officeLocation;
+    if (!loc || !loc.lat || !loc.lng) {
+      setAutoStatusText('⚠️ إحداثيات مقر العمل غير محددة من الإدارة');
+      return;
+    }
+
+    const officeLat = parseFloat(loc.lat);
+    const officeLng = parseFloat(loc.lng);
+    const radiusLimit = parseInt(loc.radius) || 150;
+
+    if (isNaN(officeLat) || isNaN(officeLng)) {
+      setAutoStatusText('⚠️ إحداثيات مقر العمل غير صالحة');
+      return;
+    }
+
+    setAutoStatusText('📡 جاري مراقبة موقعك بالخلفية للبصم التلقائي...');
+
+    let watchId: number | null = null;
+    let outsideCounter = 0;
+
+    if (navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition(
+        async (position) => {
+          const userLat = position.coords.latitude;
+          const userLng = position.coords.longitude;
+          const diff = getDistance(userLat, userLng, officeLat, officeLng);
+          setCurrentDistance(Math.round(diff));
+
+          const isInside = diff <= radiusLimit;
+          const activeStatus = stateRef.current.attendanceStatus;
+          const activeAutoCheckIn = stateRef.current.autoCheckIn;
+          const activeAutoCheckOut = stateRef.current.autoCheckOut;
+
+          if (isInside) {
+            outsideCounter = 0;
+            setAutoStatusText(`📍 أنت داخل مقر العمل (${Math.round(diff)} م) • نطاق البصم متاح ✅`);
+
+            if (activeAutoCheckIn) {
+              if (activeStatus === 'not-checked-in') {
+                setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] 🚀 تم رصد دخولك للموقع، جاري تسجيل الحضور...`, ...prev.slice(0, 4)]);
+                await executePunchInBackground(userLat, userLng, 'first');
+              } else if (activeStatus === 'not-checked-in-2') {
+                setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] 🚀 تم رصد دخولك للموقع للفترة الثانية، جاري تسجيل الحضور...`, ...prev.slice(0, 4)]);
+                await executePunchInBackground(userLat, userLng, 'second');
+              }
+            }
+          } else {
+            setAutoStatusText(`📍 أنت خارج مقر العمل بمسافة (${Math.round(diff)} م) 🚫`);
+
+            if (activeAutoCheckOut) {
+              if (activeStatus === 'checked-in' || activeStatus === 'checked-in-2') {
+                outsideCounter++;
+                if (outsideCounter >= 2) { // confirm departure to avoid GPS spikes
+                  setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] 🚶 تم رصد خروجك من الموقع، جاري تسجيل الانصراف...`, ...prev.slice(0, 4)]);
+                  await executePunchOutBackground();
+                  outsideCounter = 0;
+                }
+              }
+            }
+          }
+        },
+        (error) => {
+          console.error('Error auto punch GPS:', error);
+          setAutoStatusText(`⚠️ عذرًا، تعذر رصد الإشارة التلقائية: ${error.message}`);
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+      );
+    } else {
+      setAutoStatusText('⚠️ جهازك لا يدعم تتبع الموقع بالخلفية');
+    }
+
+    return () => {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, [autoCheckIn, autoCheckOut, attendanceStatus, employee.id, appSettings]);
 
   const DAYS_AR = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
   const MONTHS_AR = [
@@ -65,6 +283,26 @@ export default function EmployeePortal({
   const getTodayStr = () => {
     const t = new Date();
     return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+  };
+
+  const getLocalScheduleData = () => {
+    const localDataStr = localStorage.getItem('schedule_mainData') || '{}';
+    try {
+      const raw = JSON.parse(localDataStr);
+      return raw.schedule || {};
+    } catch (e) {
+      return {};
+    }
+  };
+
+  const isTodayRecordShiftDouble = (): boolean => {
+    const todayStr = getTodayStr();
+    const sched = schedule && Object.keys(schedule).length > 0 ? schedule : getLocalScheduleData();
+    const assigned = sched?.[todayStr]?.[employee.id];
+    const stType = assigned?.shiftType || 'A';
+    const sTypes = shiftTypes && shiftTypes.length > 0 ? shiftTypes : [];
+    const st = sTypes.find((s: any) => s.id === stType);
+    return st?.type === 'double';
   };
 
   useEffect(() => {
@@ -133,10 +371,25 @@ export default function EmployeePortal({
         const docData = snap.docs[0].data();
         const record = { id: snap.docs[0].id, ...docData };
         setTodayRecord(record);
-        if (!docData.checkOut) {
-          setAttendanceStatus('checked-in');
+        
+        const isDouble = isTodayRecordShiftDouble();
+
+        if (isDouble) {
+          if (!docData.checkOut) {
+            setAttendanceStatus('checked-in'); // First period check-in
+          } else if (!docData.checkIn2) {
+            setAttendanceStatus('not-checked-in-2'); // Ready for Second period check-in
+          } else if (!docData.checkOut2) {
+            setAttendanceStatus('checked-in-2'); // Second period check-in
+          } else {
+            setAttendanceStatus('checked-out'); // Both periods checked-out!
+          }
         } else {
-          setAttendanceStatus('checked-out');
+          if (!docData.checkOut) {
+            setAttendanceStatus('checked-in');
+          } else {
+            setAttendanceStatus('checked-out');
+          }
         }
       }
     } catch (e: any) {
@@ -233,28 +486,51 @@ export default function EmployeePortal({
         minute: '2-digit'
       });
 
-      const payload = {
-        empId: employee.id,
-        empName: employee.name,
-        dept: employee.dept || '',
-        date: todayStr,
-        checkIn: formattedTime,
-        checkInTs: Date.now(),
-        checkOut: null,
-        checkOutTs: null,
-        status: 'present',
-        ...(lat !== null && { checkInLat: lat, checkInLng: lng }),
-        createdAt: Date.now()
-      };
+      const isDouble = isTodayRecordShiftDouble();
+      const isPeriod2 = isDouble && todayRecord && todayRecord.checkOut && !todayRecord.checkIn2;
 
-      try {
-        await addDoc(collection(db, 'attendance'), payload);
-      } catch (e) {
-        handleFirestoreError(e, OperationType.CREATE, 'attendance');
-        throw e;
+      if (isPeriod2) {
+        // Update existing daily record with period 2 check-in
+        const recordRef = doc(db, 'attendance', todayRecord.id);
+        const updateData: any = {
+          checkIn2: formattedTime,
+          checkInTs2: Date.now(),
+          ...(lat !== null && { checkInLat2: lat, checkInLng2: lng })
+        };
+        try {
+          await updateDoc(recordRef, updateData);
+        } catch (e) {
+          handleFirestoreError(e, OperationType.UPDATE, `attendance/${todayRecord.id}`);
+          throw e;
+        }
+
+        setGeoStatus('✅ تم تسجيل حضور الفترة الثانية بنجاح اليوم!');
+      } else {
+        // Standard first check-in of the day
+        const payload = {
+          empId: employee.id,
+          empName: employee.name,
+          dept: employee.dept || '',
+          date: todayStr,
+          checkIn: formattedTime,
+          checkInTs: Date.now(),
+          checkOut: null,
+          checkOutTs: null,
+          status: 'present',
+          source: 'المقر',
+          ...(lat !== null && { checkInLat: lat, checkInLng: lng }),
+          createdAt: Date.now()
+        };
+
+        try {
+          await addDoc(collection(db, 'attendance'), payload);
+        } catch (e) {
+          handleFirestoreError(e, OperationType.CREATE, 'attendance');
+          throw e;
+        }
+
+        setGeoStatus('✅ تم تسجيل حضورك بنجاح اليوم!');
       }
-
-      setGeoStatus('✅ تم تسجيل حضورك بنجاح اليوم!');
       await loadAttendanceStatus();
     } catch (e: any) {
       setGeoStatus('خطأ أثناء الإدخال: ' + e.message);
@@ -269,6 +545,37 @@ export default function EmployeePortal({
       return;
     }
 
+    const loc = appSettings?.officeLocation;
+    const requiresGPS = loc && loc.lat && loc.lng && loc.preventOutCheckout;
+
+    if (requiresGPS) {
+      setCheckActionLoading(true);
+      setGeoStatus('📡 جاري تحديد موقعك الجغرافي للتحقق من الانصراف...');
+      try {
+        const position = await getPosition();
+        const userLat = position.coords.latitude;
+        const userLng = position.coords.longitude;
+        const officeLat = parseFloat(loc.lat);
+        const officeLng = parseFloat(loc.lng);
+        const diffDistance = getDistance(userLat, userLng, officeLat, officeLng);
+        const radiusLimit = parseInt(loc.radius) || 150;
+
+        if (diffDistance > radiusLimit) {
+          setCheckActionLoading(false);
+          setGeoStatus(
+            `🚫 لا يمكنك تسجيل الانصراف. أنت خارج نطاق مقر الشركة بمسافة قدرها (${Math.round(
+              diffDistance
+            )}متر). النطاق المسموح به للانصراف هو: ${radiusLimit}متر.`
+          );
+          return;
+        }
+      } catch (e: any) {
+        setGeoStatus('❌ فشل التحقق من الموقع لتسجيل الانصراف: ' + e.message);
+        setCheckActionLoading(false);
+        return;
+      }
+    }
+
     requestConfirm('هل تريد تأكيد تسجيل انصرافك الآن؟', async () => {
       setCheckActionLoading(true);
       setGeoStatus('⏳ جاري تسجيل الانصراف...');
@@ -279,12 +586,20 @@ export default function EmployeePortal({
           minute: '2-digit'
         });
 
+        const isDouble = isTodayRecordShiftDouble();
+        const isPeriod2 = isDouble && todayRecord.checkOut;
+
         const recordRef = doc(db, 'attendance', todayRecord.id);
+        const updateData: any = isPeriod2 ? {
+          checkOut2: formattedTime,
+          checkOutTs2: Date.now()
+        } : {
+          checkOut: formattedTime,
+          checkOutTs: Date.now()
+        };
+
         try {
-          await updateDoc(recordRef, {
-            checkOut: formattedTime,
-            checkOutTs: Date.now()
-          });
+          await updateDoc(recordRef, updateData);
         } catch (e) {
           handleFirestoreError(e, OperationType.UPDATE, `attendance/${todayRecord.id}`);
           throw e;
@@ -330,6 +645,11 @@ export default function EmployeePortal({
       payload.targetShift = reqTargetShift;
     }
 
+    if ((requestType as any) === 'attendance_adjustment') {
+      payload.checkInTime = reqCheckInTime;
+      payload.checkOutTime = reqCheckOutTime;
+    }
+
     try {
       try {
         await addDoc(collection(db, 'requests'), payload);
@@ -362,7 +682,7 @@ export default function EmployeePortal({
 
   const daysInMonth = new Date(showingYear, showingMonth + 1, 0).getDate();
   const rawFirstDay = new Date(showingYear, showingMonth, 1).getDay(); // 0 is Sunday, 5 is Friday
-  const saudiFirstCol = (rawFirstDay + 2) % 7; // Convert to Saudi standard (Saturday is col 0, Friday is col 6)
+  const saudiFirstCol = (rawFirstDay + 1) % 7; // Convert to Saudi standard (Saturday is col 0, Friday is col 6)
 
   const calendarCells: (number | null)[] = [];
   for (let i = 0; i < saudiFirstCol; i++) calendarCells.push(null);
@@ -481,7 +801,20 @@ export default function EmployeePortal({
                     let label = 'إجازة';
                     let labelColor = 'text-slate-400';
 
-                    if (stType === 'S') {
+                    const matchingShift = (shiftTypes || []).find((s: any) => s.id === stType);
+                    if (matchingShift) {
+                      label = matchingShift.name;
+                      if (matchingShift.type === 'double') {
+                        cellBg = 'bg-indigo-50/50 bg-opacity-70';
+                        labelColor = 'text-indigo-700';
+                      } else if (matchingShift.type === 'evening') {
+                        cellBg = 'bg-amber-50/50 bg-opacity-70';
+                        labelColor = 'text-amber-700';
+                      } else {
+                        cellBg = 'bg-emerald-50/55 bg-opacity-70';
+                        labelColor = 'text-emerald-700';
+                      }
+                    } else if (stType === 'S') {
                       cellBg = 'bg-emerald-50 bg-opacity-70';
                       label = 'صباحي';
                       labelColor = 'text-emerald-700';
@@ -500,7 +833,7 @@ export default function EmployeePortal({
                     return (
                       <td
                         key={cIdx}
-                        className={`p-2 border border-sky-100 text-center align-top relative transition-all ${cellBg} ${
+                        className={`p-1.5 border border-sky-100 text-center align-top relative transition-all ${cellBg} ${
                           isToday ? 'outline-2 outline-amber-500 shadow-md ring-2 ring-amber-100' : ''
                         }`}
                         title={assigned?.note ? `ملاحظة: ${assigned.note}` : ''}
@@ -509,7 +842,19 @@ export default function EmployeePortal({
                           {cell}
                           {isToday && <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full mr-1"></span>}
                         </div>
-                        <div className={`text-[10px] font-bold mt-1.5 ${labelColor}`}>{label}</div>
+                        <div className={`text-[10px] font-bold mt-1 ${labelColor}`}>{label}</div>
+                        {matchingShift && (
+                          <div className="text-[8px] text-slate-500 font-mono mt-0.5 whitespace-nowrap opacity-90 leading-tight">
+                            {matchingShift.type === 'double' ? (
+                              <>
+                                <div className="text-amber-600">🌅 {matchingShift.start}-{matchingShift.end}</div>
+                                <div className="text-indigo-600">🌙 {matchingShift.start2 || '17:00'}-{matchingShift.end2 || '21:00'}</div>
+                              </>
+                            ) : (
+                              <span>{matchingShift.start}-{matchingShift.end}</span>
+                            )}
+                          </div>
+                        )}
                         {assigned?.note && (
                           <div className={`text-[8px] text-slate-400 truncate mt-1 bg-slate-100 px-1 py-0.5 rounded`}>
                             ✏️ {assigned.note}
@@ -566,6 +911,34 @@ export default function EmployeePortal({
             </div>
           )}
 
+          {attendanceStatus === 'not-checked-in-2' && (
+            <div className="flex flex-col gap-4">
+              <div className="p-3.5 bg-amber-50 border border-amber-100 rounded-xl flex gap-2 items-start text-xs text-amber-800">
+                <AlertCircle size={15} className="mt-0.5" />
+                <div>
+                  <span className="font-extrabold text-sm block mb-1">انتهت الفترة الأولى • يرجى تسجيل حضور الفترة الثانية</span>
+                  وقت الفترة الأولى: دخول ({todayRecord?.checkIn}) انصراف ({todayRecord?.checkOut}).
+                </div>
+              </div>
+              <div className="flex gap-3 flex-wrap">
+                <button
+                  onClick={handleCheckIn}
+                  disabled={actionLoading}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold shadow-md transition-all text-xs disabled:opacity-75"
+                >
+                  {actionLoading ? <Loader size={14} className="animate-spin" /> : <span>📍 تسجيل حضور الفترة الثانية</span>}
+                </button>
+                <button
+                  onClick={loadAttendanceStatus}
+                  className="flex items-center gap-1 px-4 py-2 hover:bg-slate-50 border rounded-xl text-slate-500 transition-all text-xs"
+                >
+                  <RefreshCw size={12} />
+                  <span>تحديث</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {attendanceStatus === 'checked-in' && (
             <div className="flex flex-col gap-4">
               <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl flex gap-2.5 items-start text-xs text-emerald-800">
@@ -594,15 +967,53 @@ export default function EmployeePortal({
             </div>
           )}
 
+          {attendanceStatus === 'checked-in-2' && (
+            <div className="flex flex-col gap-4">
+              <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl flex gap-2.5 items-start text-xs text-emerald-800">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping mt-1"></span>
+                <div>
+                  <span className="font-extrabold text-sm block mb-0.5 font-bold">أنت حاضر للفترة الثانية في الدوام</span>
+                  وقت دخول الفترة الثانية المعتمدة: <strong className="text-emerald-700">{todayRecord?.checkIn2}</strong>
+                </div>
+              </div>
+              <div className="flex gap-3 flex-wrap">
+                <button
+                  onClick={handleCheckOut}
+                  disabled={actionLoading}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold shadow-md transition-all text-xs disabled:opacity-75"
+                >
+                  {actionLoading ? <Loader size={14} className="animate-spin" /> : <span>👋 تسجيل انصراف الفترة الثانية</span>}
+                </button>
+                <button
+                  onClick={loadAttendanceStatus}
+                  className="flex items-center gap-1 px-4 py-2 hover:bg-slate-50 border rounded-xl text-slate-500 transition-all text-xs"
+                >
+                  <RefreshCw size={12} />
+                  <span>تحديث</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {attendanceStatus === 'checked-out' && (
             <div className="p-4 bg-sky-50 border border-sky-100 rounded-xl text-xs text-sky-800">
               <span className="font-extrabold text-sm block mb-1">✅ انتهت نوبة عملك اليوم بنجاح</span>
-              وقت الحضور: <strong className="font-bold">{todayRecord?.checkIn}</strong> | وقت الانصراف: <strong className="font-bold">{todayRecord?.checkOut}</strong>
+              <div className="flex flex-col gap-1 my-1">
+                <div>• الحضور: <strong className="font-bold">{todayRecord?.checkIn}</strong> | الانصراف: <strong className="font-bold">{todayRecord?.checkOut}</strong></div>
+                {todayRecord?.checkIn2 && (
+                  <div>• الفترة الثانية: حضور <strong className="font-bold">{todayRecord?.checkIn2}</strong> | انصراف <strong className="font-bold">{todayRecord?.checkOut2 || 'مستمر'}</strong></div>
+                )}
+              </div>
+              {todayRecord?.note && (
+                <div className="mt-2.5 text-[10.5px] font-bold text-indigo-700 bg-indigo-50/50 p-2 rounded-lg border border-indigo-100/50">
+                  👮 ملاحظة الإدارة: {todayRecord.note}
+                </div>
+              )}
               {todayRecord?.checkInTs && todayRecord?.checkOutTs && (
-                <div className="mt-1 bg-white inline-block px-2 py-0.5 rounded text-[10px] font-extrabold text-sky-600 shadow-sm">
+                <div className="mt-2 bg-white inline-block px-2 py-0.5 rounded text-[10px] font-extrabold text-sky-600 shadow-sm">
                   ⏱️ مدة العمل الكلية:{' '}
-                  {Math.floor((todayRecord.checkOutTs - todayRecord.checkInTs) / 3600000)}ساعة{' '}
-                  {Math.round(((todayRecord.checkOutTs - todayRecord.checkInTs) % 3600000) / 60000)}دقيقة
+                  {Math.floor(((todayRecord.checkOutTs - todayRecord.checkInTs) + (todayRecord.checkOutTs2 && todayRecord.checkInTs2 ? (todayRecord.checkOutTs2 - todayRecord.checkInTs2) : 0)) / 3600000)}ساعة{' '}
+                  {Math.round((((todayRecord.checkOutTs - todayRecord.checkInTs) + (todayRecord.checkOutTs2 && todayRecord.checkInTs2 ? (todayRecord.checkOutTs2 - todayRecord.checkInTs2) : 0)) % 3600000) / 60000)}دقيقة
                 </div>
               )}
             </div>
@@ -613,6 +1024,93 @@ export default function EmployeePortal({
               {geoStatus}
             </div>
           )}
+        </div>
+
+        {/* Automatic Geofencing Punch Card */}
+        <div className="p-6 bg-gradient-to-br from-slate-900 to-indigo-950 border border-indigo-900 rounded-2xl shadow-xl text-white flex flex-col gap-4 relative overflow-hidden">
+          {/* Subtle decorative lights */}
+          <div className="absolute top-0 right-0 w-36 h-36 bg-sky-500/10 rounded-full blur-3xl"></div>
+          <div className="absolute bottom-0 left-0 w-36 h-36 bg-amber-500/10 rounded-full blur-3xl"></div>
+
+          <div className="flex items-center justify-between pb-3 border-b border-indigo-800/60 z-10">
+            <div className="flex items-center gap-2.5">
+              <span className="p-2 bg-indigo-500/20 rounded-xl text-sky-400">
+                <Clock size={16} className="animate-pulse" />
+              </span>
+              <div>
+                <h3 className="font-extrabold text-sm text-indigo-100">نظام البصمة التلقائي الذكي (Geofencing)</h3>
+                <p className="text-[10px] text-indigo-300">يستخدم الـ GPS لتسجيل الدخول والخروج تلقائياً دون أي تدخل منك</p>
+              </div>
+            </div>
+            {(autoCheckIn || autoCheckOut) && (
+              <span className="flex items-center gap-1 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-2 py-0.5 rounded-full text-[10px] font-bold">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                مراقب فعال
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-2 z-10">
+            {/* Toggle 1: Auto Check in */}
+            <label className="flex items-center justify-between p-3.5 bg-indigo-950/40 border border-indigo-800/40 rounded-xl cursor-pointer hover:bg-indigo-900/40 transition-all">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold text-slate-100">بصمة الحضور تلقائياً عند الدخول</span>
+                <span className="text-[9.5px] text-indigo-300">يسجل حضور فور وصولك لنطاق الشركة</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={autoCheckIn}
+                onChange={(e) => setAutoCheckIn(e.target.checked)}
+                className="w-10 h-5 bg-indigo-900 rounded-full appearance-none relative before:content-[''] before:absolute before:h-4 before:w-4 before:rounded-full before:bg-white before:top-0.5 before:left-0.5 checked:bg-sky-500 checked:before:translate-x-5 before:transition-all cursor-pointer"
+              />
+            </label>
+
+            {/* Toggle 2: Auto Check out */}
+            <label className="flex items-center justify-between p-3.5 bg-indigo-950/40 border border-indigo-800/40 rounded-xl cursor-pointer hover:bg-indigo-900/40 transition-all">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold text-slate-100">بصمة الانصراف تلقائياً عند الخروج</span>
+                <span className="text-[9.5px] text-indigo-300">يسجل انصراف بمجرد مغادرتك للموقع</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={autoCheckOut}
+                onChange={(e) => setAutoCheckOut(e.target.checked)}
+                className="w-10 h-5 bg-indigo-900 rounded-full appearance-none relative before:content-[''] before:absolute before:h-4 before:w-4 before:rounded-full before:bg-white before:top-0.5 before:left-0.5 checked:bg-sky-500 checked:before:translate-x-5 before:transition-all cursor-pointer"
+              />
+            </label>
+          </div>
+
+          <div className="p-3.5 bg-indigo-950/60 border border-indigo-800/60 rounded-xl flex flex-col gap-2 z-10 text-xs">
+            <div className="flex justify-between items-center text-slate-300">
+              <span className="font-bold text-[11px]">حالة التتبع الجغرافي:</span>
+              {currentDistance !== null ? (
+                <span className="font-mono text-[11px] bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-sky-400 font-extrabold">
+                  المسافة للمقر: {currentDistance} م
+                </span>
+              ) : (
+                <span className="text-[10px] text-slate-400">جاري مسح الإشارة...</span>
+              )}
+            </div>
+
+            <div className="text-slate-200 text-[11px] flex items-center gap-1.5 font-semibold">
+              <span className={`w-2 h-2 rounded-full ${autoCheckIn || autoCheckOut ? 'bg-sky-400 animate-pulse' : 'bg-slate-500'}`}></span>
+              <span>{autoStatusText}</span>
+            </div>
+
+            {/* Auto logs */}
+            {autoLogs.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-indigo-900">
+                <div className="text-[10px] text-indigo-300 block mb-1.5 font-bold">آخر عمليات البصمة التلقائي للجهاز:</div>
+                <div className="flex flex-col gap-1">
+                  {autoLogs.map((log, index) => (
+                    <div key={index} className="text-[10.5px] text-slate-300 bg-slate-900/35 px-2 py-1 rounded border border-indigo-900/30">
+                      {log}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Requests Management Buttons */}
@@ -640,6 +1138,14 @@ export default function EmployeePortal({
             <ArrowRightLeft size={14} className="text-amber-500" />
             <span>طلب تبديل مع زميل آخر</span>
           </button>
+
+          <button
+            onClick={() => { setRequestType('attendance_adjustment' as any); setRequestModalOpen(true); }}
+            className="flex items-center gap-2 px-5 py-3 hover:transform hover:-translate-y-0.5 hover:shadow bg-white text-slate-700 border rounded-xl font-bold text-xs transition-all shadow-sm"
+          >
+            <Clock size={14} className="text-sky-500" />
+            <span>طلب تعديل بصمة تاريخ معين</span>
+          </button>
         </div>
 
         {/* Requests Status list */}
@@ -665,6 +1171,7 @@ export default function EmployeePortal({
                 let reqTitle = 'طلب إجازة';
                 if (r.type === 'shift_change') reqTitle = 'تغيير شيفت الدوام';
                 if (r.type === 'swap') reqTitle = `تبديل مع: ${r.swapWithEmpName || 'زميل'}`;
+                if (r.type === 'attendance_adjustment') reqTitle = `تعديل بصمة: حضور (${r.checkInTime || '-'}) وانصراف (${r.checkOutTime || '-'})`;
 
                 return (
                   <div key={r.id} className="flex justify-between items-center py-3.5 border-b last:border-0 border-slate-50 text-xs">
@@ -706,6 +1213,7 @@ export default function EmployeePortal({
               {requestType === 'leave' && 'تقديم طلب إجازة'}
               {requestType === 'shift_change' && 'طلب تغيير شيفت الدوام'}
               {requestType === 'swap' && 'طلب تبديل شيفت مع زميل'}
+              {(requestType as any) === 'attendance_adjustment' && 'طلب تعديل لقطات البصمة الرياضية'}
             </h3>
 
             <div className="flex flex-col gap-4">
@@ -751,6 +1259,29 @@ export default function EmployeePortal({
                     <option value="E">🌙 مسائي</option>
                     <option value="A">إجازة</option>
                   </select>
+                </div>
+              )}
+
+              {(requestType as any) === 'attendance_adjustment' && (
+                <div className="grid grid-cols-2 gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold text-slate-600">وقت الدخول المطلوب</label>
+                    <input
+                      type="time"
+                      value={reqCheckInTime}
+                      onChange={(e) => setReqCheckInTime(e.target.value)}
+                      className="px-2 py-1 border rounded bg-white text-xs text-center font-mono focus:outline-none"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold text-slate-600">وقت الخروج المطلوب</label>
+                    <input
+                      type="time"
+                      value={reqCheckOutTime}
+                      onChange={(e) => setReqCheckOutTime(e.target.value)}
+                      className="px-2 py-1 border rounded bg-white text-xs text-center font-mono focus:outline-none"
+                    />
+                  </div>
                 </div>
               )}
 
