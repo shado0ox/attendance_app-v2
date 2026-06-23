@@ -199,6 +199,24 @@ export default function App() {
         setLoading(false);
       },
       (error) => {
+        console.warn('Snapshot subscription failed, retrieving cached data...', error);
+        const cached = localStorage.getItem('schedule_mainData');
+        if (cached) {
+          try {
+            const data = JSON.parse(cached);
+            setAppData({
+              departments: data.departments || defaultDepartments,
+              employees: data.employees || defaultEmployees,
+              shiftTypes: data.shiftTypes || defaultShiftTypes,
+              schedule: data.schedule || defaultSchedule
+            });
+            if (data.settings) {
+              setAppSettings(data.settings);
+            }
+          } catch (e) {
+            console.error('Error parsing cached data:', e);
+          }
+        }
         handleFirestoreError(error, OperationType.GET, 'scheduleApp/mainData');
         setLoading(false);
       }

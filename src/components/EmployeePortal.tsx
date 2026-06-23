@@ -72,13 +72,50 @@ export default function EmployeePortal({
   const [currentDistance, setCurrentDistance] = useState<number | null>(null);
   const [autoLogs, setAutoLogs] = useState<string[]>([]);
 
+  // New Smart Background / Scheduled GPS Settings
+  const [autoCheckMode, setAutoCheckMode] = useState<'always' | 'shift' | 'scheduled'>(() => {
+    return (localStorage.getItem(`autoCheckMode_${employee.id}`) as any) || 'shift';
+  });
+  const [autoCheckInterval, setAutoCheckInterval] = useState<number>(() => {
+    return Number(localStorage.getItem(`autoCheckInterval_${employee.id}`)) || 15;
+  });
+  const [scheduledCheckTime, setScheduledCheckTime] = useState<string>(() => {
+    return localStorage.getItem(`scheduledCheckTime_${employee.id}`) || '08:00';
+  });
+  const [enableMissedShiftAlert, setEnableMissedShiftAlert] = useState<boolean>(() => {
+    const val = localStorage.getItem(`enableMissedShiftAlert_${employee.id}`);
+    return val === null ? true : val === 'true';
+  });
+  const [missedShiftAlert, setMissedShiftAlert] = useState<{
+    shiftName: string;
+    startTime: string;
+    date: string;
+  } | null>(() => {
+    const saved = localStorage.getItem(`missedShiftAlert_${employee.id}`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.date === getTodayStr()) return parsed;
+      } catch (e) {}
+    }
+    return null;
+  });
+  const [notificationPermissionState, setNotificationPermissionState] = useState<string>(() => {
+    return 'Notification' in window ? Notification.permission : 'unsupported';
+  });
+
   const stateRef = useRef({
     attendanceStatus,
     todayRecord,
     autoCheckIn,
     autoCheckOut,
     employee,
-    appSettings
+    appSettings,
+    autoCheckMode,
+    autoCheckInterval,
+    scheduledCheckTime,
+    enableMissedShiftAlert,
+    missedShiftAlert
   });
 
   useEffect(() => {
@@ -88,9 +125,43 @@ export default function EmployeePortal({
       autoCheckIn,
       autoCheckOut,
       employee,
-      appSettings
+      appSettings,
+      autoCheckMode,
+      autoCheckInterval,
+      scheduledCheckTime,
+      enableMissedShiftAlert,
+      missedShiftAlert
     };
-  }, [attendanceStatus, todayRecord, autoCheckIn, autoCheckOut, employee, appSettings]);
+  }, [
+    attendanceStatus,
+    todayRecord,
+    autoCheckIn,
+    autoCheckOut,
+    employee,
+    appSettings,
+    autoCheckMode,
+    autoCheckInterval,
+    scheduledCheckTime,
+    enableMissedShiftAlert,
+    missedShiftAlert
+  ]);
+
+  // Save effects
+  useEffect(() => {
+    localStorage.setItem(`autoCheckMode_${employee.id}`, autoCheckMode);
+  }, [autoCheckMode, employee.id]);
+
+  useEffect(() => {
+    localStorage.setItem(`autoCheckInterval_${employee.id}`, String(autoCheckInterval));
+  }, [autoCheckInterval, employee.id]);
+
+  useEffect(() => {
+    localStorage.setItem(`scheduledCheckTime_${employee.id}`, scheduledCheckTime);
+  }, [scheduledCheckTime, employee.id]);
+
+  useEffect(() => {
+    localStorage.setItem(`enableMissedShiftAlert_${employee.id}`, String(enableMissedShiftAlert));
+  }, [enableMissedShiftAlert, employee.id]);
 
   const executePunchInBackground = async (lat: number, lng: number, period: 'first' | 'second') => {
     try {
@@ -184,7 +255,270 @@ export default function EmployeePortal({
     localStorage.setItem(`autoCheckOut_${employee.id}`, String(autoCheckOut));
   }, [autoCheckOut, employee.id]);
 
-  // Geofencing Background Watcher Worker
+  const getTodayShift = () => {
+    const todayStr = getTodayStr();
+    const sched = schedule && Object.keys(schedule).length > 0 ? schedule : getLocalScheduleData();
+    const assigned = sched?.[todayStr]?.[employee.id];
+    const stType = assigned?.shiftType || 'A';
+    const sTypes = shiftTypes && shiftTypes.length > 0 ? shiftTypes : [];
+    return sTypes.find((s: any) => s.id === stType);
+  };
+
+  const speakVoiceAlert = (text: string) => {
+    if ('speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ar-SA';
+        window.speechSynthesis.speak(utterance);
+      } catch (e) {
+        console.error('Speech synthesis error:', e);
+      }
+    }
+  };
+
+  const triggerMissedShiftAlert = (shiftName: string, startTime: string) => {
+    const todayStr = getTodayStr();
+    const alertKey = `lastMissedAlertDate_${employee.id}`;
+    const lastAlertDate = localStorage.getItem(alertKey);
+    
+    // Check if we already alerted today
+    if (lastAlertDate === todayStr) return;
+    
+    // Set alert state
+    const alertObj = { shiftName, startTime, date: todayStr };
+    setMissedShiftAlert(alertObj);
+    localStorage.setItem(`missedShiftAlert_${employee.id}`, JSON.stringify(alertObj));
+    localStorage.setItem(alertKey, todayStr);
+    
+    // Voice speech alert
+    speakVoiceAlert(`تنبيه هام. لقد فات موعد شيفت ${shiftName} المجدول في الساعة ${startTime}. يرجى التوجه لمقر العمل لتسجيل الحضور`);
+
+    // Mobile Notification if permission granted
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('⚠️ تنبيه: فاتك موعد الدوام!', {
+        body: `لقد بدأ شيفت "${shiftName}" في الساعة ${startTime} ولم تقم بتسجيل حضورك حتى الآن!`,
+        dir: 'rtl'
+      });
+    }
+    
+    setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ⚠️ تم إرسال تنبيه: لقد فاتك موعد الدوام الجاري!`, ...prev.slice(0, 4)]);
+  };
+
+  const requestNotificationPermission = async () => {
+    if ('Notification' in window) {
+      const permission = await Notification.requestPermission();
+      setNotificationPermissionState(permission);
+      if (permission === 'granted') {
+        new Notification('✅ تم تفعيل التنبيهات على الجوال', {
+          body: 'سوف نرسل لك تنبيهات مباشرة إذا فاتك موعد الدوام أو عند تسجيل البصمة تلقائياً.',
+          dir: 'rtl'
+        });
+        speakVoiceAlert('تم تفعيل إشعارات وتنبيهات الدوام بنجاح');
+      }
+    } else {
+      alert('متصفحك أو جهازك لا يدعم التنبيهات المباشرة حالياً.');
+    }
+  };
+
+  const requestAlwaysLocationPermission = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          speakVoiceAlert('تم تأكيد الاتصال بالموقع الجغرافي');
+          alert('✅ تم الوصول للموقع الجغرافي بنجاح. لتفعيل التتبع الدائم بالخلفية، يرجى التأكد من اختيار "السماح دائماً" (Always Allow) في إعدادات موقع متصفحك أو جهازك.');
+        },
+        (err) => {
+          alert(`❌ تعذر الوصول للموقع: ${err.message}. يرجى التحقق من تفعيل الـ GPS وإذن المتصفح.`);
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    }
+  };
+
+  // Background interval check worker (runs every 1 minute)
+  useEffect(() => {
+    const intervalId = setInterval(async () => {
+      const mode = stateRef.current.autoCheckMode;
+      const interval = stateRef.current.autoCheckInterval;
+      const schedTime = stateRef.current.scheduledCheckTime;
+      const autoIn = stateRef.current.autoCheckIn;
+      const settings = stateRef.current.appSettings;
+      
+      const todayShift = getTodayShift();
+      if (!todayShift || todayShift.id === 'OFF' || todayShift.id === 'A') {
+        return; // No work today
+      }
+
+      const now = new Date();
+      const currentHour = String(now.getHours()).padStart(2, '0');
+      const currentMinute = String(now.getMinutes()).padStart(2, '0');
+      const minutesToday = now.getHours() * 60 + now.getMinutes();
+
+      // Helper to parse HH:MM to minutes today
+      const parseTimeToMins = (timeStr: string) => {
+        const [h, m] = timeStr.split(':').map(Number);
+        return h * 60 + m;
+      };
+
+      let shouldPerformGPSCheck = false;
+
+      // 1. Determine if we should perform check based on mode
+      if (mode === 'always') {
+        // Always mode: Check based on interval (e.g. every 15 mins)
+        if (now.getMinutes() % interval === 0) {
+          shouldPerformGPSCheck = true;
+        }
+      } else if (mode === 'shift') {
+        // Shift hours mode: check from 30 minutes before shift start, until shift end, in interval
+        const shiftStartMins = parseTimeToMins(todayShift.start);
+        const shiftEndMins = parseTimeToMins(todayShift.end);
+        
+        // Handle overnight shifts or normal day shifts
+        let isInsideShiftWindow = false;
+        if (shiftEndMins >= shiftStartMins) {
+          isInsideShiftWindow = (minutesToday >= shiftStartMins - 30) && (minutesToday <= shiftEndMins);
+        } else {
+          // Overnight shift (e.g. 22:00 to 06:00)
+          isInsideShiftWindow = (minutesToday >= shiftStartMins - 30) || (minutesToday <= shiftEndMins);
+        }
+
+        // Also check second period if double shift
+        if (todayShift.type === 'double' && todayShift.start2 && todayShift.end2) {
+          const shiftStartMins2 = parseTimeToMins(todayShift.start2);
+          const shiftEndMins2 = parseTimeToMins(todayShift.end2);
+          let isInsideShiftWindow2 = false;
+          if (shiftEndMins2 >= shiftStartMins2) {
+            isInsideShiftWindow2 = (minutesToday >= shiftStartMins2 - 30) && (minutesToday <= shiftEndMins2);
+          } else {
+            isInsideShiftWindow2 = (minutesToday >= shiftStartMins2 - 30) || (minutesToday <= shiftEndMins2);
+          }
+          if (isInsideShiftWindow2) isInsideShiftWindow = true;
+        }
+
+        if (isInsideShiftWindow && (now.getMinutes() % interval === 0)) {
+          shouldPerformGPSCheck = true;
+        }
+      } else if (mode === 'scheduled') {
+        // Scheduled check mode: checks exactly at user-defined scheduled time
+        const schedMins = parseTimeToMins(schedTime);
+        const diffFromSched = minutesToday - schedMins;
+        // Check if we are within the interval window of the scheduled time to avoid skipping
+        if (diffFromSched >= 0 && diffFromSched < interval && (now.getMinutes() % interval === 0)) {
+          shouldPerformGPSCheck = true;
+        }
+      }
+
+      // 2. Perform GPS check if needed
+      if (shouldPerformGPSCheck && autoIn) {
+        const loc = settings?.officeLocation;
+        if (loc && loc.lat && loc.lng) {
+          const officeLat = parseFloat(loc.lat);
+          const officeLng = parseFloat(loc.lng);
+          const radiusLimit = parseInt(loc.radius) || 150;
+          
+          if (!isNaN(officeLat) && !isNaN(officeLng)) {
+            navigator.geolocation.getCurrentPosition(
+              async (position) => {
+                const userLat = position.coords.latitude;
+                const userLng = position.coords.longitude;
+                const diff = getDistance(userLat, userLng, officeLat, officeLng);
+                setCurrentDistance(Math.round(diff));
+                const isInside = diff <= radiusLimit;
+
+                const activeStatus = stateRef.current.attendanceStatus;
+
+                if (isInside) {
+                  setAutoStatusText(`📍 أنت داخل مقر العمل (${Math.round(diff)} م) • نطاق البصم متاح ✅`);
+                  if (activeStatus === 'not-checked-in') {
+                    setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] 🚀 فحص ذكي مجدول: تم رصدك بالموقع، جاري تسجيل حضورك...`, ...prev.slice(0, 4)]);
+                    await executePunchInBackground(userLat, userLng, 'first');
+                  } else if (activeStatus === 'not-checked-in-2') {
+                    setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] 🚀 فحص ذكي مجدول: تم رصدك بالموقع للفترة الثانية، جاري تسجيل حضورك...`, ...prev.slice(0, 4)]);
+                    await executePunchInBackground(userLat, userLng, 'second');
+                  }
+                } else {
+                  setAutoStatusText(`📍 أنت خارج مقر العمل بمسافة (${Math.round(diff)} م) 🚫`);
+                }
+              },
+              (err) => {
+                console.error('Scheduled GPS error:', err);
+              },
+              { enableHighAccuracy: true, timeout: 10000 }
+            );
+          }
+        }
+      }
+
+      // 3. Missed Shift Alert evaluation
+      if (stateRef.current.enableMissedShiftAlert) {
+        const shiftStartMins = parseTimeToMins(todayShift.start);
+        const activeStatus = stateRef.current.attendanceStatus;
+
+        // If shift has started and they are not checked in
+        if (activeStatus === 'not-checked-in') {
+          // If 15 minutes or more has passed since shift start
+          if (minutesToday >= shiftStartMins + 15 && minutesToday < shiftStartMins + 240) { // check for 4 hours window
+            // Query position first to check if they are outside
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                const userLat = pos.coords.latitude;
+                const userLng = pos.coords.longitude;
+                const loc = settings?.officeLocation;
+                if (loc && loc.lat && loc.lng) {
+                  const officeLat = parseFloat(loc.lat);
+                  const officeLng = parseFloat(loc.lng);
+                  const radiusLimit = parseInt(loc.radius) || 150;
+                  const diff = getDistance(userLat, userLng, officeLat, officeLng);
+                  if (diff > radiusLimit) {
+                    // Outside location and missed start! Trigger alert!
+                    triggerMissedShiftAlert(todayShift.name, todayShift.start);
+                  }
+                }
+              },
+              () => {
+                // If GPS failed but we are late, we still alert to be safe
+                triggerMissedShiftAlert(todayShift.name, todayShift.start);
+              },
+              { enableHighAccuracy: false, timeout: 8000 }
+            );
+          }
+        }
+
+        // Also check period 2 if double shift
+        if (todayShift.type === 'double' && todayShift.start2 && activeStatus === 'not-checked-in-2') {
+          const shiftStartMins2 = parseTimeToMins(todayShift.start2);
+          if (minutesToday >= shiftStartMins2 + 15 && minutesToday < shiftStartMins2 + 240) {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                const userLat = pos.coords.latitude;
+                const userLng = pos.coords.longitude;
+                const loc = settings?.officeLocation;
+                if (loc && loc.lat && loc.lng) {
+                  const officeLat = parseFloat(loc.lat);
+                  const officeLng = parseFloat(loc.lng);
+                  const radiusLimit = parseInt(loc.radius) || 150;
+                  const diff = getDistance(userLat, userLng, officeLat, officeLng);
+                  if (diff > radiusLimit) {
+                    triggerMissedShiftAlert(`${todayShift.name} (الفترة الثانية)`, todayShift.start2 || '17:00');
+                  }
+                }
+              },
+              () => {
+                triggerMissedShiftAlert(`${todayShift.name} (الفترة الثانية)`, todayShift.start2 || '17:00');
+              },
+              { enableHighAccuracy: false, timeout: 8000 }
+            );
+          }
+        }
+      }
+
+    }, 60000); // Check every 60 seconds
+
+    return () => clearInterval(intervalId);
+  }, [autoCheckMode, autoCheckInterval, scheduledCheckTime, enableMissedShiftAlert, autoCheckIn, schedule, shiftTypes]);
+
+  // Original Geofencing Background Watcher Worker (Runs continuously in response to GPS/watchPosition changes)
   useEffect(() => {
     const currentAutoCheckIn = stateRef.current.autoCheckIn;
     const currentAutoCheckOut = stateRef.current.autoCheckOut;
@@ -197,7 +531,7 @@ export default function EmployeePortal({
 
     const loc = stateRef.current.appSettings?.officeLocation;
     if (!loc || !loc.lat || !loc.lng) {
-      setAutoStatusText('⚠️ إحداثيات مقر العمل غير محددة من الإدارة');
+      setAutoStatusText('⚠️ إحداثيات مقر العمل غير حددتها الإدارة');
       return;
     }
 
@@ -210,7 +544,7 @@ export default function EmployeePortal({
       return;
     }
 
-    setAutoStatusText('📡 جاري مراقبة موقعك بالخلفية للبصم التلقائي...');
+    setAutoStatusText('📡 جاري تتبع الموقع التلقائي بالخلفية...');
 
     let watchId: number | null = null;
     let outsideCounter = 0;
@@ -743,6 +1077,34 @@ export default function EmployeePortal({
 
       {/* Main Container */}
       <main className="max-w-4xl px-4 py-8 mx-auto flex flex-col gap-6">
+
+        {/* Missed Shift Alert Banner */}
+        {missedShiftAlert && (
+          <div className="p-4 bg-rose-50 border-2 border-rose-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-md animate-bounce z-20">
+            <div className="flex gap-3">
+              <span className="p-2.5 bg-rose-100 text-rose-600 rounded-xl h-fit">
+                <AlertCircle size={20} className="animate-pulse" />
+              </span>
+              <div>
+                <h4 className="font-extrabold text-sm text-rose-900">⚠️ تنبيه: لقد فاتك موعد الدوام الجاري!</h4>
+                <p className="text-xs text-rose-700 mt-1 leading-relaxed">
+                  بدأ شيفتك اليومي <strong className="font-extrabold">"{missedShiftAlert.shiftName}"</strong> في الساعة <span className="font-mono font-bold">{missedShiftAlert.startTime}</span> ولم تسجل حضورك حتى الآن. يرجى التوجه فوراً لمقر العمل أو تسجيل بصمتك.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 w-full sm:w-auto justify-end">
+              <button
+                onClick={() => {
+                  setMissedShiftAlert(null);
+                  localStorage.removeItem(`missedShiftAlert_${employee.id}`);
+                }}
+                className="px-4 py-1.5 bg-white border border-rose-200 text-rose-700 hover:bg-rose-100 rounded-xl text-xs font-bold transition-all whitespace-nowrap"
+              >
+                تجاهل التنبيه 🔕
+              </button>
+            </div>
+          </div>
+        )}
         
         {/* Month Selector */}
         <div className="flex items-center justify-between px-4 py-3 bg-white border border-sky-100 rounded-2xl shadow-sm">
@@ -1027,7 +1389,7 @@ export default function EmployeePortal({
         </div>
 
         {/* Automatic Geofencing Punch Card */}
-        <div className="p-6 bg-gradient-to-br from-slate-900 to-indigo-950 border border-indigo-900 rounded-2xl shadow-xl text-white flex flex-col gap-4 relative overflow-hidden">
+        <div className="p-6 bg-gradient-to-br from-slate-900 to-indigo-950 border border-indigo-900 rounded-2xl shadow-xl text-white flex flex-col gap-5 relative overflow-hidden">
           {/* Subtle decorative lights */}
           <div className="absolute top-0 right-0 w-36 h-36 bg-sky-500/10 rounded-full blur-3xl"></div>
           <div className="absolute bottom-0 left-0 w-36 h-36 bg-amber-500/10 rounded-full blur-3xl"></div>
@@ -1038,8 +1400,8 @@ export default function EmployeePortal({
                 <Clock size={16} className="animate-pulse" />
               </span>
               <div>
-                <h3 className="font-extrabold text-sm text-indigo-100">نظام البصمة التلقائي الذكي (Geofencing)</h3>
-                <p className="text-[10px] text-indigo-300">يستخدم الـ GPS لتسجيل الدخول والخروج تلقائياً دون أي تدخل منك</p>
+                <h3 className="font-extrabold text-sm text-indigo-100">نظام البصمة التلقائي والتنبيه الذكي (Geofencing)</h3>
+                <p className="text-[10px] text-indigo-300">يستخدم تحديد الموقع والذكاء المجدول للتحقق التلقائي والإنذار بالخلفية</p>
               </div>
             </div>
             {(autoCheckIn || autoCheckOut) && (
@@ -1050,7 +1412,35 @@ export default function EmployeePortal({
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-2 z-10">
+          {/* Quick Permission Grants section */}
+          <div className="p-3.5 bg-sky-950/45 border border-sky-900/40 rounded-xl flex flex-col gap-2.5 z-10">
+            <span className="text-[11px] font-extrabold text-sky-300 flex items-center gap-1">
+              📱 خطوة هامة: تفعيل إذن الوصول الدائم والتنبيهات على الهاتف:
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <button
+                onClick={requestAlwaysLocationPermission}
+                className="px-3 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 rounded-lg text-[11px] font-bold transition-all text-right flex items-center justify-between"
+              >
+                <span>1. طلب إذن الموقع الجغرافي النشط / الدائم</span>
+                <span className="font-mono text-[9px] bg-sky-900/40 px-1.5 py-0.5 rounded">اضغط هنا 📍</span>
+              </button>
+              <button
+                onClick={requestNotificationPermission}
+                className="px-3 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 rounded-lg text-[11px] font-bold transition-all text-right flex items-center justify-between"
+              >
+                <span>2. تفعيل التنبيهات المباشرة على الجوال</span>
+                <span className="font-mono text-[9px] bg-sky-900/40 px-1.5 py-0.5 rounded">
+                  {notificationPermissionState === 'granted' ? '✅ مفعلة' : 'اضغط للتفعيل 🔔'}
+                </span>
+              </button>
+            </div>
+            <p className="text-[9px] text-slate-300 leading-normal">
+              * للتأكد من عمل البصمة بالخلفية تلقائياً، يرجى تفعيل <strong className="font-extrabold">"السماح دائماً" (Always Allow)</strong> للموقع في إعدادات جهازك، وإبقاء صفحة البرنامج مفتوحة بالخلفية على جوالك.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-1 z-10">
             {/* Toggle 1: Auto Check in */}
             <label className="flex items-center justify-between p-3.5 bg-indigo-950/40 border border-indigo-800/40 rounded-xl cursor-pointer hover:bg-indigo-900/40 transition-all">
               <div className="flex flex-col gap-0.5">
@@ -1080,9 +1470,67 @@ export default function EmployeePortal({
             </label>
           </div>
 
+          {/* Smart Check Scheduling configuration */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 z-10 p-4 bg-indigo-950/45 border border-indigo-900/50 rounded-xl">
+            {/* Check interval & Mode */}
+            <div className="flex flex-col gap-2.5">
+              <span className="text-[11px] font-extrabold text-indigo-200">⏱️ نظام الجدولة والتحقق الذكي:</span>
+              <div className="flex flex-col gap-1.5 text-xs">
+                <label className="text-[10px] text-slate-300 font-bold">نمط التحقق التلقائي عبر الـ GPS</label>
+                <select
+                  value={autoCheckMode}
+                  onChange={(e) => setAutoCheckMode(e.target.value as any)}
+                  className="px-2.5 py-1.5 bg-indigo-900/60 border border-indigo-800 rounded-lg text-xs font-bold text-white focus:outline-none"
+                >
+                  <option value="shift" className="bg-indigo-950">تلقائياً خلال أوقات الدوام فقط 💼</option>
+                  <option value="always" className="bg-indigo-950">تلقائياً طوال اليوم بشكل مستمر 🕒</option>
+                  <option value="scheduled" className="bg-indigo-950">في توقيت مخصص يتم تحديده 🔔</option>
+                </select>
+              </div>
+
+              {autoCheckMode === 'scheduled' && (
+                <div className="flex flex-col gap-1.5 text-xs">
+                  <label className="text-[10px] text-slate-300 font-bold">التوقيت المخصص للتحقق اليومي</label>
+                  <input
+                    type="time"
+                    value={scheduledCheckTime}
+                    onChange={(e) => setScheduledCheckTime(e.target.value)}
+                    className="px-2.5 py-1 bg-indigo-900/60 border border-indigo-800 rounded-lg text-xs font-mono font-bold text-white focus:outline-none"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2.5">
+              <span className="text-[11px] font-extrabold text-indigo-200">⚙️ إعدادات الحضور والإنذار بالخلفية:</span>
+              <div className="flex flex-col gap-1.5 text-xs">
+                <label className="text-[10px] text-slate-300 font-bold">معدل تكرار فحص الموقع بالخلفية</label>
+                <select
+                  value={autoCheckInterval}
+                  onChange={(e) => setAutoCheckInterval(Number(e.target.value))}
+                  className="px-2.5 py-1.5 bg-indigo-900/60 border border-indigo-800 rounded-lg text-xs font-bold text-white focus:outline-none"
+                >
+                  <option value="15" className="bg-indigo-950">كل 15 دقيقة (ربع ساعة) - افتراضي</option>
+                  <option value="30" className="bg-indigo-950">كل 30 دقيقة (نصف ساعة)</option>
+                  <option value="60" className="bg-indigo-950">كل ساعة (60 دقيقة)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between pt-1 text-xs">
+                <span className="text-[10px] text-slate-300 font-bold">تنبيه بالخلفية إذا فات موعد الدوام</span>
+                <input
+                  type="checkbox"
+                  checked={enableMissedShiftAlert}
+                  onChange={(e) => setEnableMissedShiftAlert(e.target.checked)}
+                  className="w-8 h-4 bg-indigo-900 rounded-full appearance-none relative before:content-[''] before:absolute before:h-3 before:w-3 before:rounded-full before:bg-white before:top-0.5 before:left-0.5 checked:bg-emerald-500 checked:before:translate-x-4 before:transition-all cursor-pointer"
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="p-3.5 bg-indigo-950/60 border border-indigo-800/60 rounded-xl flex flex-col gap-2 z-10 text-xs">
             <div className="flex justify-between items-center text-slate-300">
-              <span className="font-bold text-[11px]">حالة التتبع الجغرافي:</span>
+              <span className="font-bold text-[11px]">حالة التتبع الجغرافي للشبكة:</span>
               {currentDistance !== null ? (
                 <span className="font-mono text-[11px] bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-sky-400 font-extrabold">
                   المسافة للمقر: {currentDistance} م
@@ -1100,7 +1548,7 @@ export default function EmployeePortal({
             {/* Auto logs */}
             {autoLogs.length > 0 && (
               <div className="mt-2 pt-2 border-t border-indigo-900">
-                <div className="text-[10px] text-indigo-300 block mb-1.5 font-bold">آخر عمليات البصمة التلقائي للجهاز:</div>
+                <div className="text-[10px] text-indigo-300 block mb-1.5 font-bold">آخر عمليات البصمة والتحقق بالخلفية:</div>
                 <div className="flex flex-col gap-1">
                   {autoLogs.map((log, index) => (
                     <div key={index} className="text-[10.5px] text-slate-300 bg-slate-900/35 px-2 py-1 rounded border border-indigo-900/30">
