@@ -2592,9 +2592,35 @@ export default function AdminPortal({
                                       dept: departments[0]?.id || '',
                                       phone: it.phone,
                                       username: it.username || it.name.replace(/\s+/g, '_').toLowerCase(),
+                                      password: it.password || '123456',
                                       color: '#01696f'
                                     }];
                                     onUpdateAppData({ ...appData, employees: updated });
+                                  } else if (it.type === 'admin') {
+                                    const adminData = {
+                                      name: it.name,
+                                      username: (it.username || it.name.replace(/\s+/g, '_')).toLowerCase(),
+                                      email: `${(it.username || it.name.replace(/\s+/g, '_')).toLowerCase()}@company.com`,
+                                      password: it.password,
+                                      role: 'admin',
+                                      permissions: {
+                                        canEditSchedule: true,
+                                        canManageEmployees: true,
+                                        canManageDepts: true,
+                                        canApproveRequests: true,
+                                        canViewReports: true,
+                                        canManageSettings: true,
+                                        canPrint: true
+                                      }
+                                    };
+                                    const resAdmin = await fetch('/api/admins', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify(adminData)
+                                    });
+                                    if (!resAdmin.ok) {
+                                      throw new Error();
+                                    }
                                   }
                                   alert('تم اعتماد وتسجيل الحساب بنجاح.');
                                   loadRequests();

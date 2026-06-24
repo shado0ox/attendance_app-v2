@@ -1,5 +1,8 @@
-import express from 'express';
+import dotenv from 'dotenv';
 import path from 'path';
+dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
+
+import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { db, schema } from './src/db/index.ts';
 import { eq, desc } from 'drizzle-orm';
@@ -8,6 +11,21 @@ const app = express();
 app.use(express.json());
 
 const PORT = 3000;
+
+// Debug DB route
+app.get('/api/debug-db', (req, res) => {
+  const connectionString = process.env.DATABASE_URL;
+  res.json({
+    cwd: process.cwd(),
+    NODE_ENV: process.env.NODE_ENV,
+    hasConnectionString: !!connectionString,
+    connectionStringPrefix: connectionString ? connectionString.substring(0, 45) + '...' : null,
+    SQL_HOST: process.env.SQL_HOST,
+    SQL_USER: process.env.SQL_USER,
+    SQL_DB_NAME: process.env.SQL_DB_NAME,
+    isExternalDb: connectionString?.includes('supabase') || connectionString?.includes('neon') || connectionString?.includes('render') || process.env.SQL_HOST?.includes('supabase')
+  });
+});
 
 // Default datasets to seed if DB is empty
 const defaultDepartments = [

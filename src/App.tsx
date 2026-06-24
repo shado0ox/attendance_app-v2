@@ -163,24 +163,33 @@ export default function App() {
     const fetchMainData = async () => {
       try {
         const response = await fetch('/api/main-data');
-        if (response.ok) {
-          const data = await response.json();
-          setAppData({
-            departments: data.departments || defaultDepartments,
-            employees: data.employees || defaultEmployees,
-            shiftTypes: data.shiftTypes || defaultShiftTypes,
-            schedule: data.schedule || defaultSchedule
-          });
-          if (data.settings) {
-            setAppSettings(data.settings);
-          }
-          localStorage.setItem('schedule_mainData', JSON.stringify(data));
+        if (!response.ok) {
+          throw new Error(`API Handshake failed: Server returned status ${response.status} (${response.statusText})`);
         }
-      } catch (err) {
-        console.warn('Failed to fetch main-data from API, checking cache...', err);
+        
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await response.text();
+          throw new Error(`Invalid response format. Expected JSON, got: ${text.substring(0, 100)}...`);
+        }
+
+        const data = await response.json();
+        setAppData({
+          departments: data.departments || defaultDepartments,
+          employees: data.employees || defaultEmployees,
+          shiftTypes: data.shiftTypes || defaultShiftTypes,
+          schedule: data.schedule || defaultSchedule
+        });
+        if (data.settings) {
+          setAppSettings(data.settings);
+        }
+        localStorage.setItem('schedule_mainData', JSON.stringify(data));
+      } catch (err: any) {
+        console.error('[API Error] Failed to fetch main-data from backend:', err.message || err);
         const cached = localStorage.getItem('schedule_mainData');
         if (cached) {
           try {
+            console.log('[Cache Fallback] Loading application data from local storage cache.');
             const data = JSON.parse(cached);
             setAppData({
               departments: data.departments || defaultDepartments,
@@ -204,12 +213,20 @@ export default function App() {
     const fetchRegRequests = async () => {
       try {
         const response = await fetch('/api/registration-requests');
-        if (response.ok) {
-          const data = await response.json();
-          setRegistrationRequests(data);
+        if (!response.ok) {
+          throw new Error(`API Handshake failed: Server returned status ${response.status} (${response.statusText})`);
         }
-      } catch (err) {
-        console.error('Error fetching registration requests:', err);
+
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await response.text();
+          throw new Error(`Invalid response format. Expected JSON, got: ${text.substring(0, 100)}...`);
+        }
+
+        const data = await response.json();
+        setRegistrationRequests(data);
+      } catch (err: any) {
+        console.error('[API Error] Failed to fetch registration requests:', err.message || err);
       }
     };
 

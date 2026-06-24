@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
-dotenv.config({ override: true });
+import path from 'path';
+dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pkg from 'pg';
 const { Pool } = pkg;
@@ -9,12 +10,15 @@ export const createPool = () => {
   const connectionString = process.env.DATABASE_URL;
   const isExternalDb = connectionString?.includes('supabase') || connectionString?.includes('neon') || connectionString?.includes('render') || process.env.SQL_HOST?.includes('supabase');
   
-  console.log('Initializing database pool:', {
-    hasConnectionString: !!connectionString,
-    connectionStringPrefix: connectionString ? connectionString.substring(0, 25) + '...' : undefined,
-    host: process.env.SQL_HOST,
-    isExternalDb
-  });
+  console.log('--- DATABASE CONNECTION POOL INITIALIZATION ---');
+  console.log('Current CWD:', process.cwd());
+  console.log('Environment DATABASE_URL exists:', !!connectionString);
+  if (connectionString) {
+    console.log('DATABASE_URL starts with:', connectionString.substring(0, 45) + '...');
+  }
+  console.log('Environment SQL_HOST:', process.env.SQL_HOST);
+  console.log('Is external DB identified:', isExternalDb);
+  console.log('------------------------------------------------');
 
   if (connectionString) {
     return new Pool({
