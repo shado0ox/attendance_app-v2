@@ -1,6 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { auth, OperationType, handleFirestoreError } from './firebase';
-import { onAuthStateChanged, updatePassword } from 'firebase/auth';
 import { Loader, Key, X, AlertCircle, Smartphone } from 'lucide-react';
 
 import LoginScreen from './components/LoginScreen';
@@ -297,8 +295,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    requestConfirm('هل تريد تأكيد تسجيل الخروج وتأمين المنصة؟', async () => {
-      await auth.signOut();
+    requestConfirm('هل تريد تأكيد تسجيل الخروج وتأمين المنصة؟', () => {
       persistSession(null, null);
     });
   };
@@ -311,8 +308,8 @@ export default function App() {
   };
 
   const executeChangePassword = async () => {
-    if (!newPassword || newPassword.length < 6) {
-      setChangePwdMsg('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+    if (!newPassword || newPassword.length < 4) {
+      setChangePwdMsg('كلمة المرور يجب أن تكون 4 أحرف على الأقل');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -324,13 +321,53 @@ export default function App() {
     setChangePwdMsg('');
 
     try {
-      const currentUser = auth.currentUser;
-      if (currentUser) {
-        await updatePassword(currentUser, newPassword);
-        setChangePwdMsg('✅ تم تحديث كلمة المرور لحسابك الفرعي بنجاح!');
+      if (session.role === 'employee') {
+        const nextEmployees = appData.employees.map((emp: any) => {
+          if (emp.id === session.info.id) {
+            return { ...emp, password: newPassword };
+          }
+          return emp;
+        });
+        await handleUpdateAppData({ ...appData, employees: nextEmployees });
+        
+        const updatedSession = { ...session, info: { ...session.info, password: newPassword } };
+        setSession(updatedSession);
+        localStorage.setItem('app_session', JSON.stringify(updatedSession));
+        
+        setChangePwdMsg('✅ تم تحديث كلمة المرور لحسابك بنجاح!');
+        setTimeout(() => setChangePwdOpen(false), 2000);
+      } else if (session.role === 'admin') {
+        const response = await fetch('/api/admins', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: session.info.id,
+            name: session.info.name,
+            username: session.info.username,
+            password: newPassword
+          })
+        });
+        if (!response.ok) {
+          throw new Error('فشل تحديث كلمة المرور في الخادم');
+        }
+        
+        const updatedSession = { ...session, info: { ...session.info, password: newPassword } };
+        setSession(updatedSession);
+        localStorage.setItem('app_session', JSON.stringify(updatedSession));
+        
+        setChangePwdMsg('✅ تم تحديث كلمة المرور لحسابك الإداري الفرعي بنجاح!');
+        setTimeout(() => setChangePwdOpen(false), 2000);
+      } else if (session.role === 'superadmin') {
+        await handleUpdateSettings({ ...appSettings, password: newPassword });
+        
+        const updatedSession = { ...session, info: { ...session.info, password: newPassword } };
+        setSession(updatedSession);
+        localStorage.setItem('app_session', JSON.stringify(updatedSession));
+        
+        setChangePwdMsg('✅ تم تحديث كلمة المرور الرئيسية للمدير العام بنجاح!');
         setTimeout(() => setChangePwdOpen(false), 2000);
       } else {
-        setChangePwdMsg('⚠️ يجب أن تكون مسجلاً بالبريد لتحديث كلمة مرور الموثوقية الخاصة بك.');
+        setChangePwdMsg('⚠️ لا يمكن العثور على جلسة تسجيل الدخول الحالية.');
       }
     } catch (err: any) {
       setChangePwdMsg('فشل الإجراء: ' + err.message);

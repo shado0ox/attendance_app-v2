@@ -5,7 +5,6 @@ import {
   Search, Download, Trash2, Check, X, Shield, UserCheck, UserX, Key, Save,
   Crosshair, MessageCircle, UploadCloud, Loader, AlertTriangle, Edit
 } from 'lucide-react';
-import { OperationType, handleFirestoreError } from '../firebase';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 

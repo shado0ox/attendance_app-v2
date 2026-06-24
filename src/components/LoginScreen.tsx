@@ -1,7 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import { User, Shield, UserPlus, LogIn, Loader, Key, Fingerprint, ScanFace, ChevronDown, CheckCircle2, RefreshCw, AlertCircle } from 'lucide-react';
-import { auth, OperationType, handleFirestoreError } from '../firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
 interface LoginScreenProps {
   appSettings: any;
@@ -57,10 +55,6 @@ export default function LoginScreen({
   const [regSuccess, setRegSuccess] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
 
-
-  const usernameToEmail = (uname: string) => {
-    return uname.trim().toLowerCase() + '@app.local';
-  };
 
   const handleAdminLogin = async () => {
     if (!adminUsername.trim()) {
@@ -131,7 +125,6 @@ export default function LoginScreen({
     setEmpError('');
     setEmpLoading(true);
 
-    const email = usernameToEmail(empUsername);
     const matchedEmp = employees.find(
       (e: any) => 
         (e.username || '').toLowerCase() === empUsername.trim().toLowerCase() ||
@@ -149,43 +142,10 @@ export default function LoginScreen({
     const targetPassword = (matchedEmp.password || '123456').trim();
     if (empPassword.trim() === targetPassword) {
       onEmployeeLogin(matchedEmp);
-      setEmpLoading(false);
-      return;
+    } else {
+      setEmpError('كلمة المرور غير صحيحة لحساب هذا الموظف. (الرمز الافتراضي هو 123456)');
     }
-
-    try {
-      // 1. Try traditional sign-in as a backup
-      await signInWithEmailAndPassword(auth, email, empPassword);
-      onEmployeeLogin(matchedEmp);
-    } catch (error: any) {
-      console.log("Normal login failed, attempting dynamic check-in configuration:", error.code);
-      // 2. If Auth account doesn't exist yet on this newly created Firebase project, 
-      // let's seamlessly create it on-the-fly to ensure immediate access!
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential' || error.code === 'auth/email-already-in-use') {
-        if (empPassword.length < 6) {
-          setEmpError('كلمة المرور غير صحيحة! رمز الموظف الافتراضي هو 123456 ما لم يغيره المدير.');
-          setEmpLoading(false);
-          return;
-        }
-
-        try {
-          // Attempt lazy dynamic signup for seeded employees
-          await createUserWithEmailAndPassword(auth, email, empPassword);
-          onEmployeeLogin(matchedEmp);
-        } catch (createErr: any) {
-          // If already in use, then the password entered was wrong
-          if (createErr.code === 'auth/email-already-in-use') {
-            setEmpError('كلمة المرور المدخلة غير صحيحة لحساب الموظف هذا. (الرمز الافتراضي هو 123456)');
-          } else {
-            setEmpError('كلمة المرور غير مطابقة. يرجى إدخال الباسورد الصحيح المعين من المدير.');
-          }
-        }
-      } else {
-        setEmpError('كلمة المرور غير صحيحة لحساب هذا الموظف. (الرمز الافتراضي هو 123456)');
-      }
-    } finally {
-      setEmpLoading(false);
-    }
+    setEmpLoading(false);
   };
 
   // Face Scan Control

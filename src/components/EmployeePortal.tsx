@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle } from 'lucide-react';
-import { auth, OperationType, handleFirestoreError } from '../firebase';
 
 interface EmployeePortalProps {
   employee: any;
