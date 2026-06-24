@@ -27,6 +27,68 @@ app.get('/api/debug-db', (req, res) => {
   });
 });
 
+// Diagnose DB route
+app.get('/api/diagnose-db', async (req, res) => {
+  const connectionString = process.env.DATABASE_URL;
+  const isExternalDb = connectionString?.includes('supabase') || connectionString?.includes('neon') || connectionString?.includes('render') || process.env.SQL_HOST?.includes('supabase');
+
+  const diagnosticReport: any = {
+    timestamp: new Date().toISOString(),
+    config: {
+      hasConnectionString: !!connectionString,
+      connectionStringMasked: connectionString ? connectionString.replace(/:([^:@]+)@/, ':******@') : null,
+      SQL_HOST: process.env.SQL_HOST,
+      SQL_PORT: process.env.SQL_PORT,
+      SQL_USER: process.env.SQL_USER,
+      SQL_DB_NAME: process.env.SQL_DB_NAME,
+      isExternalDb
+    },
+    databaseHandshake: {
+      status: 'pending',
+      latencyMs: null,
+      error: null
+    },
+    tablesCheck: {
+      systemData: { status: 'untested', count: null, error: null },
+      registrationRequests: { status: 'untested', count: null, error: null }
+    }
+  };
+
+  try {
+    const dbStartTime = Date.now();
+    const systemDataResult = await db.select().from(schema.systemData).limit(1);
+    diagnosticReport.databaseHandshake.status = 'SUCCESS';
+    diagnosticReport.databaseHandshake.latencyMs = Date.now() - dbStartTime;
+    diagnosticReport.tablesCheck.systemData.status = 'OK';
+    diagnosticReport.tablesCheck.systemData.count = systemDataResult.length;
+  } catch (error: any) {
+    diagnosticReport.databaseHandshake.status = 'FAILED';
+    diagnosticReport.databaseHandshake.error = {
+      message: error.message || String(error),
+      code: error.code,
+      stack: error.stack,
+      detail: error.detail,
+      hint: error.hint
+    };
+  }
+
+  if (diagnosticReport.databaseHandshake.status === 'SUCCESS') {
+    try {
+      const regReqResult = await db.select().from(schema.registrationRequests).limit(1);
+      diagnosticReport.tablesCheck.registrationRequests.status = 'OK';
+      diagnosticReport.tablesCheck.registrationRequests.count = regReqResult.length;
+    } catch (error: any) {
+      diagnosticReport.tablesCheck.registrationRequests.status = 'FAILED';
+      diagnosticReport.tablesCheck.registrationRequests.error = {
+        message: error.message || String(error),
+        code: error.code
+      };
+    }
+  }
+
+  res.json(diagnosticReport);
+});
+
 // Default datasets to seed if DB is empty
 const defaultDepartments = [
   { id: 'dept1', name: 'استقدام', needsMorning: true, needsEvening: true, friday: 'off' },
