@@ -224,9 +224,11 @@ app.post('/api/registration-requests', async (req, res) => {
       status: status || 'pending',
     }).returning();
     res.json(inserted[0]);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating registration request:', error);
-    res.status(500).json({ error: 'Failed to create registration request' });
+    res.status(500).json({ 
+      error: 'فشل إنشاء طلب التسجيل في قاعدة البيانات: ' + (error.message || String(error)) 
+    });
   }
 });
 

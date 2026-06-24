@@ -368,7 +368,8 @@ export default function LoginScreen({
       });
 
       if (!response.ok) {
-        throw new Error('فشل إرسال الطلب إلى الخادم');
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || errData.message || 'فشل إرسال الطلب إلى الخادم');
       }
 
       setRegSuccess(true);
