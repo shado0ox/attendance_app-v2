@@ -5,8 +5,7 @@ import {
   Search, Download, Trash2, Check, X, Shield, UserCheck, UserX, Key, Save,
   Crosshair, MessageCircle, UploadCloud, Loader, AlertTriangle, Edit
 } from 'lucide-react';
-import { db, OperationType, handleFirestoreError } from '../firebase';
-import { collection, doc, updateDoc, deleteDoc, addDoc, getDocs, query, where } from 'firebase/firestore';
+import { OperationType, handleFirestoreError } from '../firebase';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
@@ -185,14 +184,13 @@ export default function AdminPortal({
   const loadSubAdmins = async () => {
     setSubAdminsLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'admins'));
-      const loaded: any[] = [];
-      snap.forEach((doc) => {
-        loaded.push({ id: doc.id, ...doc.data() });
-      });
-      setSubAdmins(loaded);
+      const response = await fetch('/api/admins');
+      if (response.ok) {
+        const loaded = await response.json();
+        setSubAdmins(loaded);
+      }
     } catch (e) {
-      console.error(e);
+      console.error('Error loading admins from PostgreSQL:', e);
     } finally {
       setSubAdminsLoading(false);
     }
@@ -201,15 +199,14 @@ export default function AdminPortal({
   const loadRequests = async () => {
     setRequestsLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'requests'));
-      const loaded: any[] = [];
-      snap.forEach((doc) => {
-        loaded.push({ id: doc.id, ...doc.data() });
-      });
-      loaded.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      setAdminRequests(loaded);
+      const response = await fetch('/api/requests');
+      if (response.ok) {
+        const loaded = await response.json();
+        loaded.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        setAdminRequests(loaded);
+      }
     } catch (e) {
-      console.error(e);
+      console.error('Error loading requests from PostgreSQL:', e);
     } finally {
       setRequestsLoading(false);
     }
@@ -218,14 +215,13 @@ export default function AdminPortal({
   const loadAttendance = async () => {
     setAttLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'attendance'));
-      const loaded: any[] = [];
-      snap.forEach((doc) => {
-        loaded.push({ id: doc.id, ...doc.data() });
-      });
-      setAttendanceRecords(loaded);
+      const response = await fetch('/api/attendance');
+      if (response.ok) {
+        const loaded = await response.json();
+        setAttendanceRecords(loaded);
+      }
     } catch (e) {
-      console.error(e);
+      console.error('Error loading attendance from PostgreSQL:', e);
     } finally {
       setAttLoading(false);
     }
@@ -512,12 +508,23 @@ export default function AdminPortal({
     };
 
     try {
+      const payload = editingAdmId 
+        ? { id: editingAdmId, ...adminData }
+        : adminData;
+
+      const response = await fetch('/api/admins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error('فشل الحفظ على الخادم');
+      }
+
       if (editingAdmId) {
-        await updateDoc(doc(db, 'admins', editingAdmId), adminData);
         alert('تم تحديث بيانات المسؤول بنجاح');
       } else {
-        adminData.createdAt = new Date().toISOString();
-        await addDoc(collection(db, 'admins'), adminData);
         alert('تم حفظ حساب المسؤول الجديد بنجاح');
       }
       setSubAdminModalOpen(false);
@@ -538,12 +545,16 @@ export default function AdminPortal({
     if (!matchedReq) return;
 
     try {
-      const docRef = doc(db, 'requests', requestId);
-      await updateDoc(docRef, {
-        status: decision,
-        reviewedBy: admin.name || 'المدير',
-        reviewedAt: `${new Date().toLocaleDateString('ar-SA')} ${new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}`
+      // 1. Update request status
+      const reqResponse = await fetch(`/api/requests/${requestId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: decision })
       });
+
+      if (!reqResponse.ok) {
+        throw new Error('فشل تحديث حالة الطلب في قاعدة البيانات');
+      }
 
       // Apply changes inline to schedule on approval
       if (decision === 'approved') {
@@ -561,17 +572,14 @@ export default function AdminPortal({
           updatedSch[matchedReq.date][matchedReq.empId] = { shiftType: originalShift2.shiftType, note: `بديل لـ ${matchedReq.swapWithEmpName}` };
           updatedSch[matchedReq.date][matchedReq.swapWithEmpId] = { shiftType: originalShift1.shiftType, note: `بديل لـ ${matchedReq.empName}` };
         } else if (matchedReq.type === 'attendance_adjustment') {
-          // Update or insert dynamic attendance record approved by management
-          const q = query(
-            collection(db, 'attendance'),
-            where('empId', '==', matchedReq.empId),
-            where('date', '==', matchedReq.date)
+          // Check in locally loaded attendance records to see if a record already exists
+          const existingRecord = attendanceRecords.find(
+            (rec) => rec.empId === matchedReq.empId && rec.date === matchedReq.date
           );
-          const snap = await getDocs(q);
+
           const formattedCheckIn = matchedReq.checkInTime || '08:00';
           const formattedCheckOut = matchedReq.checkOutTime || '16:00';
 
-          // Correctly calculate timestamps so duration can be calculated in reports
           const [inH, inM] = formattedCheckIn.split(':').map(Number);
           const [outH, outM] = formattedCheckOut.split(':').map(Number);
 
@@ -584,35 +592,34 @@ export default function AdminPortal({
           const checkInTimestamp = isNaN(inDateObj.getTime()) ? Date.now() : inDateObj.getTime();
           const checkOutTimestamp = isNaN(outDateObj.getTime()) ? Date.now() : outDateObj.getTime();
 
-          if (!snap.empty) {
-            const attendanceDocRef = doc(db, 'attendance', snap.docs[0].id);
-            await updateDoc(attendanceDocRef, {
-              checkIn: formattedCheckIn,
-              checkInTs: checkInTimestamp,
-              checkOut: formattedCheckOut,
-              checkOutTs: checkOutTimestamp,
-              note: 'تم البصم بموافقة الإدارة',
-              status: 'present',
-              source: 'الإدارة'
-            });
+          const attendancePayload: any = {
+            empId: matchedReq.empId,
+            empName: matchedReq.empName,
+            date: matchedReq.date,
+            checkIn: formattedCheckIn,
+            checkInTs: checkInTimestamp,
+            checkOut: formattedCheckOut,
+            checkOutTs: checkOutTimestamp,
+            note: 'تم البصم بموافقة الإدارة',
+            status: 'present',
+            source: 'الإدارة'
+          };
+
+          if (existingRecord) {
+            attendancePayload.id = existingRecord.id;
           } else {
             const empObj = employees.find((e) => e.id === matchedReq.empId);
-            const deptName = empObj?.dept || '';
+            attendancePayload.dept = empObj?.dept || '';
+          }
 
-            await addDoc(collection(db, 'attendance'), {
-              empId: matchedReq.empId,
-              empName: matchedReq.empName,
-              dept: deptName,
-              date: matchedReq.date,
-              checkIn: formattedCheckIn,
-              checkInTs: checkInTimestamp,
-              checkOut: formattedCheckOut,
-              checkOutTs: checkOutTimestamp,
-              status: 'present',
-              note: 'تم البصم بموافقة الإدارة',
-              source: 'الإدارة',
-              createdAt: Date.now()
-            });
+          const attResponse = await fetch('/api/attendance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(attendancePayload)
+          });
+
+          if (!attResponse.ok) {
+            throw new Error('فشل تعديل سجل البصمة المعتمدة');
           }
         }
 
@@ -621,6 +628,7 @@ export default function AdminPortal({
 
       alert('تم تحديث حالة الطلب بنجاح.');
       loadRequests();
+      loadAttendance();
     } catch (e: any) {
       alert('حدث خطأ: ' + e.message);
     }
@@ -1654,7 +1662,12 @@ export default function AdminPortal({
                                   onClick={() => {
                                     requestConfirm('هل تريد تأكيد حذف هذا السجل وحجبه من البيانات؟', async () => {
                                       try {
-                                        await deleteDoc(doc(db, 'attendance', rec.id));
+                                        const response = await fetch(`/api/attendance/${rec.id}`, {
+                                          method: 'DELETE'
+                                        });
+                                        if (!response.ok) {
+                                          throw new Error();
+                                        }
                                         loadAttendance();
                                       } catch (err) {
                                         alert('تعذر الحذف');
@@ -2511,7 +2524,12 @@ export default function AdminPortal({
                               onClick={() => {
                                 requestConfirm('هل تريد إلغاء صلاحية هذا المسؤول وحذفه؟', async () => {
                                   try {
-                                    await deleteDoc(doc(db, 'admins', item.id));
+                                    const response = await fetch(`/api/admins/${item.id}`, {
+                                      method: 'DELETE'
+                                    });
+                                    if (!response.ok) {
+                                      throw new Error();
+                                    }
                                     loadSubAdmins();
                                   } catch (err) {
                                     alert('فشل الإجراء');
@@ -2558,8 +2576,14 @@ export default function AdminPortal({
                             onClick={() => {
                               requestConfirm('موافقة وقبول التسجيل؟', async () => {
                                 try {
-                                  const docRef = doc(db, 'registrationRequests', it.id);
-                                  await updateDoc(docRef, { status: 'approved' });
+                                  const response = await fetch(`/api/registration-requests/${it.id}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ status: 'approved' })
+                                  });
+                                  if (!response.ok) {
+                                    throw new Error();
+                                  }
                                   
                                   if (it.type === 'employee') {
                                     const updated = [...employees, {
@@ -2587,8 +2611,14 @@ export default function AdminPortal({
                             onClick={() => {
                               requestConfirm('رفض طلب التسجيل هذا؟', async () => {
                                 try {
-                                  const docRef = doc(db, 'registrationRequests', it.id);
-                                  await updateDoc(docRef, { status: 'rejected' });
+                                  const response = await fetch(`/api/registration-requests/${it.id}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ status: 'rejected' })
+                                  });
+                                  if (!response.ok) {
+                                    throw new Error();
+                                  }
                                   alert('تم رفض الطلب.');
                                   loadRequests();
                                 } catch (e) {

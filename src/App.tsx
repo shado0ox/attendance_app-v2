@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react';
-import { db, auth, OperationType, handleFirestoreError } from './firebase';
-import { doc, onSnapshot, setDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { useState, useEffect, useRef } from 'react';
+import { auth, OperationType, handleFirestoreError } from './firebase';
 import { onAuthStateChanged, updatePassword } from 'firebase/auth';
 import { Loader, Key, X, AlertCircle, Smartphone } from 'lucide-react';
 
@@ -160,13 +159,12 @@ export default function App() {
   };
 
   useEffect(() => {
-    // 1. Core Roster real-time Listener
-    const docRef = doc(db, 'scheduleApp', 'mainData');
-    const unsub = onSnapshot(
-      docRef,
-      (snapshot) => {
-        if (snapshot.exists()) {
-          const data = snapshot.data();
+    // 1. Fetch mainData from PostgreSQL API
+    const fetchMainData = async () => {
+      try {
+        const response = await fetch('/api/main-data');
+        if (response.ok) {
+          const data = await response.json();
           setAppData({
             departments: data.departments || defaultDepartments,
             employees: data.employees || defaultEmployees,
@@ -176,30 +174,10 @@ export default function App() {
           if (data.settings) {
             setAppSettings(data.settings);
           }
-          // Save to local storage for offline fallback in portals
           localStorage.setItem('schedule_mainData', JSON.stringify(data));
-        } else {
-          // Document does not exist yet. Seed with default datasets
-          const initialData = {
-            departments: defaultDepartments,
-            employees: defaultEmployees,
-            shiftTypes: defaultShiftTypes,
-            schedule: defaultSchedule,
-            settings: {
-              password: '5198',
-              companyName: 'نظام الدوام',
-              officeLocation: { lat: 24.7136, lng: 46.6753, radius: 150 }
-            },
-            updatedAt: Date.now()
-          };
-          setDoc(docRef, initialData).catch((err) => {
-            console.error('Error seeding initial data:', err);
-          });
         }
-        setLoading(false);
-      },
-      (error) => {
-        console.warn('Snapshot subscription failed, retrieving cached data...', error);
+      } catch (err) {
+        console.warn('Failed to fetch main-data from API, checking cache...', err);
         const cached = localStorage.getItem('schedule_mainData');
         if (cached) {
           try {
@@ -217,19 +195,31 @@ export default function App() {
             console.error('Error parsing cached data:', e);
           }
         }
-        handleFirestoreError(error, OperationType.GET, 'scheduleApp/mainData');
+      } finally {
         setLoading(false);
       }
-    );
+    };
 
-    // 2. Real-time sign up registration request listener
-    const regUnsub = onSnapshot(collection(db, 'registrationRequests'), (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((d) => {
-        list.push({ id: d.id, ...d.data() });
-      });
-      setRegistrationRequests(list);
-    });
+    // 2. Fetch registration requests from PostgreSQL API
+    const fetchRegRequests = async () => {
+      try {
+        const response = await fetch('/api/registration-requests');
+        if (response.ok) {
+          const data = await response.json();
+          setRegistrationRequests(data);
+        }
+      } catch (err) {
+        console.error('Error fetching registration requests:', err);
+      }
+    };
+
+    // Initial fetches
+    fetchMainData();
+    fetchRegRequests();
+
+    // Set up polling intervals to maintain real-time sync
+    const mainDataInterval = setInterval(fetchMainData, 5000);
+    const regRequestsInterval = setInterval(fetchRegRequests, 5000);
 
     // 3. Keep local sessions on reload
     const storedSession = localStorage.getItem('app_session');
@@ -240,28 +230,34 @@ export default function App() {
     }
 
     return () => {
-      unsub();
-      regUnsub();
+      clearInterval(mainDataInterval);
+      clearInterval(regRequestsInterval);
     };
   }, []);
 
   const handleUpdateSettings = async (nextSettings: any) => {
     setAppSettings(nextSettings);
     try {
-      const docRef = doc(db, 'scheduleApp', 'mainData');
-      await setDoc(docRef, { ...appData, settings: nextSettings, updatedAt: Date.now() });
+      await fetch('/api/main-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...appData, settings: nextSettings, updatedAt: Date.now() })
+      });
     } catch (e) {
-      console.error(e);
+      console.error('Failed to update settings in PostgreSQL:', e);
     }
   };
 
   const handleUpdateAppData = async (nextData: any) => {
     setAppData(nextData);
     try {
-      const docRef = doc(db, 'scheduleApp', 'mainData');
-      await setDoc(docRef, { ...nextData, settings: appSettings, updatedAt: Date.now() });
+      await fetch('/api/main-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...nextData, settings: appSettings, updatedAt: Date.now() })
+      });
     } catch (e) {
-      console.error(e);
+      console.error('Failed to update app data in PostgreSQL:', e);
     }
   };
 

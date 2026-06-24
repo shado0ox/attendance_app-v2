@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle } from 'lucide-react';
-import { db, auth, OperationType, handleFirestoreError } from '../firebase';
-import { collection, query, where, limit, getDocs, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { auth, OperationType, handleFirestoreError } from '../firebase';
 
 interface EmployeePortalProps {
   employee: any;
@@ -174,8 +173,8 @@ export default function EmployeePortal({
       if (period === 'second') {
         const tr = stateRef.current.todayRecord;
         if (!tr) return;
-        const recordRef = doc(db, 'attendance', tr.id);
         const updateData = {
+          id: tr.id,
           checkIn2: formattedTime,
           checkInTs2: Date.now(),
           checkInLat2: lat,
@@ -183,7 +182,12 @@ export default function EmployeePortal({
           note: (tr.note ? tr.note + ' ' : '') + '[حضور تلقائي عبر GPS]',
           source: 'المقر (تلقائي)'
         };
-        await updateDoc(recordRef, updateData);
+        const response = await fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updateData)
+        });
+        if (!response.ok) throw new Error('فشل الحفظ على الخادم');
         setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ✅ تم الحضور التلقائي للفترة الثانية.`, ...prev.slice(0, 4)]);
       } else {
         const payload = {
@@ -199,10 +203,14 @@ export default function EmployeePortal({
           source: 'المقر (تلقائي)',
           note: 'حضور تلقائي عبر GPS',
           checkInLat: lat,
-          checkInLng: lng,
-          createdAt: Date.now()
+          checkInLng: lng
         };
-        await addDoc(collection(db, 'attendance'), payload);
+        const response = await fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error('فشل تسجيل الحضور على الخادم');
         setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ✅ تم تسجيل حضورك التلقائي بنجاح.`, ...prev.slice(0, 4)]);
       }
       await loadAttendanceStatus();
@@ -224,20 +232,27 @@ export default function EmployeePortal({
       const isDouble = isTodayRecordShiftDouble();
       const isPeriod2 = isDouble && tr.checkOut;
 
-      const recordRef = doc(db, 'attendance', tr.id);
       const updateData = isPeriod2 ? {
+        id: tr.id,
         checkOut2: formattedTime,
         checkOutTs2: Date.now(),
         note: (tr.note ? tr.note + ' ' : '') + '[انصراف تلقائي عبر GPS]',
         source: tr.source || 'المقر (تلقائي)'
       } : {
+        id: tr.id,
         checkOut: formattedTime,
         checkOutTs: Date.now(),
         note: (tr.note ? tr.note + ' ' : '') + '[انصراف تلقائي عبر GPS]',
         source: tr.source || 'المقر (تلقائي)'
       };
 
-      await updateDoc(recordRef, updateData);
+      const response = await fetch('/api/attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateData)
+      });
+      if (!response.ok) throw new Error('فشل تسجيل الانصراف على الخادم');
+
       setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ✅ تم الانصراف التلقائي بنجاح.`, ...prev.slice(0, 4)]);
       await loadAttendanceStatus();
     } catch (e: any) {
@@ -651,26 +666,14 @@ export default function EmployeePortal({
   const loadRequests = async () => {
     setReqsLoading(true);
     try {
-      const q = query(
-        collection(db, 'requests'),
-        where('empId', '==', employee.id),
-        limit(50)
-      );
-      
-      let querySnapshot;
-      try {
-        querySnapshot = await getDocs(q);
-      } catch (e) {
-        handleFirestoreError(e, OperationType.GET, 'requests');
-        throw e;
+      const response = await fetch('/api/requests');
+      if (!response.ok) {
+        throw new Error('فشل تحميل الطلبات من الخادم');
       }
-      
-      const loaded: any[] = [];
-      querySnapshot.forEach((d) => {
-        loaded.push({ id: d.id, ...d.data() });
-      });
+      const allRequests = await response.json();
+      const loaded = allRequests.filter((r: any) => r.empId === employee.id);
       // Sort locally by createdAt desc
-      loaded.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      loaded.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
       setRequests(loaded);
     } catch (e) {
       console.error('Error loading requests:', e);
@@ -683,43 +686,33 @@ export default function EmployeePortal({
     setAttendanceStatus('checking');
     try {
       const todayStr = getTodayStr();
-      const q = query(
-        collection(db, 'attendance'),
-        where('empId', '==', employee.id),
-        where('date', '==', todayStr),
-        limit(1)
-      );
-      
-      let snap;
-      try {
-        snap = await getDocs(q);
-      } catch (e) {
-        handleFirestoreError(e, OperationType.GET, 'attendance');
-        throw e;
+      const response = await fetch('/api/attendance');
+      if (!response.ok) {
+        throw new Error('فشل تحميل البيانات من الخادم المساعد');
       }
+      const list = await response.json();
+      const record = list.find((r: any) => r.empId === employee.id && r.date === todayStr);
 
-      if (snap.empty) {
+      if (!record) {
         setAttendanceStatus('not-checked-in');
         setTodayRecord(null);
       } else {
-        const docData = snap.docs[0].data();
-        const record = { id: snap.docs[0].id, ...docData };
         setTodayRecord(record);
         
         const isDouble = isTodayRecordShiftDouble();
 
         if (isDouble) {
-          if (!docData.checkOut) {
+          if (!record.checkOut) {
             setAttendanceStatus('checked-in'); // First period check-in
-          } else if (!docData.checkIn2) {
+          } else if (!record.checkIn2) {
             setAttendanceStatus('not-checked-in-2'); // Ready for Second period check-in
-          } else if (!docData.checkOut2) {
+          } else if (!record.checkOut2) {
             setAttendanceStatus('checked-in-2'); // Second period check-in
           } else {
             setAttendanceStatus('checked-out'); // Both periods checked-out!
           }
         } else {
-          if (!docData.checkOut) {
+          if (!record.checkOut) {
             setAttendanceStatus('checked-in');
           } else {
             setAttendanceStatus('checked-out');
@@ -825,17 +818,19 @@ export default function EmployeePortal({
 
       if (isPeriod2) {
         // Update existing daily record with period 2 check-in
-        const recordRef = doc(db, 'attendance', todayRecord.id);
         const updateData: any = {
+          id: todayRecord.id,
           checkIn2: formattedTime,
           checkInTs2: Date.now(),
           ...(lat !== null && { checkInLat2: lat, checkInLng2: lng })
         };
-        try {
-          await updateDoc(recordRef, updateData);
-        } catch (e) {
-          handleFirestoreError(e, OperationType.UPDATE, `attendance/${todayRecord.id}`);
-          throw e;
+        const response = await fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updateData)
+        });
+        if (!response.ok) {
+          throw new Error('فشل تسجيل حضور الفترة الثانية');
         }
 
         setGeoStatus('✅ تم تسجيل حضور الفترة الثانية بنجاح اليوم!');
@@ -852,15 +847,16 @@ export default function EmployeePortal({
           checkOutTs: null,
           status: 'present',
           source: 'المقر',
-          ...(lat !== null && { checkInLat: lat, checkInLng: lng }),
-          createdAt: Date.now()
+          ...(lat !== null && { checkInLat: lat, checkInLng: lng })
         };
 
-        try {
-          await addDoc(collection(db, 'attendance'), payload);
-        } catch (e) {
-          handleFirestoreError(e, OperationType.CREATE, 'attendance');
-          throw e;
+        const response = await fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+          throw new Error('فشل تسجيل الحضور');
         }
 
         setGeoStatus('✅ تم تسجيل حضورك بنجاح اليوم!');
@@ -923,20 +919,23 @@ export default function EmployeePortal({
         const isDouble = isTodayRecordShiftDouble();
         const isPeriod2 = isDouble && todayRecord.checkOut;
 
-        const recordRef = doc(db, 'attendance', todayRecord.id);
         const updateData: any = isPeriod2 ? {
+          id: todayRecord.id,
           checkOut2: formattedTime,
           checkOutTs2: Date.now()
         } : {
+          id: todayRecord.id,
           checkOut: formattedTime,
           checkOutTs: Date.now()
         };
 
-        try {
-          await updateDoc(recordRef, updateData);
-        } catch (e) {
-          handleFirestoreError(e, OperationType.UPDATE, `attendance/${todayRecord.id}`);
-          throw e;
+        const response = await fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updateData)
+        });
+        if (!response.ok) {
+          throw new Error('فشل تسجيل الانصراف');
         }
 
         setGeoStatus('✅ تم تسجيل الانصراف وحفظ السجل بنجاح.');
@@ -985,11 +984,13 @@ export default function EmployeePortal({
     }
 
     try {
-      try {
-        await addDoc(collection(db, 'requests'), payload);
-      } catch (e) {
-        handleFirestoreError(e, OperationType.CREATE, 'requests');
-        throw e;
+      const response = await fetch('/api/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        throw new Error('فشل إرسال الطلب إلى الخادم');
       }
       alert('🎉 تم إرسال طلبك بنجاح وجاري المراجعة من الإدارة.');
       setRequestModalOpen(false);

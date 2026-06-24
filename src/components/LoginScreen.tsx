@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { User, Shield, UserPlus, LogIn, Loader, Key, Fingerprint, ScanFace, ChevronDown, CheckCircle2, RefreshCw, AlertCircle } from 'lucide-react';
-import { db, auth, OperationType, handleFirestoreError } from '../firebase';
-import { doc, getDoc, collection, query, where, limit, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, OperationType, handleFirestoreError } from '../firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
 interface LoginScreenProps {
@@ -88,62 +87,31 @@ export default function LoginScreen({
       return;
     }
 
-    // Try Sub-Admin check in Firestore
+    // Try Sub-Admin check in PostgreSQL
     try {
-      const adminsRef = collection(db, 'admins');
-      const q = query(
-        adminsRef, 
-        where('password', '==', adminPassword.trim())
-      );
-      let querySnapshot;
-      try {
-        querySnapshot = await getDocs(q);
-      } catch (e) {
-        handleFirestoreError(e, OperationType.GET, 'admins');
-        throw e;
+      const response = await fetch('/api/admins');
+      if (!response.ok) {
+        throw new Error('فشل الاتصال بالخادم المساعد');
       }
-
-      if (querySnapshot.empty) {
-        setAdminError('اسم المستخدم أو كلمة المرور للمدير غير صحيحة');
-        setAdminLoading(false);
-        return;
-      }
-
-      // Filter client-side to locate the correct user
+      const adminsList = await response.json();
+      
       const correctInputLower = adminUsername.trim().toLowerCase();
-      const adminDoc = querySnapshot.docs.find(doc => {
-        const data = doc.data();
-        const usernameMatch = data.username && data.username.toLowerCase() === correctInputLower;
-        const emailMatch = data.email && data.email.toLowerCase().split('@')[0] === correctInputLower;
-        const nameMatch = data.name && data.name.toLowerCase() === correctInputLower;
-        return usernameMatch || emailMatch || nameMatch;
+      const enteredPassword = adminPassword.trim();
+      
+      const foundAdmin = adminsList.find((adm: any) => {
+        const usernameMatch = adm.username && adm.username.toLowerCase() === correctInputLower;
+        const nameMatch = adm.name && adm.name.toLowerCase() === correctInputLower;
+        const passwordMatch = adm.password === enteredPassword;
+        return (usernameMatch || nameMatch) && passwordMatch;
       });
 
-      if (!adminDoc) {
-        setAdminError('اسم المستخدم غير متطابق مع هذا الرمز');
+      if (!foundAdmin) {
+        setAdminError('اسم المستخدم أو رمز الدخول غير صحيح');
         setAdminLoading(false);
         return;
       }
 
-      const adminData = { id: adminDoc.id, ...adminDoc.data() } as any;
-
-      if (adminData.email) {
-        try {
-          await signInWithEmailAndPassword(auth, adminData.email, adminPassword.trim());
-        } catch (authErr: any) {
-          if (authErr.code === 'auth/user-not-found') {
-            try {
-              await createUserWithEmailAndPassword(auth, adminData.email, adminPassword.trim());
-            } catch (ce) {
-              console.warn('Sub-Admin user creation skipped or failed:', ce);
-            }
-          } else {
-            console.warn('Auth issue signed in locally:', authErr);
-          }
-        }
-      }
-
-      onAdminLogin({ role: 'admin', name: adminData.name, ...adminData });
+      onAdminLogin({ role: 'admin', name: foundAdmin.name, ...foundAdmin });
     } catch (e: any) {
       setAdminError('فشل تسجيل الدخول: ' + e.message);
     } finally {
@@ -424,22 +392,23 @@ export default function LoginScreen({
     setRegLoading(true);
 
     try {
-      const regRequestsRef = collection(db, 'registrationRequests');
       const payload = {
         name: regName.trim(),
         type: regType,
         username: regType === 'employee' ? regUsername.trim().toLowerCase() : '',
         phone: regPhone.trim(),
         password: regPassword,
-        status: 'pending',
-        createdAt: serverTimestamp()
+        status: 'pending'
       };
       
-      try {
-        await addDoc(regRequestsRef, payload);
-      } catch (e) {
-        handleFirestoreError(e, OperationType.CREATE, 'registrationRequests');
-        throw e;
+      const response = await fetch('/api/registration-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error('فشل إرسال الطلب إلى الخادم');
       }
 
       setRegSuccess(true);
