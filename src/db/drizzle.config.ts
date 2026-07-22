@@ -3,7 +3,10 @@ import * as dotenv from "dotenv";
 
 dotenv.config({ override: true });
 
-const connectionString = process.env.DATABASE_URL;
+let connectionString = process.env.DATABASE_URL;
+if (connectionString && connectionString.includes('cmccnjkusdcqbpbkclke.supabase.co')) {
+  connectionString = undefined;
+}
 const isExternalDb = connectionString?.includes('supabase') || connectionString?.includes('neon') || connectionString?.includes('render') || process.env.SQL_HOST?.includes('supabase');
 
 export default defineConfig({

@@ -6,19 +6,26 @@ interface LoginScreenProps {
   onAdminLogin: (admin: any) => void;
   onEmployeeLogin: (employee: any) => void;
   employees: any[];
+  companyId: string;
+  setCompanyId: (id: string) => void;
+  companiesList: any[];
 }
 
 export default function LoginScreen({
   appSettings,
   onAdminLogin,
   onEmployeeLogin,
-  employees
+  employees,
+  companyId,
+  setCompanyId,
+  companiesList
 }: LoginScreenProps) {
   const [activeTab, setActiveTab] = useState<'emp' | 'admin' | 'reg'>('emp');
   
   // Admin login state
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  const [adminCompanyCode, setAdminCompanyCode] = useState('');
   const [adminError, setAdminError] = useState('');
   const [adminLoading, setAdminLoading] = useState(false);
 
@@ -65,14 +72,26 @@ export default function LoginScreen({
       setAdminError('الرجاء إدخال كلمة المرور');
       return;
     }
+    
+    // Validate Company Code
+    const expectedCode = companyId === 'default' 
+      ? '0' 
+      : (companiesList.find(c => c.id === companyId)?.companyCode || '0');
+
+    if (adminCompanyCode.trim() !== expectedCode) {
+      setAdminError('رمز الشركة غير صحيح');
+      return;
+    }
+
     setAdminError('');
     setAdminLoading(true);
 
     const superPassword = appSettings?.password || '5198';
 
+    // 1. Root General Manager check
     if (adminUsername.trim().toLowerCase() === 'admin' && adminPassword === superPassword) {
       try {
-        onAdminLogin({ role: 'superadmin', name: 'المدير العام' });
+        onAdminLogin({ role: 'superadmin', name: 'المدير العام', companyId: 'default' });
       } catch (err: any) {
         setAdminError('حدث خطأ في استعادة الاتصال. يرجى المحاولة لاحقاً.');
       } finally {
@@ -81,9 +100,39 @@ export default function LoginScreen({
       return;
     }
 
-    // Try Sub-Admin check in PostgreSQL
+    // 2. Custom company master admin check
+    if (companyId !== 'default') {
+      const selectedCompany = companiesList.find(c => c.id === companyId);
+      if (selectedCompany) {
+        // Check if subscription has expired
+        const isExpired = selectedCompany.subscriptionStatus !== 'active' && 
+                          selectedCompany.subscriptionExpiresAt && 
+                          new Date(selectedCompany.subscriptionExpiresAt) < new Date();
+        
+        if (isExpired || selectedCompany.subscriptionStatus === 'suspended') {
+          setAdminError('عذراً، اشتراك هذه الشركة منتهي أو معطل حالياً. يرجى مراجعة الإدارة.');
+          setAdminLoading(false);
+          return;
+        }
+
+        if (selectedCompany.adminUsername && 
+            adminUsername.trim().toLowerCase() === selectedCompany.adminUsername.toLowerCase() && 
+            adminPassword === selectedCompany.adminPassword) {
+          try {
+            onAdminLogin({ role: 'admin', name: `مدير ${selectedCompany.name}`, companyId, isMaster: true });
+          } catch (err) {
+            setAdminError('حدث خطأ أثناء تسجيل الدخول.');
+          } finally {
+            setAdminLoading(false);
+          }
+          return;
+        }
+      }
+    }
+
+    // 3. Try Sub-Admin check in PostgreSQL (scoped to current company)
     try {
-      const response = await fetch('/api/admins');
+      const response = await fetch(`/api/admins?companyId=${companyId}`);
       if (!response.ok) {
         throw new Error('فشل الاتصال بالخادم المساعد');
       }
@@ -105,7 +154,7 @@ export default function LoginScreen({
         return;
       }
 
-      onAdminLogin({ role: 'admin', name: foundAdmin.name, ...foundAdmin });
+      onAdminLogin({ role: 'admin', name: foundAdmin.name, ...foundAdmin, companyId });
     } catch (e: any) {
       setAdminError('فشل تسجيل الدخول: ' + e.message);
     } finally {
@@ -358,7 +407,8 @@ export default function LoginScreen({
         username: regType === 'employee' ? regUsername.trim().toLowerCase() : '',
         phone: regPhone.trim(),
         password: regPassword,
-        status: 'pending'
+        status: 'pending',
+        companyId: companyId || 'default'
       };
       
       const response = await fetch('/api/registration-requests', {
@@ -385,13 +435,48 @@ export default function LoginScreen({
     }
   };
 
-  const companyName = appSettings?.companyName || 'نظام الدوام';
-  const logoUrl = appSettings?.logoDataUrl || '';
+  const selectedCompanyObj = companiesList.find(c => c.id === companyId);
+  const companyName = selectedCompanyObj ? selectedCompanyObj.name : (appSettings?.companyName || 'نظام الدوام');
+  const logoUrl = selectedCompanyObj ? (selectedCompanyObj.logoUrl || '') : (appSettings?.logoDataUrl || '');
 
   return (
     <div id="login-screen" className="flex flex-col items-center justify-center min-h-screen px-4 bg-sky-50 bg-opacity-70">
       <div className="w-full max-w-md p-8 bg-white border border-sky-100 rounded-2xl shadow-xl transition-all">
         
+        {/* Workspace selector */}
+        {companiesList.length > 0 && (
+          <div className="mb-6 p-3.5 bg-slate-50 border border-slate-100 rounded-xl" dir="rtl">
+            <label className="block text-[11px] font-extrabold text-slate-500 mb-1.5 text-right flex items-center gap-1.5">
+              <span>🏢 مساحة عمل الشركة / الفرع باشتراك شهري</span>
+            </label>
+            <div className="relative">
+              <select
+                value={companyId}
+                onChange={(e) => setCompanyId(e.target.value)}
+                className="w-full pl-8 pr-3 py-2 text-xs font-bold bg-white border border-sky-100 rounded-lg text-slate-700 outline-none appearance-none cursor-pointer focus:border-sky-500 shadow-sm"
+              >
+                <option value="default">المساحة الرئيسية (الافتراضية)</option>
+                {companiesList.map((comp: any) => (
+                  <option key={comp.id} value={comp.id}>
+                    {comp.name} {comp.subscriptionStatus !== 'active' ? '⚠️ (الاشتراك منتهي)' : '✓'}
+                  </option>
+                ))}
+              </select>
+              <div className="absolute inset-y-0 left-2.5 flex items-center pointer-events-none text-slate-400">
+                <ChevronDown size={14} />
+              </div>
+            </div>
+            {selectedCompanyObj && (
+              <div className="mt-2 text-[10px] text-slate-400 text-right flex flex-col gap-0.5 border-t pt-1.5 border-dashed border-slate-200">
+                <span>الاشتراك الشهري: <span className="font-bold text-slate-600">{selectedCompanyObj.monthlyFee || '100'} ريال / شهر</span></span>
+                {selectedCompanyObj.subscriptionExpiresAt && (
+                  <span>تاريخ انتهاء الصلاحية: <span className="font-bold text-slate-600">{new Date(selectedCompanyObj.subscriptionExpiresAt).toLocaleDateString('ar-EG')}</span></span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Logo and Brand */}
         <div className="flex flex-col items-center mb-8 text-center">
           {logoUrl ? (

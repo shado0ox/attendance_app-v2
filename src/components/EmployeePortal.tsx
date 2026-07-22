@@ -10,6 +10,7 @@ interface EmployeePortalProps {
   schedule?: any;
   onLogout: () => void;
   onOpenChangePassword: () => void;
+  companyId: string;
 }
 
 export default function EmployeePortal({
@@ -20,7 +21,8 @@ export default function EmployeePortal({
   shiftTypes = [],
   schedule = {},
   onLogout,
-  onOpenChangePassword
+  onOpenChangePassword,
+  companyId
 }: EmployeePortalProps) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [requests, setRequests] = useState<any[]>([]);
@@ -202,7 +204,8 @@ export default function EmployeePortal({
           source: 'المقر (تلقائي)',
           note: 'حضور تلقائي عبر GPS',
           checkInLat: lat,
-          checkInLng: lng
+          checkInLng: lng,
+          companyId: companyId || 'default'
         };
         const response = await fetch('/api/attendance', {
           method: 'POST',
@@ -634,7 +637,7 @@ export default function EmployeePortal({
   };
 
   const getLocalScheduleData = () => {
-    const localDataStr = localStorage.getItem('schedule_mainData') || '{}';
+    const localDataStr = localStorage.getItem(`schedule_mainData_${companyId}`) || localStorage.getItem('schedule_mainData') || '{}';
     try {
       const raw = JSON.parse(localDataStr);
       return raw.schedule || {};
@@ -665,7 +668,7 @@ export default function EmployeePortal({
   const loadRequests = async () => {
     setReqsLoading(true);
     try {
-      const response = await fetch('/api/requests');
+      const response = await fetch(`/api/requests?companyId=${companyId}`);
       if (!response.ok) {
         throw new Error('فشل تحميل الطلبات من الخادم');
       }
@@ -685,7 +688,7 @@ export default function EmployeePortal({
     setAttendanceStatus('checking');
     try {
       const todayStr = getTodayStr();
-      const response = await fetch('/api/attendance');
+      const response = await fetch(`/api/attendance?companyId=${companyId}`);
       if (!response.ok) {
         throw new Error('فشل تحميل البيانات من الخادم المساعد');
       }
@@ -846,6 +849,7 @@ export default function EmployeePortal({
           checkOutTs: null,
           status: 'present',
           source: 'المقر',
+          companyId: companyId || 'default',
           ...(lat !== null && { checkInLat: lat, checkInLng: lng })
         };
 
@@ -960,6 +964,7 @@ export default function EmployeePortal({
       date: reqDate,
       note: reqNote.trim(),
       status: 'pending',
+      companyId: companyId || 'default',
       createdAt: Date.now()
     };
 
@@ -1021,17 +1026,22 @@ export default function EmployeePortal({
   const calendarCells: (number | null)[] = [];
   for (let i = 0; i < saudiFirstCol; i++) calendarCells.push(null);
   for (let d = 1; d <= daysInMonth; d++) calendarCells.push(d);
-  while (calendarCells.length % 7 !== 0) calendarCells.push(null);
+  // Guarantee exactly 42 elements (6 rows of 7 columns) for absolute visual height stability across any month!
+  while (calendarCells.length < 42) {
+    calendarCells.push(null);
+  }
 
   const dept = departments.find((d) => d.id === employee.dept);
 
-  // Read schedules from appSettings if they synchronized, else fall back to local storage
-  const localDataStr = localStorage.getItem('schedule_mainData') || '{}';
-  let scheduleData: any = {};
-  try {
-    const raw = JSON.parse(localDataStr);
-    scheduleData = raw.schedule || {};
-  } catch (e) {}
+  // Read schedules from props first, then fall back to local storage cache if empty
+  let scheduleData: any = schedule;
+  if (!scheduleData || Object.keys(scheduleData).length === 0) {
+    const localDataStr = localStorage.getItem(`schedule_mainData_${companyId}`) || localStorage.getItem('schedule_mainData') || '{}';
+    try {
+      const raw = JSON.parse(localDataStr);
+      scheduleData = raw.schedule || {};
+    } catch (e) {}
+  }
 
   return (
     <div id="emp-portal" className="min-h-screen pb-12 bg-sky-50 bg-opacity-40">
@@ -1128,14 +1138,14 @@ export default function EmployeePortal({
         </div>
 
         {/* Roster Calendar */}
-        <div className="overflow-hidden bg-white border border-sky-100 rounded-2xl shadow-sm">
-          <table className="w-full border-collapse">
+        <div className="overflow-hidden bg-white border border-sky-100 rounded-2xl shadow-sm w-full mx-auto max-w-full">
+          <table className="w-full border-collapse table-fixed select-none">
             <thead>
               <tr className="bg-sky-50">
                 {DAYS_AR.map((day, dIdx) => (
                   <th
                     key={day}
-                    className={`py-3 text-center text-xs font-bold border-b border-sky-100 ${
+                    className={`py-3 text-center text-[11px] sm:text-xs font-bold border-b border-sky-100 ${
                       dIdx === 6 ? 'bg-rose-50/50 text-rose-600 font-extrabold' : 'text-slate-600'
                     }`}
                   >
@@ -1149,7 +1159,12 @@ export default function EmployeePortal({
                 <tr key={rIdx} className="hover:bg-slate-50/50 transition-all">
                   {calendarCells.slice(rIdx * 7, (rIdx + 1) * 7).map((cell, cIdx) => {
                     if (cell === null) {
-                      return <td key={cIdx} className="p-1 border border-slate-50 aspect-square min-h-[50px] bg-slate-50/30"></td>;
+                      return (
+                        <td
+                          key={cIdx}
+                          className="p-1 border border-sky-100 bg-slate-50/10 h-[68px] sm:h-[84px] md:h-[96px] transition-all"
+                        ></td>
+                      );
                     }
 
                     const dateStr = `${showingYear}-${String(showingMonth + 1).padStart(2, '0')}-${String(cell).padStart(2, '0')}`;
@@ -1167,13 +1182,13 @@ export default function EmployeePortal({
                     if (matchingShift) {
                       label = matchingShift.name;
                       if (matchingShift.type === 'double') {
-                        cellBg = 'bg-indigo-50/50 bg-opacity-70';
+                        cellBg = 'bg-indigo-50/55 bg-opacity-80';
                         labelColor = 'text-indigo-700';
                       } else if (matchingShift.type === 'evening') {
-                        cellBg = 'bg-amber-50/50 bg-opacity-70';
+                        cellBg = 'bg-amber-50/55 bg-opacity-80';
                         labelColor = 'text-amber-700';
                       } else {
-                        cellBg = 'bg-emerald-50/55 bg-opacity-70';
+                        cellBg = 'bg-emerald-50/55 bg-opacity-80';
                         labelColor = 'text-emerald-700';
                       }
                     } else if (stType === 'S') {
@@ -1186,7 +1201,7 @@ export default function EmployeePortal({
                       labelColor = 'text-amber-700';
                     }
 
-                    if (cIdx === 6) { // Friday column override
+                    if (cIdx === 6 && stType === 'A') { // Friday column override if no active shift is assigned
                       cellBg = 'bg-rose-50/30';
                       label = 'إجازة جمعة';
                       labelColor = 'text-rose-500';
@@ -1195,33 +1210,45 @@ export default function EmployeePortal({
                     return (
                       <td
                         key={cIdx}
-                        className={`p-1.5 border border-sky-100 text-center align-top relative transition-all ${cellBg} ${
-                          isToday ? 'outline-2 outline-amber-500 shadow-md ring-2 ring-amber-100' : ''
+                        className={`p-1 border border-sky-100 text-center align-middle relative transition-all h-[68px] sm:h-[84px] md:h-[96px] ${cellBg} ${
+                          isToday ? 'outline-2 outline-amber-500 shadow-md ring-2 ring-amber-100 z-10' : ''
                         }`}
                         title={assigned?.note ? `ملاحظة: ${assigned.note}` : ''}
                       >
-                        <div className={`font-bold text-xs ${isToday ? 'text-amber-600 font-black' : 'text-slate-700'}`}>
-                          {cell}
-                          {isToday && <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full mr-1"></span>}
-                        </div>
-                        <div className={`text-[10px] font-bold mt-1 ${labelColor}`}>{label}</div>
-                        {matchingShift && (
-                          <div className="text-[8px] text-slate-500 font-mono mt-0.5 whitespace-nowrap opacity-90 leading-tight">
-                            {matchingShift.type === 'double' ? (
-                              <>
-                                <div className="text-amber-600">🌅 {matchingShift.start}-{matchingShift.end}</div>
-                                <div className="text-indigo-600">🌙 {matchingShift.start2 || '17:00'}-{matchingShift.end2 || '21:00'}</div>
-                              </>
+                        <div className="flex flex-col justify-between h-full w-full overflow-hidden select-none">
+                          {/* Top row: day number */}
+                          <div className={`font-bold text-[11px] sm:text-xs ${isToday ? 'text-amber-600 font-black scale-105' : 'text-slate-700'}`}>
+                            {cell}
+                            {isToday && <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full mr-1 animate-pulse"></span>}
+                          </div>
+
+                          {/* Middle row: Shift type label */}
+                          <div className={`text-[9px] sm:text-[10px] font-extrabold truncate ${labelColor} leading-tight`}>
+                            {label}
+                          </div>
+
+                          {/* Bottom row: hours or notes */}
+                          <div className="min-h-[14px] flex items-center justify-center overflow-hidden">
+                            {matchingShift ? (
+                              <div className="text-[7px] sm:text-[8px] text-slate-500 font-mono scale-95 sm:scale-100 origin-center whitespace-nowrap opacity-90 leading-none">
+                                {matchingShift.type === 'double' ? (
+                                  <div className="flex flex-col text-[7px] leading-none">
+                                    <span className="text-amber-600">🌅 {matchingShift.start}</span>
+                                    <span className="text-indigo-600">🌙 {matchingShift.start2 || '17:00'}</span>
+                                  </div>
+                                ) : (
+                                  <span>{matchingShift.start}</span>
+                                )}
+                              </div>
+                            ) : assigned?.note ? (
+                              <div className="text-[7px] sm:text-[8px] text-slate-400 truncate bg-slate-100 px-0.5 py-0.5 rounded leading-none w-full text-center" title={assigned.note}>
+                                ✏️ {assigned.note}
+                              </div>
                             ) : (
-                              <span>{matchingShift.start}-{matchingShift.end}</span>
+                              <span className="text-[8px] text-slate-300">-</span>
                             )}
                           </div>
-                        )}
-                        {assigned?.note && (
-                          <div className={`text-[8px] text-slate-400 truncate mt-1 bg-slate-100 px-1 py-0.5 rounded`}>
-                            ✏️ {assigned.note}
-                          </div>
-                        )}
+                        </div>
                       </td>
                     );
                   })}

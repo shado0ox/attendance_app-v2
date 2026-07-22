@@ -4,7 +4,7 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
 
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import { db, schema } from './src/db/index.ts';
+import { db, schema, pool, initializeSchemaAndTables, getDbSchemaName } from './src/db/index.ts';
 import { eq, desc } from 'drizzle-orm';
 
 const app = express();
@@ -23,6 +23,8 @@ app.get('/api/debug-db', (req, res) => {
     SQL_HOST: process.env.SQL_HOST,
     SQL_USER: process.env.SQL_USER,
     SQL_DB_NAME: process.env.SQL_DB_NAME,
+    DB_SCHEMA: getDbSchemaName(),
+    DB_SSL: process.env.DB_SSL || 'auto',
     isExternalDb: connectionString?.includes('supabase') || connectionString?.includes('neon') || connectionString?.includes('render') || process.env.SQL_HOST?.includes('supabase')
   });
 });
@@ -41,6 +43,8 @@ app.get('/api/diagnose-db', async (req, res) => {
       SQL_PORT: process.env.SQL_PORT,
       SQL_USER: process.env.SQL_USER,
       SQL_DB_NAME: process.env.SQL_DB_NAME,
+      DB_SCHEMA: getDbSchemaName(),
+      DB_SSL: process.env.DB_SSL || 'auto',
       isExternalDb
     },
     databaseHandshake: {
@@ -152,69 +156,146 @@ const defaultMainData = {
   }
 };
 
+const createCleanCompanyData = (companyName: string) => ({
+  departments: [],
+  employees: [],
+  shiftTypes: [
+    { id: 'S', name: 'صباحي', start: '08:00', end: '16:00', type: 'morning' },
+    { id: 'E', name: 'مسائي', start: '16:00', end: '00:00', type: 'evening' }
+  ],
+  schedule: {},
+  settings: {
+    password: '1234',
+    companyName: companyName,
+    officeLocation: { lat: 24.7136, lng: 46.6753, radius: 150 }
+  }
+});
+
 // --- API ENDPOINTS ---
 
-// 1. Get/Seed Main App Data
-app.get('/api/main-data', async (req, res) => {
+// Database Connection Status & Health Check
+app.get('/api/db-status', async (req, res) => {
+  const connectionString = process.env.DATABASE_URL;
+  const dbSchema = getDbSchemaName();
+  const host = process.env.SQL_HOST || (connectionString ? 'via connection string' : 'localhost');
+  const dbName = process.env.SQL_DB_NAME || 'postgres';
+
   try {
-    const result = await db.select().from(schema.systemData).where(eq(schema.systemData.key, 'mainData')).limit(1);
+    const client = await pool.connect();
+    try {
+      const dbRes = await client.query('SELECT NOW(), current_schema()');
+      return res.json({
+        status: 'connected',
+        serverTime: dbRes.rows[0]?.now,
+        currentSchema: dbRes.rows[0]?.current_schema,
+        targetSchema: dbSchema,
+        host,
+        database: dbName,
+        message: 'تم الاتصال بقاعدة بيانات PostgreSQL بنجاح'
+      });
+    } finally {
+      client.release();
+    }
+  } catch (err: any) {
+    return res.status(500).json({
+      status: 'disconnected',
+      error: 'فشل الاتصال بقاعدة البيانات PostgreSQL',
+      details: err?.message || String(err),
+      host,
+      database: dbName,
+      targetSchema: dbSchema
+    });
+  }
+});
+
+// 1. Get/Seed Main App Data (Tenant Aware)
+app.get('/api/main-data', async (req, res) => {
+  const companyId = (req.query.companyId as string) || 'default';
+  const key = companyId === 'default' ? 'mainData' : 'mainData_' + companyId;
+
+  try {
+    const result = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
     
     if (result.length === 0) {
-      // Seed initial data
+      // Seed initial data directly into PostgreSQL database
+      let initialVal = defaultMainData;
+      if (companyId !== 'default') {
+        const comp = await db.select().from(schema.companies).where(eq(schema.companies.id, companyId)).limit(1);
+        const compName = comp.length > 0 ? comp[0].name : 'شركة فرعية جديدة';
+        initialVal = createCleanCompanyData(compName);
+      }
+      
       const inserted = await db.insert(schema.systemData).values({
-        key: 'mainData',
-        value: defaultMainData,
+        key,
+        value: initialVal,
       }).returning();
+      
       return res.json(inserted[0].value);
     }
     
     return res.json(result[0].value);
-  } catch (error) {
-    console.error('Error fetching main-data:', error);
-    res.status(500).json({ error: 'Failed to fetch system main data' });
+  } catch (error: any) {
+    console.error('Error fetching main-data from PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'خطأ في الاتصال بقاعدة البيانات PostgreSQL أثناء جلب البيانات الرئيسية',
+      details: error?.message || String(error)
+    });
   }
 });
 
-// 2. Save Main App Data
+// 2. Save Main App Data (Tenant Aware)
 app.post('/api/main-data', async (req, res) => {
+  const payload = req.body;
+  const companyId = (req.query.companyId as string) || 'default';
+  const key = companyId === 'default' ? 'mainData' : 'mainData_' + companyId;
+
   try {
-    const payload = req.body;
-    
-    const result = await db.select().from(schema.systemData).where(eq(schema.systemData.key, 'mainData')).limit(1);
+    const result = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
     
     if (result.length === 0) {
       const inserted = await db.insert(schema.systemData).values({
-        key: 'mainData',
+        key,
         value: payload,
       }).returning();
       return res.json(inserted[0].value);
     } else {
       const updated = await db.update(schema.systemData)
         .set({ value: payload, updatedAt: new Date() })
-        .where(eq(schema.systemData.key, 'mainData'))
+        .where(eq(schema.systemData.key, key))
         .returning();
       return res.json(updated[0].value);
     }
-  } catch (error) {
-    console.error('Error saving main-data:', error);
-    res.status(500).json({ error: 'Failed to save system main data' });
+  } catch (error: any) {
+    console.error('Error saving main-data to PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'خطأ في حفظ البيانات في قاعدة بيانات PostgreSQL',
+      details: error?.message || String(error)
+    });
   }
 });
 
-// 3. Registration Requests
+// 3. Registration Requests (Tenant Aware)
 app.get('/api/registration-requests', async (req, res) => {
+  const companyId = (req.query.companyId as string) || 'default';
   try {
-    const result = await db.select().from(schema.registrationRequests).orderBy(desc(schema.registrationRequests.createdAt));
-    res.json(result);
-  } catch (error) {
-    console.error('Error getting registration requests:', error);
-    res.status(500).json({ error: 'Failed to fetch registration requests' });
+    const result = await db.select()
+      .from(schema.registrationRequests)
+      .where(eq(schema.registrationRequests.companyId, companyId))
+      .orderBy(desc(schema.registrationRequests.createdAt));
+    return res.json(result);
+  } catch (error: any) {
+    console.error('Error getting registration requests from PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'خطأ في جلب طلبات التسجيل من قاعدة البيانات',
+      details: error?.message || String(error)
+    });
   }
 });
 
 app.post('/api/registration-requests', async (req, res) => {
+  const { name, type, username, phone, password, status, companyId } = req.body;
+
   try {
-    const { name, type, username, phone, password, status } = req.body;
     const inserted = await db.insert(schema.registrationRequests).values({
       name,
       type,
@@ -222,64 +303,82 @@ app.post('/api/registration-requests', async (req, res) => {
       phone,
       password,
       status: status || 'pending',
+      companyId: companyId || 'default'
     }).returning();
-    res.json(inserted[0]);
+    return res.json(inserted[0]);
   } catch (error: any) {
-    console.error('Error creating registration request:', error);
-    res.status(500).json({ 
-      error: 'فشل إنشاء طلب التسجيل في قاعدة البيانات: ' + (error.message || String(error)) 
+    console.error('Error creating registration request in PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'فشل إرسال طلب التسجيل في قاعدة البيانات PostgreSQL: ' + (error?.message || String(error))
     });
   }
 });
 
 app.put('/api/registration-requests/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { status } = req.body;
+
   try {
-    const id = parseInt(req.params.id);
-    const { status } = req.body;
     const updated = await db.update(schema.registrationRequests)
       .set({ status })
       .where(eq(schema.registrationRequests.id, id))
       .returning();
-    res.json(updated[0]);
-  } catch (error) {
-    console.error('Error updating registration request:', error);
-    res.status(500).json({ error: 'Failed to update registration request' });
+    return res.json(updated[0]);
+  } catch (error: any) {
+    console.error('Error updating registration request in PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'فشل تحديث حالة طلب التسجيل في قاعدة البيانات',
+      details: error?.message || String(error)
+    });
   }
 });
 
 app.delete('/api/registration-requests/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+
   try {
-    const id = parseInt(req.params.id);
     await db.delete(schema.registrationRequests).where(eq(schema.registrationRequests.id, id));
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error deleting registration request:', error);
-    res.status(500).json({ error: 'Failed to delete registration request' });
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error deleting registration request from PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'فشل حذف طلب التسجيل من قاعدة البيانات',
+      details: error?.message || String(error)
+    });
   }
 });
 
-// 4. Attendance Endpoints
+// 4. Attendance Endpoints (Tenant Aware)
 app.get('/api/attendance', async (req, res) => {
+  const companyId = (req.query.companyId as string) || 'default';
   try {
-    const result = await db.select().from(schema.attendance).orderBy(desc(schema.attendance.createdAt));
-    res.json(result);
-  } catch (error) {
-    console.error('Error getting attendance logs:', error);
-    res.status(500).json({ error: 'Failed to fetch attendance logs' });
+    const result = await db.select()
+      .from(schema.attendance)
+      .where(eq(schema.attendance.companyId, companyId))
+      .orderBy(desc(schema.attendance.createdAt));
+    return res.json(result);
+  } catch (error: any) {
+    console.error('Error getting attendance logs from PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'خطأ في جلب سجلات الحضور والانصراف من قاعدة البيانات',
+      details: error?.message || String(error)
+    });
   }
 });
 
 app.post('/api/attendance', async (req, res) => {
-  try {
-    const {
-      id, empId, empName, dept, date,
-      checkIn, checkInTs, checkOut, checkOutTs, checkInLat, checkInLng,
-      checkIn2, checkInTs2, checkOut2, checkOutTs2, checkInLat2, checkInLng2,
-      status, source, note
-    } = req.body;
+  const {
+    id, empId, empName, dept, date,
+    checkIn, checkInTs, checkOut, checkOutTs, checkInLat, checkInLng,
+    checkIn2, checkInTs2, checkOut2, checkOutTs2, checkInLat2, checkInLng2,
+    status, source, note, companyId
+  } = req.body;
 
+  const activeCompanyId = companyId || 'default';
+
+  try {
     if (id) {
-      // Update existing record by database id
+      // Update existing record in PostgreSQL
       const updated = await db.update(schema.attendance)
         .set({
           empId, empName, dept, date,
@@ -291,119 +390,238 @@ app.post('/api/attendance', async (req, res) => {
         .returning();
       return res.json(updated[0]);
     } else {
-      // Insert new record
+      // Insert new record in PostgreSQL
       const inserted = await db.insert(schema.attendance).values({
         empId, empName, dept: dept || '', date,
         checkIn, checkInTs: checkInTs ? String(checkInTs) : null, checkOut, checkOutTs: checkOutTs ? String(checkOutTs) : null, checkInLat, checkInLng,
         checkIn2, checkInTs2: checkInTs2 ? String(checkInTs2) : null, checkOut2, checkOutTs2: checkOutTs2 ? String(checkOutTs2) : null, checkInLat2, checkInLng2,
-        status: status || 'present', source: source || 'المقر', note: note || ''
+        status: status || 'present', source: source || 'المقر', note: note || '',
+        companyId: activeCompanyId
       }).returning();
       return res.json(inserted[0]);
     }
-  } catch (error) {
-    console.error('Error adding/updating attendance record:', error);
-    res.status(500).json({ error: 'Failed to process attendance record' });
+  } catch (error: any) {
+    console.error('Error registering attendance in PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'فشل تسجيل الحضور والانصراف في قاعدة البيانات PostgreSQL: ' + (error?.message || String(error))
+    });
   }
 });
 
 app.delete('/api/attendance/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+
   try {
-    const id = parseInt(req.params.id);
     await db.delete(schema.attendance).where(eq(schema.attendance.id, id));
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error deleting attendance record:', error);
-    res.status(500).json({ error: 'Failed to delete attendance record' });
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error deleting attendance record from PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'فشل حذف سجل الحضور من قاعدة البيانات',
+      details: error?.message || String(error)
+    });
   }
 });
 
-// 5. Employee Requests Endpoints
+// 5. Employee Requests Endpoints (Tenant Aware)
 app.get('/api/requests', async (req, res) => {
+  const companyId = (req.query.companyId as string) || 'default';
   try {
-    const result = await db.select().from(schema.requests).orderBy(desc(schema.requests.createdAt));
-    res.json(result);
-  } catch (error) {
-    console.error('Error getting requests:', error);
-    res.status(500).json({ error: 'Failed to fetch requests' });
+    const result = await db.select()
+      .from(schema.requests)
+      .where(eq(schema.requests.companyId, companyId))
+      .orderBy(desc(schema.requests.createdAt));
+    return res.json(result);
+  } catch (error: any) {
+    console.error('Error getting requests from PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'خطأ في جلب طلبات الموظفين من قاعدة البيانات',
+      details: error?.message || String(error)
+    });
   }
 });
 
 app.post('/api/requests', async (req, res) => {
-  try {
-    const {
-      empId, empName, dept, date, type, notes, status,
-      swapWithEmpId, swapWithEmpName, targetShift, checkInTime, checkOutTime
-    } = req.body;
+  const {
+    empId, empName, dept, date, type, notes, status,
+    swapWithEmpId, swapWithEmpName, targetShift, checkInTime, checkOutTime, companyId
+  } = req.body;
 
+  try {
     const inserted = await db.insert(schema.requests).values({
       empId, empName, dept: dept || '', date, type, notes: notes || '', status: status || 'pending',
-      swapWithEmpId, swapWithEmpName, targetShift, checkInTime, checkOutTime
+      swapWithEmpId, swapWithEmpName, targetShift, checkInTime, checkOutTime,
+      companyId: companyId || 'default'
     }).returning();
-    res.json(inserted[0]);
-  } catch (error) {
-    console.error('Error creating request:', error);
-    res.status(500).json({ error: 'Failed to create request' });
+    return res.json(inserted[0]);
+  } catch (error: any) {
+    console.error('Error creating request in PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'فشل تقديم الطلب في قاعدة البيانات',
+      details: error?.message || String(error)
+    });
   }
 });
 
 app.put('/api/requests/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { status } = req.body;
+
   try {
-    const id = parseInt(req.params.id);
-    const { status } = req.body;
     const updated = await db.update(schema.requests)
       .set({ status })
       .where(eq(schema.requests.id, id))
       .returning();
-    res.json(updated[0]);
-  } catch (error) {
-    console.error('Error updating request:', error);
-    res.status(500).json({ error: 'Failed to update request' });
+    return res.json(updated[0]);
+  } catch (error: any) {
+    console.error('Error updating request in PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'فشل تحديث حالة الطلب في قاعدة البيانات',
+      details: error?.message || String(error)
+    });
   }
 });
 
-// 6. Admin User Endpoints
+// 6. Admin User Endpoints (Tenant Aware)
 app.get('/api/admins', async (req, res) => {
+  const companyId = (req.query.companyId as string) || 'default';
   try {
-    const result = await db.select().from(schema.admins).orderBy(desc(schema.admins.createdAt));
-    res.json(result);
-  } catch (error) {
-    console.error('Error getting admins:', error);
-    res.status(500).json({ error: 'Failed to fetch admins' });
+    const result = await db.select()
+      .from(schema.admins)
+      .where(eq(schema.admins.companyId, companyId))
+      .orderBy(desc(schema.admins.createdAt));
+    return res.json(result);
+  } catch (error: any) {
+    console.error('Error getting admins from PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'خطأ في جلب بيانات المسؤولين من قاعدة البيانات',
+      details: error?.message || String(error)
+    });
   }
 });
 
 app.post('/api/admins', async (req, res) => {
+  const { id, name, username, password, companyId } = req.body;
+  const activeCompanyId = companyId || 'default';
+
   try {
-    const { id, name, username, password } = req.body;
-    
     if (id) {
       const updated = await db.update(schema.admins)
         .set({ name, username, password })
         .where(eq(schema.admins.id, parseInt(id)))
         .returning();
-      res.json(updated[0]);
+      return res.json(updated[0]);
     } else {
       const inserted = await db.insert(schema.admins).values({
         name,
         username,
         password,
+        companyId: activeCompanyId
       }).returning();
-      res.json(inserted[0]);
+      return res.json(inserted[0]);
     }
-  } catch (error) {
-    console.error('Error creating/updating admin:', error);
-    res.status(500).json({ error: 'Failed to process admin' });
+  } catch (error: any) {
+    console.error('Error creating/updating admin in PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'فشل حفظ بيانات المسؤول في قاعدة البيانات',
+      details: error?.message || String(error)
+    });
   }
 });
 
 app.delete('/api/admins/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+
   try {
-    const id = parseInt(req.params.id);
     await db.delete(schema.admins).where(eq(schema.admins.id, id));
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error deleting admin:', error);
-    res.status(500).json({ error: 'Failed to delete admin' });
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error deleting admin from PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'فشل حذف المسؤول من قاعدة البيانات',
+      details: error?.message || String(error)
+    });
+  }
+});
+
+// 7. Companies / Subscription Management Endpoints
+app.get('/api/companies', async (req, res) => {
+  try {
+    const result = await db.select().from(schema.companies).orderBy(desc(schema.companies.createdAt));
+    return res.json(result);
+  } catch (error: any) {
+    console.error('Error getting companies from PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'خطأ في جلب الشركات من قاعدة البيانات',
+      details: error?.message || String(error)
+    });
+  }
+});
+
+app.post('/api/companies', async (req, res) => {
+  const { id, name, logoUrl, subscriptionStatus, subscriptionExpiresAt, monthlyFee, adminUsername, adminPassword, companyCode } = req.body;
+
+  try {
+    const existing = await db.select().from(schema.companies).where(eq(schema.companies.id, id)).limit(1);
+    
+    let resultCompany;
+    if (existing.length > 0) {
+      const updated = await db.update(schema.companies)
+        .set({
+          name,
+          logoUrl: logoUrl || '',
+          subscriptionStatus: subscriptionStatus || 'active',
+          subscriptionExpiresAt: subscriptionExpiresAt ? new Date(subscriptionExpiresAt) : null,
+          monthlyFee: monthlyFee || '100',
+          adminUsername,
+          adminPassword,
+          companyCode: companyCode || '0',
+        })
+        .where(eq(schema.companies.id, id))
+        .returning();
+      resultCompany = updated[0];
+    } else {
+      const inserted = await db.insert(schema.companies).values({
+        id,
+        name,
+        logoUrl: logoUrl || '',
+        subscriptionStatus: subscriptionStatus || 'active',
+        subscriptionExpiresAt: subscriptionExpiresAt ? new Date(subscriptionExpiresAt) : null,
+        monthlyFee: monthlyFee || '100',
+        adminUsername,
+        adminPassword,
+        companyCode: companyCode || '0',
+      }).returning();
+      resultCompany = inserted[0];
+      
+      const cleanData = createCleanCompanyData(name);
+      await db.insert(schema.systemData).values({
+        key: 'mainData_' + id,
+        value: cleanData,
+      }).catch(() => {});
+    }
+    return res.json(resultCompany);
+  } catch (error: any) {
+    console.error('Error saving company to PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'فشل حفظ بيانات الشركة في قاعدة البيانات: ' + (error?.message || String(error))
+    });
+  }
+});
+
+app.delete('/api/companies/:id', async (req, res) => {
+  const id = req.params.id;
+
+  try {
+    await db.delete(schema.companies).where(eq(schema.companies.id, id));
+    await db.delete(schema.systemData).where(eq(schema.systemData.key, 'mainData_' + id));
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error deleting company from PostgreSQL:', error);
+    return res.status(500).json({
+      error: 'فشل حذف الشركة من قاعدة البيانات',
+      details: error?.message || String(error)
+    });
   }
 });
 
@@ -411,6 +629,9 @@ app.delete('/api/admins/:id', async (req, res) => {
 // --- INTEGRATE VITE DEV SERVER MIDDLEWARE & PRODUCTION STATIC SERVING ---
 
 async function startServer() {
+  // Ensure local PostgreSQL schema and tables are initialized
+  await initializeSchemaAndTables();
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

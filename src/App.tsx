@@ -156,11 +156,46 @@ export default function App() {
     setShowInstallBanner(false);
   };
 
+  const [companiesList, setCompaniesList] = useState<any[]>([]);
+  const [companyId, setCompanyId] = useState<string>(() => {
+    return localStorage.getItem('app_company_id') || 'default';
+  });
+
+  // Keep companyId in sync with localStorage
+  useEffect(() => {
+    localStorage.setItem('app_company_id', companyId);
+  }, [companyId]);
+
+  // If user logs in and belongs to a specific company, sync it
+  useEffect(() => {
+    if (session && session.info && session.info.companyId) {
+      setCompanyId(session.info.companyId);
+    }
+  }, [session]);
+
+  const fetchCompanies = async () => {
+    try {
+      const response = await fetch('/api/companies');
+      if (response.ok) {
+        const data = await response.json();
+        setCompaniesList(data);
+      }
+    } catch (err) {
+      console.error('Error fetching companies list:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchCompanies();
+    const interval = setInterval(fetchCompanies, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     // 1. Fetch mainData from PostgreSQL API
     const fetchMainData = async () => {
       try {
-        const response = await fetch('/api/main-data');
+        const response = await fetch(`/api/main-data?companyId=${companyId}`);
         if (!response.ok) {
           throw new Error(`API Handshake failed: Server returned status ${response.status} (${response.statusText})`);
         }
@@ -173,27 +208,27 @@ export default function App() {
 
         const data = await response.json();
         setAppData({
-          departments: data.departments || defaultDepartments,
-          employees: data.employees || defaultEmployees,
+          departments: data.departments || [],
+          employees: data.employees || [],
           shiftTypes: data.shiftTypes || defaultShiftTypes,
-          schedule: data.schedule || defaultSchedule
+          schedule: data.schedule || {}
         });
         if (data.settings) {
           setAppSettings(data.settings);
         }
-        localStorage.setItem('schedule_mainData', JSON.stringify(data));
+        localStorage.setItem(`schedule_mainData_${companyId}`, JSON.stringify(data));
       } catch (err: any) {
         console.error('[API Error] Failed to fetch main-data from backend:', err.message || err);
-        const cached = localStorage.getItem('schedule_mainData');
+        const cached = localStorage.getItem(`schedule_mainData_${companyId}`);
         if (cached) {
           try {
             console.log('[Cache Fallback] Loading application data from local storage cache.');
             const data = JSON.parse(cached);
             setAppData({
-              departments: data.departments || defaultDepartments,
-              employees: data.employees || defaultEmployees,
+              departments: data.departments || [],
+              employees: data.employees || [],
               shiftTypes: data.shiftTypes || defaultShiftTypes,
-              schedule: data.schedule || defaultSchedule
+              schedule: data.schedule || {}
             });
             if (data.settings) {
               setAppSettings(data.settings);
@@ -210,7 +245,7 @@ export default function App() {
     // 2. Fetch registration requests from PostgreSQL API
     const fetchRegRequests = async () => {
       try {
-        const response = await fetch('/api/registration-requests');
+        const response = await fetch(`/api/registration-requests?companyId=${companyId}`);
         if (!response.ok) {
           throw new Error(`API Handshake failed: Server returned status ${response.status} (${response.statusText})`);
         }
@@ -248,12 +283,12 @@ export default function App() {
       clearInterval(mainDataInterval);
       clearInterval(regRequestsInterval);
     };
-  }, []);
+  }, [companyId]);
 
   const handleUpdateSettings = async (nextSettings: any) => {
     setAppSettings(nextSettings);
     try {
-      await fetch('/api/main-data', {
+      await fetch(`/api/main-data?companyId=${companyId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...appData, settings: nextSettings, updatedAt: Date.now() })
@@ -266,7 +301,7 @@ export default function App() {
   const handleUpdateAppData = async (nextData: any) => {
     setAppData(nextData);
     try {
-      await fetch('/api/main-data', {
+      await fetch(`/api/main-data?companyId=${companyId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...nextData, settings: appSettings, updatedAt: Date.now() })
@@ -395,6 +430,9 @@ export default function App() {
           onAdminLogin={handleAdminLoginSuccess}
           onEmployeeLogin={handleEmployeeLoginSuccess}
           employees={appData.employees}
+          companyId={companyId}
+          setCompanyId={setCompanyId}
+          companiesList={companiesList}
         />
       ) : session.role === 'employee' ? (
         
@@ -408,6 +446,7 @@ export default function App() {
           schedule={appData.schedule}
           onLogout={handleLogout}
           onOpenChangePassword={handleOpenChangePassword}
+          companyId={companyId}
         />
       ) : (
         
@@ -424,6 +463,9 @@ export default function App() {
           onUpdateSettings={handleUpdateSettings}
           onUpdateAppData={handleUpdateAppData}
           registrationRequests={registrationRequests}
+          companyId={companyId}
+          companiesList={companiesList}
+          fetchCompanies={fetchCompanies}
         />
       )}
 

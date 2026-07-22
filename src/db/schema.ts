@@ -1,5 +1,19 @@
 import { pgTable, serial, text, doublePrecision, jsonb, timestamp } from 'drizzle-orm/pg-core';
 
+// 0. Companies / Tenants (for subscription/multi-tenancy)
+export const companies = pgTable('companies', {
+  id: text('id').primaryKey(), // unique company slug/id
+  name: text('name').notNull(),
+  logoUrl: text('logo_url').default(''),
+  subscriptionStatus: text('subscription_status').default('active'), // 'active', 'expired', 'suspended', 'trial'
+  subscriptionExpiresAt: timestamp('subscription_expires_at'),
+  monthlyFee: text('monthly_fee').default('100'),
+  adminUsername: text('admin_username').notNull(),
+  adminPassword: text('admin_password').notNull(),
+  companyCode: text('company_code').default('0'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // 1. System data (to hold departments, employees, shiftTypes, schedule, settings in a key-value style)
 export const systemData = pgTable('system_data', {
   id: serial('id').primaryKey(),
@@ -12,8 +26,9 @@ export const systemData = pgTable('system_data', {
 export const admins = pgTable('admins', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
-  username: text('username').notNull().unique(),
+  username: text('username').notNull(),
   password: text('password').notNull(),
+  companyId: text('company_id').default('default'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -24,6 +39,7 @@ export const attendance = pgTable('attendance', {
   empName: text('emp_name').notNull(),
   dept: text('dept').default(''),
   date: text('date').notNull(),
+  companyId: text('company_id').default('default'),
   
   // Period 1
   checkIn: text('check_in'),
@@ -56,6 +72,7 @@ export const registrationRequests = pgTable('registration_requests', {
   phone: text('phone').notNull(),
   password: text('password').notNull(),
   status: text('status').default('pending'), // 'pending', 'approved', 'rejected'
+  companyId: text('company_id').default('default'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -69,6 +86,7 @@ export const requests = pgTable('requests', {
   type: text('type').notNull(), // 'leave', 'swap', 'shift_change', 'attendance_adjustment'
   notes: text('notes').default(''),
   status: text('status').default('pending'), // 'pending', 'approved', 'rejected'
+  companyId: text('company_id').default('default'),
   
   // Swap requests
   swapWithEmpId: text('swap_with_emp_id'),
