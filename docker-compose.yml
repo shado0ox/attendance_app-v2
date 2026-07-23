@@ -1,0 +1,18 @@
+version: "3.8"
+services:
+  attendance_app:
+    build: .
+    container_name: attendance_app
+    ports:
+      - "3011:3011"
+    env_file:
+      - .env
+    environment:
+      - SQL_HOST=labor_postgres_db
+    networks:
+      - laborai_default
+    restart: unless-stopped
+
+networks:
+  laborai_default:
+    external: true

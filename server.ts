@@ -14,7 +14,7 @@ import crypto from 'crypto';
 const app = express();
 app.use(express.json());
 
-const PORT = 3000;
+const PORT = 3011;
 const isProd = process.env.NODE_ENV === 'production';
 
 // --- AUTH / PASSWORD HELPERS -------------------------------------------------

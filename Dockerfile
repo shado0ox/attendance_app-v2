@@ -25,5 +25,5 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/package.json ./package.json
 
-EXPOSE 3000
+EXPOSE 3011
 CMD ["node", "dist/server.cjs"]
