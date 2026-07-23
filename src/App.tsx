@@ -364,41 +364,30 @@ export default function App() {
           return emp;
         });
         await handleUpdateAppData({ ...appData, employees: nextEmployees });
-        
-        const updatedSession = { ...session, info: { ...session.info, password: newPassword } };
-        setSession(updatedSession);
-        localStorage.setItem('app_session', JSON.stringify(updatedSession));
-        
+
         setChangePwdMsg('✅ تم تحديث كلمة المرور لحسابك بنجاح!');
         setTimeout(() => setChangePwdOpen(false), 2000);
       } else if (session.role === 'admin') {
-        const response = await fetch('/api/admins', {
+        const response = await fetch(`/api/admins?companyId=${companyId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             id: session.info.id,
             name: session.info.name,
             username: session.info.username,
-            password: newPassword
+            password: newPassword,
+            companyId
           })
         });
         if (!response.ok) {
           throw new Error('فشل تحديث كلمة المرور في الخادم');
         }
-        
-        const updatedSession = { ...session, info: { ...session.info, password: newPassword } };
-        setSession(updatedSession);
-        localStorage.setItem('app_session', JSON.stringify(updatedSession));
-        
+
         setChangePwdMsg('✅ تم تحديث كلمة المرور لحسابك الإداري الفرعي بنجاح!');
         setTimeout(() => setChangePwdOpen(false), 2000);
       } else if (session.role === 'superadmin') {
         await handleUpdateSettings({ ...appSettings, password: newPassword });
-        
-        const updatedSession = { ...session, info: { ...session.info, password: newPassword } };
-        setSession(updatedSession);
-        localStorage.setItem('app_session', JSON.stringify(updatedSession));
-        
+
         setChangePwdMsg('✅ تم تحديث كلمة المرور الرئيسية للمدير العام بنجاح!');
         setTimeout(() => setChangePwdOpen(false), 2000);
       } else {
