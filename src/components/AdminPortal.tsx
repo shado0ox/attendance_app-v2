@@ -634,7 +634,7 @@ export default function AdminPortal({
   };
 
   const handleSaveSubAdmin = async () => {
-    if (!admName.trim() || !admUsername.trim() || !admPwd.trim()) {
+    if (!admName.trim() || !admUsername.trim() || (!editingAdmId && !admPwd.trim())) {
       alert('الرجاء إدخال اسم المسؤول، واسم المستخدم، ورمز تسجيل الدخول');
       return;
     }
@@ -642,11 +642,13 @@ export default function AdminPortal({
       name: admName.trim(),
       username: admUsername.trim().toLowerCase(),
       email: admEmail.trim() || `${admUsername.trim().toLowerCase()}@company.com`,
-      password: admPwd.trim(),
       role: 'admin',
       permissions: admPerms,
       companyId: companyId || 'default'
     };
+    if (admPwd.trim()) {
+      adminData.password = admPwd.trim();
+    }
 
     try {
       const payload = editingAdmId 
@@ -2657,7 +2659,7 @@ export default function AdminPortal({
                                 setAdmName(item.name || '');
                                 setAdmUsername(item.username || '');
                                 setAdmEmail(item.email || '');
-                                setAdmPwd(item.password || '');
+                                setAdmPwd('');
                                 setAdmPerms({
                                   canEditSchedule: !!item.permissions?.canEditSchedule,
                                   canManageEmployees: !!item.permissions?.canManageEmployees,
@@ -2758,6 +2760,7 @@ export default function AdminPortal({
                                       email: `${(it.username || it.name.replace(/\s+/g, '_')).toLowerCase()}@company.com`,
                                       password: it.password,
                                       role: 'admin',
+                                      companyId: companyId || 'default',
                                       permissions: {
                                         canEditSchedule: true,
                                         canManageEmployees: true,
@@ -3190,7 +3193,7 @@ export default function AdminPortal({
                   type="password"
                   value={admPwd}
                   onChange={(e) => setAdmPwd(e.target.value)}
-                  placeholder="رمز الدخول الفرعي"
+                  placeholder={editingAdmId ? 'اتركه فارغًا للإبقاء على الرمز الحالي' : 'رمز الدخول الفرعي'}
                   className="px-3.5 py-2.5 text-xs border rounded-lg focus:outline-none"
                 />
               </div>
