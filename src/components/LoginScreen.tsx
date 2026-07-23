@@ -72,91 +72,30 @@ export default function LoginScreen({
       setAdminError('الرجاء إدخال كلمة المرور');
       return;
     }
-    
-    // Validate Company Code
-    const expectedCode = companyId === 'default' 
-      ? '0' 
-      : (companiesList.find(c => c.id === companyId)?.companyCode || '0');
-
-    if (adminCompanyCode.trim() !== expectedCode) {
-      setAdminError('رمز الشركة غير صحيح');
-      return;
-    }
 
     setAdminError('');
     setAdminLoading(true);
 
-    const superPassword = appSettings?.password || '5198';
-
-    // 1. Root General Manager check
-    if (adminUsername.trim().toLowerCase() === 'admin' && adminPassword === superPassword) {
-      try {
-        onAdminLogin({ role: 'superadmin', name: 'المدير العام', companyId: 'default' });
-      } catch (err: any) {
-        setAdminError('حدث خطأ في استعادة الاتصال. يرجى المحاولة لاحقاً.');
-      } finally {
-        setAdminLoading(false);
-      }
-      return;
-    }
-
-    // 2. Custom company master admin check
-    if (companyId !== 'default') {
-      const selectedCompany = companiesList.find(c => c.id === companyId);
-      if (selectedCompany) {
-        // Check if subscription has expired
-        const isExpired = selectedCompany.subscriptionStatus !== 'active' && 
-                          selectedCompany.subscriptionExpiresAt && 
-                          new Date(selectedCompany.subscriptionExpiresAt) < new Date();
-        
-        if (isExpired || selectedCompany.subscriptionStatus === 'suspended') {
-          setAdminError('عذراً، اشتراك هذه الشركة منتهي أو معطل حالياً. يرجى مراجعة الإدارة.');
-          setAdminLoading(false);
-          return;
-        }
-
-        if (selectedCompany.adminUsername && 
-            adminUsername.trim().toLowerCase() === selectedCompany.adminUsername.toLowerCase() && 
-            adminPassword === selectedCompany.adminPassword) {
-          try {
-            onAdminLogin({ role: 'admin', name: `مدير ${selectedCompany.name}`, companyId, isMaster: true });
-          } catch (err) {
-            setAdminError('حدث خطأ أثناء تسجيل الدخول.');
-          } finally {
-            setAdminLoading(false);
-          }
-          return;
-        }
-      }
-    }
-
-    // 3. Try Sub-Admin check in PostgreSQL (scoped to current company)
     try {
-      const response = await fetch(`/api/admins?companyId=${companyId}`);
-      if (!response.ok) {
-        throw new Error('فشل الاتصال بالخادم المساعد');
-      }
-      const adminsList = await response.json();
-      
-      const correctInputLower = adminUsername.trim().toLowerCase();
-      const enteredPassword = adminPassword.trim();
-      
-      const foundAdmin = adminsList.find((adm: any) => {
-        const usernameMatch = adm.username && adm.username.toLowerCase() === correctInputLower;
-        const nameMatch = adm.name && adm.name.toLowerCase() === correctInputLower;
-        const passwordMatch = adm.password === enteredPassword;
-        return (usernameMatch || nameMatch) && passwordMatch;
+      const response = await fetch('/api/auth/admin-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: adminUsername.trim(),
+          password: adminPassword.trim(),
+          companyId,
+          companyCode: adminCompanyCode.trim(),
+        }),
       });
-
-      if (!foundAdmin) {
-        setAdminError('اسم المستخدم أو رمز الدخول غير صحيح');
+      const data = await response.json();
+      if (!response.ok) {
+        setAdminError(data?.error || 'فشل تسجيل الدخول');
         setAdminLoading(false);
         return;
       }
-
-      onAdminLogin({ role: 'admin', name: foundAdmin.name, ...foundAdmin, companyId });
+      onAdminLogin(data);
     } catch (e: any) {
-      setAdminError('فشل تسجيل الدخول: ' + e.message);
+      setAdminError('فشل الاتصال بالخادم: ' + e.message);
     } finally {
       setAdminLoading(false);
     }
@@ -174,27 +113,28 @@ export default function LoginScreen({
     setEmpError('');
     setEmpLoading(true);
 
-    const matchedEmp = employees.find(
-      (e: any) => 
-        (e.username || '').toLowerCase() === empUsername.trim().toLowerCase() ||
-        (e.name || '').toLowerCase() === empUsername.trim().toLowerCase() ||
-        (e.phone || '').trim() === empUsername.trim()
-    );
-
-    if (!matchedEmp) {
-      setEmpError('هذا الموظف غير مسجل في قائمة الموظفين النشطة. تأكد من إدخال اسم المستخدم أو الاسم الصحيح.');
+    try {
+      const response = await fetch('/api/auth/employee-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: empUsername.trim(),
+          password: empPassword.trim(),
+          companyId,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setEmpError(data?.error || 'فشل تسجيل الدخول');
+        setEmpLoading(false);
+        return;
+      }
+      onEmployeeLogin(data);
+    } catch (e: any) {
+      setEmpError('فشل الاتصال بالخادم: ' + e.message);
+    } finally {
       setEmpLoading(false);
-      return;
     }
-
-    // Direct database roster password check (instant / offline-first & admin configured)
-    const targetPassword = (matchedEmp.password || '123456').trim();
-    if (empPassword.trim() === targetPassword) {
-      onEmployeeLogin(matchedEmp);
-    } else {
-      setEmpError('كلمة المرور غير صحيحة لحساب هذا الموظف. (الرمز الافتراضي هو 123456)');
-    }
-    setEmpLoading(false);
   };
 
   // Face Scan Control
