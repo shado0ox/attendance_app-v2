@@ -1,0 +1,29 @@
+# مثال مرجعي فقط — انسخ الجزء اللي يخصك وادمجه في الـ docker-compose الأساسي
+# بتاعك على CasaOS (زي ما عامل مع labor_app_container / happy-home-app).
+# غيّر البورت لو 3160 مستخدم بالفعل عندك.
+
+services:
+  attendance_app:
+    build: .
+    container_name: attendance_app_container
+    restart: unless-stopped
+    ports:
+      - "3160:3000"
+    # host.docker.internal مبيتحلّش لوحده على Linux (بعكس Docker Desktop على
+    # Mac/Windows) — السطر ده بيخليه يشتغل. لو Postgres شغال هو نفسه جوه
+    # Docker على نفس الـ network، الأفضل تستخدم اسم الحاوية بتاعته بدل كده.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - NODE_ENV=production
+      # اختر واحد: إما DATABASE_URL كامل، أو المتغيرات المنفصلة تحت
+      - DATABASE_URL=
+      - SQL_HOST=host.docker.internal   # أو اسم/IP حاوية Postgres بتاعتك
+      - SQL_PORT=5432
+      - SQL_USER=postgres
+      - SQL_PASSWORD=CHANGE_ME
+      - SQL_DB_NAME=attendance_app       # قاعدة البيانات الجديدة المنفصلة
+      - DB_SCHEMA=shift_app
+      - DB_SSL=false
+      - JWT_SECRET=CHANGE_ME_LONG_RANDOM_STRING
+      - APP_URL=https://attendance.xshadox.com
