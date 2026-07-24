@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { User, Shield, UserPlus, LogIn, Loader, Key, Fingerprint, ScanFace, ChevronDown, CheckCircle2, RefreshCw, AlertCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { User, Shield, UserPlus, LogIn, Loader, Fingerprint, ScanFace, ChevronDown, AlertCircle, ShieldCheck } from 'lucide-react';
 
 interface LoginScreenProps {
   appSettings: any;
@@ -11,6 +11,25 @@ interface LoginScreenProps {
   companiesList: any[];
 }
 
+// ─── WebAuthn helpers ───────────────────────────────────────────────────────
+
+function base64urlToUint8Array(base64url: string): Uint8Array {
+  const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
+function arrayBufferToBase64url(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let str = '';
+  for (const b of bytes) str += String.fromCharCode(b);
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+
 export default function LoginScreen({
   appSettings,
   onAdminLogin,
@@ -21,7 +40,7 @@ export default function LoginScreen({
   companiesList
 }: LoginScreenProps) {
   const [activeTab, setActiveTab] = useState<'emp' | 'admin' | 'reg'>('emp');
-  
+
   // Admin login state
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
@@ -35,25 +54,15 @@ export default function LoginScreen({
   const [empError, setEmpError] = useState('');
   const [empLoading, setEmpLoading] = useState(false);
 
-  // Improved Roster Selection
-  const [showRosterDropdown, setShowRosterDropdown] = useState(false);
-  
-  // Biometric & Smart Logins states
+  // Biometric state
   const [empLoginMethod, setEmpLoginMethod] = useState<'password' | 'biometric'>('password');
   const [biometricType, setBiometricType] = useState<'face' | 'fingerprint'>('face');
   const [biometricScanning, setBiometricScanning] = useState(false);
-  const [biometricProgress, setBiometricProgress] = useState(0);
   const [biometricStatus, setBiometricStatus] = useState('');
-  const [biometricSuccess, setBiometricSuccess] = useState(false);
-  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [webAuthnSupported, setWebAuthnSupported] = useState(false);
 
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const progressIntervalRef = useRef<any>(null);
-  const holdIntervalRef = useRef<any>(null);
-
-  // Registration state
+  // Registration state — employees only (admins added via Admin portal)
   const [regName, setRegName] = useState('');
-  const [regType, setRegType] = useState<'employee' | 'admin'>('employee');
   const [regUsername, setRegUsername] = useState('');
   const [regPhone, setRegPhone] = useState('');
   const [regPassword, setRegPassword] = useState('');
@@ -62,20 +71,20 @@ export default function LoginScreen({
   const [regSuccess, setRegSuccess] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
 
+  useEffect(() => {
+    setWebAuthnSupported(
+      typeof window !== 'undefined' &&
+      !!window.PublicKeyCredential &&
+      typeof navigator.credentials?.get === 'function'
+    );
+  }, []);
 
+  // ── Admin Login ────────────────────────────────────────────────────────────
   const handleAdminLogin = async () => {
-    if (!adminUsername.trim()) {
-      setAdminError('الرجاء إدخال اسم المستخدم للمدير');
-      return;
-    }
-    if (!adminPassword.trim()) {
-      setAdminError('الرجاء إدخال كلمة المرور');
-      return;
-    }
-
+    if (!adminUsername.trim()) { setAdminError('الرجاء إدخال اسم المستخدم للمدير'); return; }
+    if (!adminPassword.trim()) { setAdminError('الرجاء إدخال كلمة المرور'); return; }
     setAdminError('');
     setAdminLoading(true);
-
     try {
       const response = await fetch('/api/auth/admin-login', {
         method: 'POST',
@@ -88,11 +97,7 @@ export default function LoginScreen({
         }),
       });
       const data = await response.json();
-      if (!response.ok) {
-        setAdminError(data?.error || 'فشل تسجيل الدخول');
-        setAdminLoading(false);
-        return;
-      }
+      if (!response.ok) { setAdminError(data?.error || 'فشل تسجيل الدخول'); return; }
       onAdminLogin(data);
     } catch (e: any) {
       setAdminError('فشل الاتصال بالخادم: ' + e.message);
@@ -101,34 +106,20 @@ export default function LoginScreen({
     }
   };
 
+  // ── Employee Password Login ────────────────────────────────────────────────
   const handleEmployeeLogin = async () => {
-    if (!empUsername.trim()) {
-      setEmpError('الرجاء اختيار أو إدخال اسم المستخدم أولاً');
-      return;
-    }
-    if (!empPassword) {
-      setEmpError('أدخل كلمة المرور المطلوبة للدخول');
-      return;
-    }
+    if (!empUsername.trim()) { setEmpError('الرجاء اختيار أو إدخال اسم المستخدم أولاً'); return; }
+    if (!empPassword) { setEmpError('أدخل كلمة المرور المطلوبة للدخول'); return; }
     setEmpError('');
     setEmpLoading(true);
-
     try {
       const response = await fetch('/api/auth/employee-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: empUsername.trim(),
-          password: empPassword.trim(),
-          companyId,
-        }),
+        body: JSON.stringify({ username: empUsername.trim(), password: empPassword.trim(), companyId }),
       });
       const data = await response.json();
-      if (!response.ok) {
-        setEmpError(data?.error || 'فشل تسجيل الدخول');
-        setEmpLoading(false);
-        return;
-      }
+      if (!response.ok) { setEmpError(data?.error || 'فشل تسجيل الدخول'); return; }
       onEmployeeLogin(data);
     } catch (e: any) {
       setEmpError('فشل الاتصال بالخادم: ' + e.message);
@@ -137,224 +128,151 @@ export default function LoginScreen({
     }
   };
 
-  // Face Scan Control
-  const startFaceScan = async () => {
+  // ── WebAuthn Biometric Login (Real) ───────────────────────────────────────
+  const handleBiometricLogin = async () => {
     if (!empUsername.trim()) {
-      setEmpError('الرجاء اختيار أو كتابة اسم الموظف أولاً لبدء التحقق بالوجه');
+      setEmpError('الرجاء إدخال اسم المستخدم أولاً للتحقق البيومتري');
       return;
     }
-    
+
     const matchedEmp = employees.find(
-      (e: any) => 
+      (e: any) =>
         (e.username || '').toLowerCase() === empUsername.trim().toLowerCase() ||
-        (e.name || '').toLowerCase() === empUsername.trim().toLowerCase() ||
         (e.phone || '').trim() === empUsername.trim()
     );
 
     if (!matchedEmp) {
-      setEmpError('مستشعر الوجه نشط، ولكن اسم الموظف غير مسجل بالنظام.');
+      setEmpError('اسم الموظف غير مسجل في النظام');
+      return;
+    }
+
+    if (!webAuthnSupported) {
+      setEmpError('جهازك أو متصفحك لا يدعم التحقق البيومتري (WebAuthn). استخدم كلمة المرور بدلاً من ذلك.');
       return;
     }
 
     setEmpError('');
     setBiometricScanning(true);
-    setBiometricProgress(0);
-    setBiometricSuccess(false);
-    setBiometricStatus('📸 جاري تشغيل الكاميرا الآمنة الفورية...');
+    setBiometricStatus('🔐 جاري التواصل مع خادم التحقق...');
 
-    // Try starting camera stream
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 320, height: 320, facingMode: 'user' }
+      // 1. طلب challenge من السيرفر
+      const challengeRes = await fetch('/api/auth/webauthn-challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ empId: matchedEmp.id, companyId }),
       });
-      setCameraStream(stream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(e => console.log('Camera play error:', e));
-      }
-    } catch (err) {
-      console.warn('Camera blocked or unavailable, using high-definition biometric avatar wireframe.', err);
-      setBiometricStatus('⚙️ تعذر فتح الكاميرا (استخدام فحص الملامح البديل)...');
-    }
 
-    let progress = 0;
-    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-    
-    progressIntervalRef.current = setInterval(() => {
-      progress += Math.floor(Math.random() * 8) + 4;
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(progressIntervalRef.current);
-        
-        // Finish scan
-        setTimeout(() => {
-          setBiometricSuccess(true);
-          setBiometricStatus('✅ تم التحقق والمطابقة الحيوية للوجه بنجاح 100%!');
-          
-          // Stop camera stream
-          if (cameraStream) {
-            cameraStream.getTracks().forEach(t => t.stop());
-            setCameraStream(null);
-          }
-
-          // Auto Login
-          setTimeout(() => {
-            setBiometricScanning(false);
-            onEmployeeLogin(matchedEmp);
-          }, 1000);
-        }, 500);
-      }
-
-      setBiometricProgress(progress);
-      
-      // Update statuses based on progress
-      if (progress < 25) {
-        setBiometricStatus('🔍 جاري استشعار الضوء ومسافة الوجه عن المستشعر...');
-      } else if (progress < 50) {
-        setBiometricStatus('⚡ جاري مسح تضاريس الوجه وتحليل 120 نقطة حيوية...');
-      } else if (progress < 75) {
-        setBiometricStatus('🧠 بمقارنة البصمة الرمزية الرقمية مع قاعدة البيانات...');
-      } else if (progress < 95) {
-        setBiometricStatus('🔒 تشفير بروتوكول المصادقة الخضراء البيومترية...');
-      }
-    }, 150);
-  };
-
-  const cancelBiometricScan = () => {
-    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-    if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
-    
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(t => t.stop());
-      setCameraStream(null);
-    }
-    
-    setBiometricScanning(false);
-    setBiometricProgress(0);
-    setBiometricSuccess(false);
-    setBiometricStatus('');
-  };
-
-  // Fingerprint touch simulation
-  const handleFingerprintStart = () => {
-    if (!empUsername.trim()) {
-      setEmpError('الرجاء تحديد الموظف أولاً لبدء التحقق ببصمة الإصبع');
-      return;
-    }
-
-    const matchedEmp = employees.find(
-      (e: any) => 
-        (e.username || '').toLowerCase() === empUsername.trim().toLowerCase() ||
-        (e.name || '').toLowerCase() === empUsername.trim().toLowerCase() ||
-        (e.phone || '').trim() === empUsername.trim()
-    );
-
-    if (!matchedEmp) {
-      setEmpError('مستشعر البصمة جاهز، ولكن اسم الموظف غير مدرج بالنظام.');
-      return;
-    }
-
-    setEmpError('');
-    setBiometricScanning(true);
-    setBiometricProgress(0);
-    setBiometricSuccess(false);
-    setBiometricStatus('👆 ضع إصبعك على المستشعر واضغط باستمرار...');
-
-    let p = 0;
-    if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
-    
-    holdIntervalRef.current = setInterval(() => {
-      p += 5;
-      if (p >= 100) {
-        p = 100;
-        clearInterval(holdIntervalRef.current);
-        setBiometricSuccess(true);
-        setBiometricStatus('✅ تطابق البصمة معيارياً! تفويض الدخول مقبول.');
-
-        setTimeout(() => {
+      if (!challengeRes.ok) {
+        const err = await challengeRes.json().catch(() => ({}));
+        // إذا الموظف لم يسجل بصمته بعد، عرّض رسالة واضحة
+        if (challengeRes.status === 404) {
+          setEmpError('لم يتم تسجيل بصمتك البيومترية بعد. يرجى التواصل مع المدير لتفعيل البصمة على حسابك.');
           setBiometricScanning(false);
-          onEmployeeLogin(matchedEmp);
-        }, 1200);
+          return;
+        }
+        throw new Error(err.error || 'فشل الحصول على رمز التحقق من الخادم');
       }
-      setBiometricProgress(p);
 
-      if (p < 30) {
-        setBiometricStatus('🔍 جاري مسح خطوط البصمة وحساب العمق التدريجي...');
-      } else if (p < 60) {
-        setBiometricStatus('⚡ فحص ميزات التفاصيل الدقيقة وحلقات التلال الحيوية...');
-      } else if (p < 90) {
-        setBiometricStatus('🔒 التحقق من درجة حرارة ونبض ملامسة الإصبع...');
+      const { challenge, credentialIds } = await challengeRes.json();
+
+      setBiometricStatus(
+        biometricType === 'face'
+          ? '📸 جاري تشغيل مستشعر الوجه... انظر للكاميرا'
+          : '👆 ضع إصبعك على مستشعر البصمة'
+      );
+
+      // 2. طلب التحقق من الجهاز (يفتح مستشعر الوجه أو الإصبع الحقيقي)
+      const assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge: base64urlToUint8Array(challenge),
+          allowCredentials: credentialIds.map((id: string) => ({
+            id: base64urlToUint8Array(id),
+            type: 'public-key' as const,
+            transports: ['internal'] as AuthenticatorTransport[],
+          })),
+          userVerification: 'required', // يشترط التحقق البيومتري الفعلي من الجهاز
+          timeout: 60000,
+        },
+      }) as PublicKeyCredential | null;
+
+      if (!assertion) throw new Error('تم إلغاء عملية التحقق');
+
+      setBiometricStatus('✅ تم قراءة البصمة، جاري التحقق مع الخادم...');
+
+      // 3. إرسال نتيجة التحقق للخادم للتأكيد النهائي
+      const response = assertion.response as AuthenticatorAssertionResponse;
+      const verifyRes = await fetch('/api/auth/webauthn-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          empId: matchedEmp.id,
+          companyId,
+          credentialId: arrayBufferToBase64url(assertion.rawId),
+          clientDataJSON: arrayBufferToBase64url(response.clientDataJSON),
+          authenticatorData: arrayBufferToBase64url(response.authenticatorData),
+          signature: arrayBufferToBase64url(response.signature),
+          userHandle: response.userHandle ? arrayBufferToBase64url(response.userHandle) : null,
+        }),
+      });
+
+      if (!verifyRes.ok) {
+        const errData = await verifyRes.json().catch(() => ({}));
+        throw new Error(errData.error || 'فشل التحقق النهائي من الخادم');
       }
-    }, 100);
+
+      const data = await verifyRes.json();
+      setBiometricStatus('🎉 تم التحقق بنجاح! جاري الدخول...');
+      setTimeout(() => {
+        setBiometricScanning(false);
+        onEmployeeLogin(data);
+      }, 800);
+
+    } catch (e: any) {
+      setBiometricScanning(false);
+      setBiometricStatus('');
+      if (e.name === 'NotAllowedError') {
+        setEmpError('❌ تم رفض أو إلغاء عملية التحقق البيومتري. حاول مرة أخرى.');
+      } else if (e.name === 'SecurityError') {
+        setEmpError('❌ خطأ أمني: تأكد من أن التطبيق يعمل على HTTPS.');
+      } else {
+        setEmpError('❌ فشل التحقق البيومتري: ' + e.message);
+      }
+    }
   };
 
-  const handleFingerprintRelease = () => {
-    if (biometricSuccess) return; // ignore if already matched
-    if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
-    setBiometricProgress(0);
-    setBiometricStatus('⚠️ تم قطع الاتصال! يجب الضغط المستمر دون إزالة الإصبع لقراءة البيانات كاملة.');
-  };
-
-  useEffect(() => {
-    return () => {
-      if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-      if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
-    };
-  }, []);
-
-
+  // ── Registration (Employees Only) ─────────────────────────────────────────
   const handleRegister = async () => {
     setRegError('');
     setRegSuccess(false);
 
-    if (!regName.trim()) {
-      setRegError('الرجاء إدخال الاسم الكامل');
-      return;
-    }
-    if (regType === 'employee' && !regUsername.trim()) {
-      setRegError('الرجاء إدخال اسم المستخدم للموظف');
-      return;
-    }
-    if (!regPhone.trim()) {
-      setRegError('الرجاء إدخال رقم الجوال');
-      return;
-    }
-    if (regPassword.length < 6) {
-      setRegError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
-      return;
-    }
-    if (regPassword !== regConfirmPassword) {
-      setRegError('كلمتا المرور غير متطابقتين');
-      return;
-    }
+    if (!regName.trim()) { setRegError('الرجاء إدخال الاسم الكامل'); return; }
+    if (!regUsername.trim()) { setRegError('الرجاء إدخال اسم المستخدم'); return; }
+    if (!regPhone.trim()) { setRegError('الرجاء إدخال رقم الجوال'); return; }
+    if (regPassword.length < 6) { setRegError('كلمة المرور يجب أن تكون 6 أحرف على الأقل'); return; }
+    if (regPassword !== regConfirmPassword) { setRegError('كلمتا المرور غير متطابقتين'); return; }
 
-    if (regType === 'employee') {
-      const exists = employees.some(
-        (e: any) => (e.username || '').toLowerCase() === regUsername.trim().toLowerCase()
-      );
-      if (exists) {
-        setRegError('اسم المستخدم مستخدم مسبقاً');
-        return;
-      }
-    }
+    const exists = employees.some(
+      (e: any) => (e.username || '').toLowerCase() === regUsername.trim().toLowerCase()
+    );
+    if (exists) { setRegError('اسم المستخدم مستخدم مسبقاً'); return; }
 
     setRegLoading(true);
-
     try {
       const payload = {
         name: regName.trim(),
-        type: regType,
-        username: regType === 'employee' ? regUsername.trim().toLowerCase() : '',
+        type: 'employee', // التسجيل العام للموظفين فقط — المديرون يُضافون من لوحة الإدارة
+        username: regUsername.trim().toLowerCase(),
         phone: regPhone.trim(),
         password: regPassword,
         status: 'pending',
-        companyId: companyId || 'default'
+        companyId: companyId || 'default',
       };
-      
+
       const response = await fetch('/api/registration-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -363,11 +281,8 @@ export default function LoginScreen({
       }
 
       setRegSuccess(true);
-      setRegName('');
-      setRegUsername('');
-      setRegPhone('');
-      setRegPassword('');
-      setRegConfirmPassword('');
+      setRegName(''); setRegUsername(''); setRegPhone('');
+      setRegPassword(''); setRegConfirmPassword('');
     } catch (e: any) {
       setRegError('حدث خطأ أثناء إرسال الطلب: ' + e.message);
     } finally {
@@ -382,12 +297,12 @@ export default function LoginScreen({
   return (
     <div id="login-screen" className="flex flex-col items-center justify-center min-h-screen px-4 bg-sky-50 bg-opacity-70">
       <div className="w-full max-w-md p-8 bg-white border border-sky-100 rounded-2xl shadow-xl transition-all">
-        
+
         {/* Workspace selector */}
         {companiesList.length > 0 && (
           <div className="mb-6 p-3.5 bg-slate-50 border border-slate-100 rounded-xl" dir="rtl">
             <label className="block text-[11px] font-extrabold text-slate-500 mb-1.5 text-right flex items-center gap-1.5">
-              <span>🏢 مساحة عمل الشركة / الفرع باشتراك شهري</span>
+              <span>🏢 مساحة عمل الشركة / الفرع</span>
             </label>
             <div className="relative">
               <select
@@ -439,23 +354,15 @@ export default function LoginScreen({
         <div className="flex p-1 mb-6 bg-slate-100 rounded-xl">
           <button
             onClick={() => { setActiveTab('emp'); setEmpError(''); }}
-            className={`flex items-center justify-center gap-2 flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${
-              activeTab === 'emp'
-                ? 'bg-white text-sky-600 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
+            className={`flex items-center justify-center gap-2 flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'emp' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           >
             <User size={14} />
             <span>بوابة الموظف</span>
           </button>
-          
+
           <button
             onClick={() => { setActiveTab('admin'); setAdminError(''); }}
-            className={`flex items-center justify-center gap-2 flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${
-              activeTab === 'admin'
-                ? 'bg-white text-sky-600 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
+            className={`flex items-center justify-center gap-2 flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'admin' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           >
             <Shield size={14} />
             <span>بوابة المدير</span>
@@ -463,26 +370,19 @@ export default function LoginScreen({
 
           <button
             onClick={() => { setActiveTab('reg'); setRegError(''); }}
-            className={`flex items-center justify-center gap-2 flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${
-              activeTab === 'reg'
-                ? 'bg-white text-sky-600 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
+            className={`flex items-center justify-center gap-2 flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'reg' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           >
             <UserPlus size={14} />
             <span>طلب حساب</span>
           </button>
         </div>
 
-        {/* Employee Login Panel */}
+        {/* ── Employee Login Panel ── */}
         {activeTab === 'emp' && (
           <div className="flex flex-col gap-4">
-            
-            {/* Employee Username Input (No auto-fill dropdown for privacy) */}
+
             <div className="flex flex-col gap-1.5 text-right" dir="rtl">
-              <label className="text-xs font-bold text-slate-600 pr-1">
-                اسم المستخدم للموظف
-              </label>
+              <label className="text-xs font-bold text-slate-600 pr-1">اسم المستخدم للموظف</label>
               <input
                 type="text"
                 value={empUsername}
@@ -496,35 +396,27 @@ export default function LoginScreen({
             <div className="flex gap-2 p-1 bg-slate-50 border border-slate-200/65 rounded-lg mt-1 text-xs" dir="rtl">
               <button
                 type="button"
-                onClick={() => { setEmpLoginMethod('password'); cancelBiometricScan(); }}
-                className={`flex-1 py-1.5 rounded font-bold transition-all text-center ${
-                  empLoginMethod === 'password'
-                    ? 'bg-sky-600 text-white shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
+                onClick={() => { setEmpLoginMethod('password'); setBiometricScanning(false); setBiometricStatus(''); setEmpError(''); }}
+                className={`flex-1 py-1.5 rounded font-bold transition-all text-center ${empLoginMethod === 'password' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 رمز الدخول السري
               </button>
               <button
                 type="button"
-                onClick={() => { setEmpLoginMethod('biometric'); setEmpError(''); }}
-                className={`flex-1 py-1.5 rounded font-bold transition-all text-center flex items-center justify-center gap-1.5 ${
-                  empLoginMethod === 'biometric'
-                    ? 'bg-sky-600 text-white shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
+                onClick={() => { setEmpLoginMethod('biometric'); setEmpError(''); setBiometricStatus(''); }}
+                className={`flex-1 py-1.5 rounded font-bold transition-all text-center flex items-center justify-center gap-1.5 ${empLoginMethod === 'biometric' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 <ScanFace size={13} />
-                <span>التحقق بالوجه والبصمة</span>
+                <span>التحقق البيومتري</span>
               </button>
             </div>
 
-            {/* PASSWORD LOGIN FORM */}
+            {/* PASSWORD LOGIN */}
             {empLoginMethod === 'password' && (
               <div className="flex flex-col gap-4 text-right" dir="rtl">
                 <div className="flex flex-col gap-1.5">
                   <div className="flex justify-between items-center pr-1">
-                    <span className="text-[10px] text-slate-400 font-normal">أول دخول للحساب؟ اكتب باسورد بـ 6 خانات لتفعيله</span>
+                    <span className="text-[10px] text-slate-400 font-normal">أول دخول؟ اكتب كلمة مرور من 6 خانات لتفعيل الحساب</span>
                     <label className="text-xs font-bold text-slate-600">كلمة المرور</label>
                   </div>
                   <input
@@ -538,9 +430,7 @@ export default function LoginScreen({
                 </div>
 
                 {empError && (
-                  <div className="p-3 text-xs text-center text-rose-600 bg-rose-50 rounded-lg border border-rose-100">
-                    {empError}
-                  </div>
+                  <div className="p-3 text-xs text-center text-rose-600 bg-rose-50 rounded-lg border border-rose-100">{empError}</div>
                 )}
 
                 <button
@@ -555,186 +445,94 @@ export default function LoginScreen({
               </div>
             )}
 
-            {/* BIOMETRIC SIMULATION INTERACTIVE PANEL */}
+            {/* REAL WEBAUTHN BIOMETRIC LOGIN */}
             {empLoginMethod === 'biometric' && (
-              <div className="flex flex-col gap-4 p-4 border border-sky-100/60 bg-sky-50/20 rounded-xl mt-1 text-right" dir="rtl font-sans">
-                {/* Switch sub-biometric */}
-                <div className="flex bg-slate-200/60 p-0.5 rounded-md text-[10px] w-fit mx-auto self-center">
+              <div className="flex flex-col gap-4 p-4 border border-sky-100/60 bg-sky-50/20 rounded-xl mt-1 text-right" dir="rtl">
+
+                {/* Biometric type selector */}
+                <div className="flex bg-slate-200/60 p-0.5 rounded-md text-[10px] w-fit mx-auto">
                   <button
                     type="button"
-                    onClick={() => { setBiometricType('face'); cancelBiometricScan(); }}
-                    className={`px-3 py-1 rounded font-bold transition-colors ${
-                      biometricType === 'face' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-400 hover:text-slate-700'
-                    }`}
+                    onClick={() => { setBiometricType('face'); setBiometricStatus(''); setEmpError(''); }}
+                    className={`px-3 py-1 rounded font-bold transition-colors ${biometricType === 'face' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-400 hover:text-slate-700'}`}
                   >
                     بصمة الوجه
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setBiometricType('fingerprint'); cancelBiometricScan(); }}
-                    className={`px-3 py-1 rounded font-bold transition-colors ${
-                      biometricType === 'fingerprint' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-400 hover:text-slate-700'
-                    }`}
+                    onClick={() => { setBiometricType('fingerprint'); setBiometricStatus(''); setEmpError(''); }}
+                    className={`px-3 py-1 rounded font-bold transition-colors ${biometricType === 'fingerprint' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-400 hover:text-slate-700'}`}
                   >
                     بصمة الإصبع
                   </button>
                 </div>
 
+                {/* WebAuthn not supported warning */}
+                {!webAuthnSupported && (
+                  <div className="p-3 text-xs text-center text-amber-700 bg-amber-50 rounded-lg border border-amber-100 flex items-center gap-2">
+                    <AlertCircle size={14} className="shrink-0" />
+                    <span>جهازك أو متصفحك لا يدعم التحقق البيومتري. استخدم كلمة المرور بدلاً من ذلك.</span>
+                  </div>
+                )}
+
                 {empError && (
-                  <div className="p-2 text-xs text-center text-rose-600 bg-rose-50 rounded-lg border border-rose-100">
-                    {empError}
+                  <div className="p-2 text-xs text-center text-rose-600 bg-rose-50 rounded-lg border border-rose-100">{empError}</div>
+                )}
+
+                {biometricStatus && !empError && (
+                  <div className="p-2 text-xs text-center text-sky-700 bg-sky-50 rounded-lg border border-sky-100 font-bold">
+                    {biometricStatus}
                   </div>
                 )}
 
-                {/* Sub UI for Face scanning */}
-                {biometricType === 'face' && (
-                  <div className="flex flex-col items-center">
-                    {!biometricScanning ? (
-                      <div className="flex flex-col items-center gap-3 text-center py-4 w-full">
-                        <div className="w-16 h-16 bg-sky-50 text-sky-600 border border-sky-100 rounded-full flex items-center justify-center transition-transform hover:scale-105 shadow-sm">
-                          <ScanFace size={30} className="animate-pulse" />
-                        </div>
-                        <div className="text-xs">
-                          <p className="font-extrabold text-slate-700">بوابة التعرف الذكي للوجه</p>
-                          <p className="text-[10px] text-slate-400 mt-1">اضغط أدناه لبدء فحص الملامح مع الكاميرا ومصادقة الدخول الآمن.</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={startFaceScan}
-                          className="flex items-center gap-1.5 px-6 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg text-xs shadow-md transition-all mt-1"
-                        >
-                          <ScanFace size={14} />
-                          <span>ابدأ مسح بصمة الوجه</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-4 w-full p-2 text-center">
-                        {/* Circular Scanning Viewport */}
-                        <div className="relative w-36 h-36 rounded-full border-4 border-dashed border-sky-400 overflow-hidden bg-slate-900 shadow-inner flex items-center justify-center">
-                          {cameraStream ? (
-                            <video
-                              ref={videoRef}
-                              className="w-full h-full object-cover rounded-full scale-x-[-1]"
-                              playsInline
-                              muted
-                            />
-                          ) : (
-                            <div className="flex flex-col items-center text-slate-400 gap-1 animate-pulse">
-                              <ScanFace size={40} className="text-sky-400 animate-bounce" />
-                              <span className="text-[9px]">أبعاد افتراضية نشطة</span>
-                            </div>
-                          )}
-
-                          {/* Green scanning laser line line */}
-                          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_#34d399] animate-[bounce_2s_infinite] z-20"></div>
-                          
-                          {/* Outer scanning glow rings */}
-                          <div className="absolute inset-0 border border-sky-500/20 rounded-full animate-ping pointer-events-none"></div>
-                        </div>
-
-                        {/* Scanner Status and Progress */}
-                        <div className="w-full max-w-xs flex flex-col gap-1.5 mt-2">
-                          <div className="flex justify-between text-[10px] font-bold text-slate-500">
-                            <span>جاري معالجة القياسات...</span>
-                            <span className="font-mono text-sky-600">{biometricProgress}%</span>
-                          </div>
-                          
-                          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden border">
-                            <div 
-                              className="h-full bg-gradient-to-r from-sky-500 to-emerald-500 transition-all duration-150"
-                              style={{ width: `${biometricProgress}%` }}
-                            ></div>
-                          </div>
-                          
-                          <p className="text-[10px] text-slate-600 font-extrabold mt-1 h-5">{biometricStatus}</p>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={cancelBiometricScan}
-                          className="px-4 py-1 bg-slate-100 hover:bg-slate-200 text-slate-500 text-[10px] font-bold rounded border transition-colors mt-1"
-                        >
-                          إلغاء المسح
-                        </button>
-                      </div>
-                    )}
+                {/* Icon */}
+                <div className="flex flex-col items-center gap-3 text-center py-2">
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center border-2 transition-all ${biometricScanning ? 'border-sky-400 bg-sky-50 animate-pulse' : 'border-sky-100 bg-sky-50'}`}>
+                    {biometricType === 'face'
+                      ? <ScanFace size={30} className={biometricScanning ? 'text-sky-500' : 'text-sky-400'} />
+                      : <Fingerprint size={30} className={biometricScanning ? 'text-sky-500' : 'text-sky-400'} />
+                    }
                   </div>
-                )}
 
-                {/* Sub UI for Fingerprint scanning */}
-                {biometricType === 'fingerprint' && (
-                  <div className="flex flex-col items-center">
-                    <div className="flex flex-col items-center gap-4 text-center py-2 w-full">
-                      <div className="text-xs">
-                        <p className="font-extrabold text-slate-700">بوابة استشعار البصمة الآمنة</p>
-                        <p className="text-[10px] text-slate-400 mt-1">اضغط باستمرار على مستشعر البصمة الذكية أدناه حتى تكتمل المعايرة بنجاح.</p>
-                      </div>
-
-                      {/* Fingerprint Graphic Sensor Pad */}
-                      <button
-                        type="button"
-                        onMouseDown={handleFingerprintStart}
-                        onMouseUp={handleFingerprintRelease}
-                        onMouseLeave={handleFingerprintRelease}
-                        onTouchStart={(e) => { e.preventDefault(); handleFingerprintStart(); }}
-                        onTouchEnd={handleFingerprintRelease}
-                        className="relative w-24 h-24 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col items-center justify-center cursor-pointer select-none overflow-hidden group focus:outline-none"
-                      >
-                        {/* Interactive Ripple and Progress scale */}
-                        <div 
-                          className="absolute bottom-0 left-0 right-0 bg-sky-500/15 transition-all duration-100 pointer-events-none"
-                          style={{ height: `${biometricProgress}%` }}
-                        ></div>
-
-                        {/* Fingeprint Icon */}
-                        <Fingerprint 
-                          size={38} 
-                          className={`transition-colors duration-200 z-10 ${
-                            biometricProgress > 0 
-                              ? 'text-sky-600 scale-105 animate-pulse' 
-                              : 'text-slate-400 group-hover:text-slate-600'
-                          }`} 
-                        />
-                        
-                        <div className="absolute inset-0 border border-sky-400/20 rounded-2xl animate-pulse pointer-events-none"></div>
-                      </button>
-
-                      {/* Info & holding progress */}
-                      <div className="w-full max-w-xs flex flex-col gap-1.5">
-                        <div className="flex justify-between text-[10px] font-bold text-slate-500">
-                          <span>دقة ضغط ملامسة الحساس</span>
-                          <span className="font-mono text-sky-600">{biometricProgress}%</span>
-                        </div>
-                        
-                        <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden border">
-                          <div 
-                            className="h-full bg-sky-50 transition-all duration-100"
-                            style={{ width: `${biometricProgress}%` }}
-                          ></div>
-                        </div>
-
-                        <p className="text-[10px] text-slate-600 font-extrabold mt-1 h-8">{biometricStatus}</p>
-                      </div>
-
-                      {biometricScanning && !biometricSuccess && (
-                        <button
-                          type="button"
-                          onClick={cancelBiometricScan}
-                          className="px-4 py-1 hover:bg-slate-50 text-slate-400 text-[10px] rounded transition-colors"
-                        >
-                          إلغاء التحتوي
-                        </button>
-                      )}
-                    </div>
+                  <div className="text-xs">
+                    <p className="font-extrabold text-slate-700">
+                      {biometricType === 'face' ? 'التحقق ببصمة الوجه (Face ID)' : 'التحقق ببصمة الإصبع (Touch ID)'}
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      يستخدم مستشعر الجهاز الحقيقي — لا يمكن تجاوزه بدون بصمة مسجلة مسبقاً
+                    </p>
                   </div>
-                )}
+
+                  {/* Security badge */}
+                  <div className="flex items-center gap-1.5 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-3 py-1 font-bold">
+                    <ShieldCheck size={11} />
+                    <span>WebAuthn — معيار W3C للأمان البيومتري</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleBiometricLogin}
+                  disabled={biometricScanning || !webAuthnSupported}
+                  className="flex items-center justify-center gap-2 w-full py-3 text-sm font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg shadow-md transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {biometricScanning ? (
+                    <><Loader size={15} className="animate-spin" /><span>جاري التحقق...</span></>
+                  ) : (
+                    <>{biometricType === 'face' ? <ScanFace size={15} /> : <Fingerprint size={15} />}<span>تسجيل الدخول ببصمة {biometricType === 'face' ? 'الوجه' : 'الإصبع'}</span></>
+                  )}
+                </button>
+
+                <p className="text-[9px] text-slate-400 text-center leading-relaxed">
+                  ⚠️ يجب تسجيل البصمة أولاً من إعدادات الحساب داخل النظام. تواصل مع المدير إذا لم يتم التفعيل بعد.
+                </p>
               </div>
             )}
-            
+
           </div>
         )}
 
-        {/* Admin Login Panel */}
+        {/* ── Admin Login Panel ── */}
         {activeTab === 'admin' && (
           <div className="flex flex-col gap-4 text-right" dir="rtl">
             <div className="flex flex-col gap-1.5">
@@ -762,9 +560,7 @@ export default function LoginScreen({
             </div>
 
             {adminError && (
-              <div className="p-3 text-xs text-center text-rose-600 bg-rose-50 rounded-lg border border-rose-100">
-                {adminError}
-              </div>
+              <div className="p-3 text-xs text-center text-rose-600 bg-rose-50 rounded-lg border border-rose-100">{adminError}</div>
             )}
 
             <button
@@ -778,87 +574,58 @@ export default function LoginScreen({
           </div>
         )}
 
-        {/* Register Account Panel */}
+        {/* ── Register Account Panel (Employees Only) ── */}
         {activeTab === 'reg' && (
-          <div className="flex flex-col gap-3.5 max-h-[460px] overflow-y-auto pr-1">
+          <div className="flex flex-col gap-3.5 max-h-[480px] overflow-y-auto pr-1">
+
+            {/* Info banner: employees only */}
+            <div className="p-3 bg-sky-50 border border-sky-100 rounded-xl text-[11px] text-sky-700 font-bold flex items-start gap-2" dir="rtl">
+              <AlertCircle size={14} className="shrink-0 mt-0.5" />
+              <span>التسجيل متاح للموظفين فقط. إضافة المديرين يتم حصرياً من داخل لوحة الإدارة.</span>
+            </div>
+
             <div className="flex flex-col gap-1">
               <label className="text-xs font-bold text-slate-600">الاسم الكامل</label>
-              <input
-                type="text"
-                value={regName}
-                onChange={(e) => setRegName(e.target.value)}
+              <input type="text" value={regName} onChange={(e) => setRegName(e.target.value)}
                 placeholder="أدخل الاسم الكامل"
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none placeholder-slate-300"
-              />
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none placeholder-slate-300" />
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-bold text-slate-600">نوع الحساب</label>
-              <select
-                value={regType}
-                onChange={(e: any) => setRegType(e.target.value)}
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none bg-white"
-              >
-                <option value="employee">موظف</option>
-                <option value="admin">مدير فرعي</option>
-              </select>
+              <label className="text-xs font-bold text-slate-600">اسم المستخدم</label>
+              <input type="text" value={regUsername} onChange={(e) => setRegUsername(e.target.value)}
+                placeholder="مثال: amjad_ahmad"
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none placeholder-slate-300" />
             </div>
-
-            {regType === 'employee' && (
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-slate-600">اسم المستخدم (الموظف)</label>
-                <input
-                  type="text"
-                  value={regUsername}
-                  onChange={(e) => setRegUsername(e.target.value)}
-                  placeholder="مثال: amjad_ahmad"
-                  className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none placeholder-slate-300"
-                />
-              </div>
-            )}
 
             <div className="flex flex-col gap-1">
               <label className="text-xs font-bold text-slate-600">رقم الجوال</label>
-              <input
-                type="tel"
-                value={regPhone}
-                onChange={(e) => setRegPhone(e.target.value)}
+              <input type="tel" value={regPhone} onChange={(e) => setRegPhone(e.target.value)}
                 placeholder="مثال: 966501234567"
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none placeholder-slate-300"
-              />
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none placeholder-slate-300" />
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-bold text-slate-600">كلمة المرور المطلوبة</label>
-              <input
-                type="password"
-                value={regPassword}
-                onChange={(e) => setRegPassword(e.target.value)}
+              <label className="text-xs font-bold text-slate-600">كلمة المرور</label>
+              <input type="password" value={regPassword} onChange={(e) => setRegPassword(e.target.value)}
                 placeholder="6 أحرف على الأقل"
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none placeholder-slate-300"
-              />
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none placeholder-slate-300" />
             </div>
 
             <div className="flex flex-col gap-1">
               <label className="text-xs font-bold text-slate-600">تأكيد كلمة المرور</label>
-              <input
-                type="password"
-                value={regConfirmPassword}
-                onChange={(e) => setRegConfirmPassword(e.target.value)}
+              <input type="password" value={regConfirmPassword} onChange={(e) => setRegConfirmPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none placeholder-slate-300"
-              />
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none placeholder-slate-300" />
             </div>
 
             {regError && (
-              <div className="p-3 text-xs text-center text-rose-600 bg-rose-50 rounded-lg border border-rose-100">
-                {regError}
-              </div>
+              <div className="p-3 text-xs text-center text-rose-600 bg-rose-50 rounded-lg border border-rose-100">{regError}</div>
             )}
 
             {regSuccess && (
               <div className="p-3 text-xs text-center text-emerald-600 bg-emerald-50 rounded-lg border border-emerald-100">
-                🎉 تم إرسال طلب تسجيلك بنجاح! يرجى انتظار موافقة المدير العام لتفعيل الحساب.
+                🎉 تم إرسال طلب تسجيلك بنجاح! يرجى انتظار موافقة المدير لتفعيل الحساب.
               </div>
             )}
 
@@ -868,7 +635,7 @@ export default function LoginScreen({
               className="flex items-center justify-center gap-2 w-full py-2.5 mt-1 text-sm font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg shadow-md transition-all disabled:opacity-75"
             >
               {regLoading ? <Loader size={16} className="animate-spin" /> : <UserPlus size={16} />}
-              <span>طلب تسجيل جديد</span>
+              <span>إرسال طلب تسجيل</span>
             </button>
           </div>
         )}
