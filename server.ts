@@ -11,6 +11,13 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 
+import {
+  generateAuthenticationOptions,
+  generateRegistrationOptions,
+  verifyAuthenticationResponse,
+  verifyRegistrationResponse,
+} from '@simplewebauthn/server';
+
 const app = express();
 app.use(express.json());
 
@@ -112,6 +119,78 @@ function sanitizeMainData(data: any, canSeeSecrets: boolean) {
       : data.employees,
     settings: data.settings ? { ...data.settings, password: undefined } : data.settings,
   };
+}
+
+type StoredWebAuthnCredential = {
+  id: string;
+  publicKey: string;
+  counter: number;
+  transports?: string[];
+  deviceType?: string;
+  backedUp?: boolean;
+};
+
+const WEBAUTHN_RP_NAME = process.env.WEBAUTHN_RP_NAME || 'نظام الدوام';
+const WEBAUTHN_ORIGIN = process.env.WEBAUTHN_ORIGIN || 'http://localhost:3011';
+const WEBAUTHN_RP_ID =
+  process.env.WEBAUTHN_RP_ID || new URL(WEBAUTHN_ORIGIN).hostname;
+
+const webauthnChallenges = new Map<
+  string,
+  { challenge: string; type: 'registration' | 'authentication'; expiresAt: number }
+>();
+
+function getMainDataKey(companyId: string) {
+  return companyId === 'default' ? 'mainData' : `mainData_${companyId}`;
+}
+
+async function getMainDataByCompanyId(companyId: string) {
+  const key = getMainDataKey(companyId);
+  const rows = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
+  return rows[0]?.value as any;
+}
+
+async function saveMainDataByCompanyId(companyId: string, value: any) {
+  const key = getMainDataKey(companyId);
+  const rows = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
+
+  if (!rows.length) {
+    await db.insert(schema.systemData).values({
+      key,
+      value,
+      updatedAt: new Date(),
+    });
+    return;
+  }
+
+  await db.update(schema.systemData)
+    .set({ value, updatedAt: new Date() })
+    .where(eq(schema.systemData.key, key));
+}
+
+function getChallengeMapKey(companyId: string, empId: string | number, type: 'registration' | 'authentication') {
+  return `${type}:${companyId}:${String(empId)}`;
+}
+
+function setStoredChallenge(companyId: string, empId: string | number, type: 'registration' | 'authentication', challenge: string) {
+  webauthnChallenges.set(getChallengeMapKey(companyId, empId, type), {
+    challenge,
+    type,
+    expiresAt: Date.now() + 5 * 60 * 1000,
+  });
+}
+
+function consumeStoredChallenge(companyId: string, empId: string | number, type: 'registration' | 'authentication') {
+  const key = getChallengeMapKey(companyId, empId, type);
+  const record = webauthnChallenges.get(key);
+  if (!record) return null;
+  webauthnChallenges.delete(key);
+  if (record.expiresAt < Date.now()) return null;
+  return record.challenge;
+}
+
+function bufferFromBase64url(value: string) {
+  return Buffer.from(value, 'base64url');
 }
 
 // Debug DB route (development only — leaks connection details, never expose in production)
@@ -403,6 +482,278 @@ app.post('/api/auth/employee-login', async (req, res) => {
   } catch (error: any) {
     console.error('Error during employee login:', error);
     return res.status(500).json({ error: 'حدث خطأ أثناء تسجيل الدخول', details: error?.message || String(error) });
+  }
+});
+
+// --- WEBAUTHN ENDPOINTS ---
+
+app.post('/api/auth/webauthn-register-options', requireAuth(['employee', 'admin', 'superadmin']), async (req, res) => {
+  const { companyId: rawCompanyId, empId } = req.body || {};
+  const companyId = rawCompanyId || 'default';
+  const auth = (req as any).auth as AuthTokenPayload;
+
+  if (!empId) {
+    return res.status(400).json({ error: 'empId مطلوب' });
+  }
+
+  if (auth.role === 'employee' && String(empId) !== String(auth.id)) {
+    return res.status(403).json({ error: 'لا يمكنك تسجيل بصمة لحساب موظف آخر' });
+  }
+
+  try {
+    const mainData = await getMainDataByCompanyId(companyId);
+    const employees = mainData?.employees || [];
+    const employee = employees.find((e: any) => String(e.id) === String(empId));
+
+    if (!employee) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+
+    const excludeCredentials = (employee.webauthnCredentials || []).map((cred: StoredWebAuthnCredential) => ({
+      id: bufferFromBase64url(cred.id),
+      type: 'public-key' as const,
+      transports: (cred.transports || ['internal']) as AuthenticatorTransport[],
+    }));
+
+    const options = await generateRegistrationOptions({
+      rpName: WEBAUTHN_RP_NAME,
+      rpID: WEBAUTHN_RP_ID,
+      userID: String(employee.id),
+      userName: employee.username || employee.phone || String(employee.id),
+      userDisplayName: employee.name || employee.username || 'Employee',
+      attestationType: 'none',
+      excludeCredentials,
+      authenticatorSelection: {
+        authenticatorAttachment: 'platform',
+        residentKey: 'preferred',
+        userVerification: 'required',
+      },
+    });
+
+    setStoredChallenge(companyId, employee.id, 'registration', options.challenge);
+    return res.json(options);
+  } catch (error: any) {
+    console.error('Error generating WebAuthn registration options:', error);
+    return res.status(500).json({ error: 'فشل تجهيز تسجيل البصمة', details: error?.message || String(error) });
+  }
+});
+
+app.post('/api/auth/webauthn-register-verify', requireAuth(['employee', 'admin', 'superadmin']), async (req, res) => {
+  const { companyId: rawCompanyId, empId, credential } = req.body || {};
+  const companyId = rawCompanyId || 'default';
+  const auth = (req as any).auth as AuthTokenPayload;
+
+  if (!empId || !credential) {
+    return res.status(400).json({ error: 'بيانات التسجيل غير مكتملة' });
+  }
+
+  if (auth.role === 'employee' && String(empId) !== String(auth.id)) {
+    return res.status(403).json({ error: 'لا يمكنك تسجيل بصمة لحساب موظف آخر' });
+  }
+
+  try {
+    const expectedChallenge = consumeStoredChallenge(companyId, empId, 'registration');
+    if (!expectedChallenge) {
+      return res.status(400).json({ error: 'انتهت صلاحية challenge أو لم يتم إنشاؤه' });
+    }
+
+    const verification = await verifyRegistrationResponse({
+      response: credential,
+      expectedChallenge,
+      expectedOrigin: WEBAUTHN_ORIGIN,
+      expectedRPID: WEBAUTHN_RP_ID,
+      requireUserVerification: true,
+    });
+
+    if (!verification.verified || !verification.registrationInfo) {
+      return res.status(400).json({ error: 'فشل التحقق من تسجيل البصمة' });
+    }
+
+    const mainData = await getMainDataByCompanyId(companyId);
+    const employees = mainData?.employees || [];
+    const employeeIndex = employees.findIndex((e: any) => String(e.id) === String(empId));
+
+    if (employeeIndex === -1) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+
+    const regInfo: any = verification.registrationInfo;
+    const credentialInfo = regInfo.credential;
+
+    const newCredential: StoredWebAuthnCredential = {
+      id: credentialInfo.id,
+      publicKey: Buffer.from(credentialInfo.publicKey).toString('base64url'),
+      counter: credentialInfo.counter,
+      transports: credential.response?.transports || ['internal'],
+      deviceType: regInfo.credentialDeviceType,
+      backedUp: regInfo.credentialBackedUp,
+    };
+
+    const currentEmployee = employees[employeeIndex];
+    const existingCreds: StoredWebAuthnCredential[] = currentEmployee.webauthnCredentials || [];
+    const withoutSameId = existingCreds.filter((c) => c.id !== newCredential.id);
+
+    employees[employeeIndex] = {
+      ...currentEmployee,
+      webauthnCredentials: [...withoutSameId, newCredential],
+    };
+
+    await saveMainDataByCompanyId(companyId, {
+      ...mainData,
+      employees,
+    });
+
+    return res.json({ verified: true, message: 'تم تسجيل البصمة بنجاح' });
+  } catch (error: any) {
+    console.error('Error verifying WebAuthn registration:', error);
+    return res.status(500).json({ error: 'فشل تأكيد تسجيل البصمة', details: error?.message || String(error) });
+  }
+});
+
+app.post('/api/auth/webauthn-challenge', async (req, res) => {
+  const { empId, companyId: rawCompanyId } = req.body || {};
+  const companyId = rawCompanyId || 'default';
+
+  if (!empId) {
+    return res.status(400).json({ error: 'empId مطلوب' });
+  }
+
+  try {
+    const mainData = await getMainDataByCompanyId(companyId);
+    const employees = mainData?.employees || [];
+    const employee = employees.find((e: any) => String(e.id) === String(empId));
+
+    if (!employee) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+
+    const creds: StoredWebAuthnCredential[] = employee.webauthnCredentials || [];
+    if (!creds.length) {
+      return res.status(404).json({ error: 'لم يتم تسجيل بصمة بيومترية لهذا الموظف بعد' });
+    }
+
+    const options = await generateAuthenticationOptions({
+      rpID: WEBAUTHN_RP_ID,
+      userVerification: 'required',
+      allowCredentials: creds.map((cred) => ({
+        id: bufferFromBase64url(cred.id),
+        type: 'public-key' as const,
+        transports: (cred.transports || ['internal']) as AuthenticatorTransport[],
+      })),
+    });
+
+    setStoredChallenge(companyId, employee.id, 'authentication', options.challenge);
+
+    return res.json({
+      challenge: options.challenge,
+      credentialIds: creds.map((c) => c.id),
+    });
+  } catch (error: any) {
+    console.error('Error generating WebAuthn auth challenge:', error);
+    return res.status(500).json({ error: 'فشل تجهيز التحقق البيومتري', details: error?.message || String(error) });
+  }
+});
+
+app.post('/api/auth/webauthn-verify', async (req, res) => {
+  const {
+    empId,
+    companyId: rawCompanyId,
+    credentialId,
+    clientDataJSON,
+    authenticatorData,
+    signature,
+    userHandle,
+  } = req.body || {};
+
+  const companyId = rawCompanyId || 'default';
+
+  if (!empId || !credentialId || !clientDataJSON || !authenticatorData || !signature) {
+    return res.status(400).json({ error: 'بيانات التحقق البيومتري غير مكتملة' });
+  }
+
+  try {
+    const expectedChallenge = consumeStoredChallenge(companyId, empId, 'authentication');
+    if (!expectedChallenge) {
+      return res.status(400).json({ error: 'انتهت صلاحية challenge أو لم يتم إنشاؤه' });
+    }
+
+    const mainData = await getMainDataByCompanyId(companyId);
+    const employees = mainData?.employees || [];
+    const employee = employees.find((e: any) => String(e.id) === String(empId));
+
+    if (!employee) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+
+    const creds: StoredWebAuthnCredential[] = employee.webauthnCredentials || [];
+    const storedCred = creds.find((c) => c.id === credentialId);
+
+    if (!storedCred) {
+      return res.status(404).json({ error: 'بيانات البصمة المسجلة غير موجودة لهذا الحساب' });
+    }
+
+    const verification = await verifyAuthenticationResponse({
+      response: {
+        id: credentialId,
+        rawId: credentialId,
+        type: 'public-key',
+        response: {
+          clientDataJSON,
+          authenticatorData,
+          signature,
+          userHandle,
+        },
+        clientExtensionResults: {},
+      },
+      expectedChallenge,
+      expectedOrigin: WEBAUTHN_ORIGIN,
+      expectedRPID: WEBAUTHN_RP_ID,
+      requireUserVerification: true,
+      authenticator: {
+        credentialID: bufferFromBase64url(storedCred.id),
+        credentialPublicKey: bufferFromBase64url(storedCred.publicKey),
+        counter: storedCred.counter,
+        transports: (storedCred.transports || ['internal']) as AuthenticatorTransport[],
+      },
+    });
+
+    if (!verification.verified) {
+      return res.status(401).json({ error: 'فشل التحقق البيومتري' });
+    }
+
+    storedCred.counter = verification.authenticationInfo.newCounter;
+
+    const updatedEmployees = employees.map((e: any) => {
+      if (String(e.id) !== String(empId)) return e;
+      return {
+        ...e,
+        webauthnCredentials: creds,
+      };
+    });
+
+    await saveMainDataByCompanyId(companyId, {
+      ...mainData,
+      employees: updatedEmployees,
+    });
+
+    const { password: _pw, ...safeEmp } = employee;
+    const token = signToken({
+      role: 'employee',
+      companyId,
+      id: employee.id,
+      name: employee.name,
+      username: employee.username,
+    });
+
+    return res.json({
+      token,
+      ...safeEmp,
+      companyId,
+      biometricVerified: true,
+    });
+  } catch (error: any) {
+    console.error('Error verifying WebAuthn authentication:', error);
+    return res.status(500).json({ error: 'فشل التحقق النهائي من البصمة', details: error?.message || String(error) });
   }
 });
 
