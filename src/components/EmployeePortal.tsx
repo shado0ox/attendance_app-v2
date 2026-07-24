@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle } from 'lucide-react';
-
+import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle, Fingerprint, ScanFace, ShieldCheck } from 'lucide-react';
 interface EmployeePortalProps {
   employee: any;
   appSettings: any;
@@ -103,6 +102,22 @@ export default function EmployeePortal({
   const [notificationPermissionState, setNotificationPermissionState] = useState<string>(() => {
     return 'Notification' in window ? Notification.permission : 'unsupported';
   });
+
+    const [biometricType, setBiometricType] = useState<'face' | 'fingerprint'>('face');
+  const [biometricSupported, setBiometricSupported] = useState(false);
+  const [biometricLoading, setBiometricLoading] = useState(false);
+  const [biometricMessage, setBiometricMessage] = useState('');
+  const [hasBiometricCredential, setHasBiometricCredential] = useState<boolean>(() => {
+    return localStorage.getItem(`biometric_enabled_${companyId}_${employee.id}`) === 'true';
+  });
+
+  useEffect(() => {
+    const supported =
+      typeof window !== 'undefined' &&
+      !!window.PublicKeyCredential &&
+      typeof navigator.credentials?.create === 'function';
+    setBiometricSupported(supported);
+  }, []);
 
   const stateRef = useRef({
     attendanceStatus,
@@ -352,7 +367,117 @@ export default function EmployeePortal({
       );
     }
   };
+  const base64urlToUint8Array = (base64url: string) => {
+    const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    const arr = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return arr;
+  };
 
+  const arrayBufferToBase64url = (buffer: ArrayBuffer) => {
+    const bytes = new Uint8Array(buffer);
+    let str = '';
+    for (const b of bytes) str += String.fromCharCode(b);
+    return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  };
+
+  const startBiometricEnrollment = async () => {
+    if (!biometricSupported) {
+      setBiometricMessage('❌ هذا الجهاز أو المتصفح لا يدعم تسجيل البصمة البيومترية.');
+      return;
+    }
+
+    setBiometricLoading(true);
+    setBiometricMessage('🔐 جاري تجهيز تسجيل البصمة...');
+
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) throw new Error('يجب تسجيل الدخول أولاً');
+
+      const optionsRes = await fetch('/api/auth/webauthn-register-options', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ empId: employee.id, companyId })
+      });
+
+      const optionsData = await optionsRes.json().catch(() => ({}));
+      if (!optionsRes.ok) throw new Error(optionsData.error || 'فشل تجهيز طلب تسجيل البصمة');
+
+      setBiometricMessage(
+        biometricType === 'face'
+          ? '📸 انظر إلى الكاميرا لإكمال تسجيل بصمة الوجه...'
+          : '👆 ضع إصبعك على المستشعر لإكمال تسجيل البصمة...'
+      );
+
+      const credential = (await navigator.credentials.create({
+        publicKey: {
+          ...optionsData,
+          challenge: base64urlToUint8Array(optionsData.challenge),
+          user: {
+            ...optionsData.user,
+            id: base64urlToUint8Array(optionsData.user.id)
+          },
+          excludeCredentials: (optionsData.excludeCredentials || []).map((cred: any) => ({
+            ...cred,
+            id: base64urlToUint8Array(cred.id)
+          }))
+        }
+      })) as PublicKeyCredential | null;
+
+      if (!credential) throw new Error('تم إلغاء عملية تسجيل البصمة');
+
+      const response = credential.response as AuthenticatorAttestationResponse;
+
+      const verifyRes = await fetch('/api/auth/webauthn-register-verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          empId: employee.id,
+          companyId,
+          credential: {
+            id: credential.id,
+            rawId: arrayBufferToBase64url(credential.rawId),
+            type: credential.type,
+            response: {
+              clientDataJSON: arrayBufferToBase64url(response.clientDataJSON),
+              attestationObject: arrayBufferToBase64url(response.attestationObject),
+              transports:
+                typeof response.getTransports === 'function' ? response.getTransports() : ['internal']
+            },
+            clientExtensionResults: credential.getClientExtensionResults?.() || {}
+          }
+        })
+      });
+
+      const verifyData = await verifyRes.json().catch(() => ({}));
+      if (!verifyRes.ok) throw new Error(verifyData.error || 'فشل تأكيد تسجيل البصمة');
+
+      localStorage.setItem(`biometric_enabled_${companyId}_${employee.id}`, 'true');
+      setHasBiometricCredential(true);
+      setBiometricMessage('✅ تم تسجيل البصمة البيومترية بنجاح. يمكنك الآن استخدامها عند تسجيل الدخول.');
+    } catch (e: any) {
+      if (e.name === 'NotAllowedError') {
+        setBiometricMessage('❌ تم إلغاء أو رفض عملية تسجيل البصمة.');
+      } else if (e.name === 'InvalidStateError') {
+        setBiometricMessage('ℹ️ هذه البصمة مسجلة بالفعل على هذا الجهاز.');
+      } else if (e.name === 'SecurityError') {
+        setBiometricMessage('❌ يجب تشغيل التطبيق على HTTPS أو localhost لتسجيل البصمة.');
+      } else {
+        setBiometricMessage('❌ ' + (e.message || 'فشل تسجيل البصمة'));
+      }
+    } finally {
+      setBiometricLoading(false);
+    }
+  };
+  
+  
   // Background interval check worker (runs every 1 minute)
   useEffect(() => {
     const intervalId = setInterval(async () => {
@@ -1115,6 +1240,91 @@ export default function EmployeePortal({
             </div>
           </div>
         )}
+
+                {/* Biometric Enrollment Card */}
+        <div className="p-4 bg-white border border-sky-100 rounded-2xl shadow-sm" dir="rtl">
+          <div className="flex items-start justify-between gap-3">
+            <div className="text-right">
+              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                <ShieldCheck size={16} className="text-sky-600" />
+                <span>تفعيل البصمة البيومترية</span>
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-1 leading-5">
+                فعّل بصمة الوجه أو الإصبع على جهازك لاستخدامها لاحقاً في صفحة تسجيل الدخول.
+              </p>
+            </div>
+            <div
+              className={`text-[10px] px-2.5 py-1 rounded-full font-bold ${
+                hasBiometricCredential
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                  : 'bg-amber-50 text-amber-700 border border-amber-100'
+              }`}
+            >
+              {hasBiometricCredential ? 'مفعلة' : 'غير مفعلة'}
+            </div>
+          </div>
+
+          <div className="flex bg-slate-100 p-1 rounded-lg mt-4 w-fit">
+            <button
+              type="button"
+              onClick={() => setBiometricType('face')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
+                biometricType === 'face' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500'
+              }`}
+            >
+              <span className="flex items-center gap-1.5">
+                <ScanFace size={13} />
+                بصمة الوجه
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setBiometricType('fingerprint')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
+                biometricType === 'fingerprint' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500'
+              }`}
+            >
+              <span className="flex items-center gap-1.5">
+                <Fingerprint size={13} />
+                بصمة الإصبع
+              </span>
+            </button>
+          </div>
+
+          {!biometricSupported && (
+            <div className="mt-3 p-3 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl">
+              هذا الجهاز أو المتصفح لا يدعم WebAuthn. جرّب Safari على iPhone أو Chrome على Android.
+            </div>
+          )}
+
+          {biometricMessage && (
+            <div className="mt-3 p-3 text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-xl leading-5">
+              {biometricMessage}
+            </div>
+          )}
+
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={startBiometricEnrollment}
+              disabled={biometricLoading || !biometricSupported}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-xl shadow-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {biometricLoading ? (
+                <>
+                  <Loader size={14} className="animate-spin" />
+                  <span>جاري التفعيل...</span>
+                </>
+              ) : (
+                <>
+                  {biometricType === 'face' ? <ScanFace size={14} /> : <Fingerprint size={14} />}
+                  <span>{hasBiometricCredential ? 'إعادة تسجيل البصمة' : 'تفعيل البصمة الآن'}</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
         
         {/* Month Selector */}
         <div className="flex items-center justify-between px-4 py-3 bg-white border border-sky-100 rounded-2xl shadow-sm">
