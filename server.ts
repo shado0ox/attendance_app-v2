@@ -693,28 +693,28 @@ app.post('/api/auth/webauthn-verify', async (req, res) => {
     }
 
     const verification = await verifyAuthenticationResponse({
-      response: {
-        id: credentialId,
-        rawId: credentialId,
-        type: 'public-key',
-        response: {
-          clientDataJSON,
-          authenticatorData,
-          signature,
-          userHandle,
-        },
-        clientExtensionResults: {},
-      },
-      expectedChallenge,
-      expectedOrigin: WEBAUTHN_ORIGIN,
-      expectedRPID: WEBAUTHN_RP_ID,
-      requireUserVerification: true,
-      authenticator: {
-        credentialID: bufferFromBase64url(storedCred.id),
-        credentialPublicKey: bufferFromBase64url(storedCred.publicKey),
-        counter: storedCred.counter,
-        transports: (storedCred.transports || ['internal']) as AuthenticatorTransport[],
-      },
+     response: {
+     id: credentialId,
+     rawId: credentialId,
+     type: 'public-key',
+     response: {
+      clientDataJSON,
+      authenticatorData,
+      signature,
+      userHandle,
+     },
+     clientExtensionResults: {},
+     },
+     expectedChallenge,
+     expectedOrigin: WEBAUTHN_ORIGIN,
+     expectedRPID: WEBAUTHN_RP_ID,
+     requireUserVerification: true,
+     credential: {
+     id: storedCred.id,
+     publicKey: bufferFromBase64url(storedCred.publicKey),
+     counter: storedCred.counter,
+     transports: (storedCred.transports || ['internal']) as AuthenticatorTransport[],
+     },
     });
 
     if (!verification.verified) {
