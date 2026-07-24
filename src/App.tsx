@@ -263,13 +263,17 @@ export default function App() {
       }
     };
 
-    // Initial fetches
+        // Initial fetches
     fetchMainData();
-    fetchRegRequests();
 
     // Set up polling intervals to maintain real-time sync
     const mainDataInterval = setInterval(fetchMainData, 5000);
-    const regRequestsInterval = setInterval(fetchRegRequests, 5000);
+
+    let regRequestsInterval: ReturnType<typeof setInterval> | undefined;
+    if (session.role === 'admin' || session.role === 'superadmin') {
+      fetchRegRequests();
+      regRequestsInterval = setInterval(fetchRegRequests, 5000);
+    }
 
     // 3. Keep local sessions on reload
     const storedSession = localStorage.getItem('app_session');
@@ -281,9 +285,9 @@ export default function App() {
 
     return () => {
       clearInterval(mainDataInterval);
-      clearInterval(regRequestsInterval);
+      if (regRequestsInterval) clearInterval(regRequestsInterval);
     };
-  }, [companyId]);
+  }, [companyId, session.role]);
 
   const handleUpdateSettings = async (nextSettings: any) => {
     setAppSettings(nextSettings);
