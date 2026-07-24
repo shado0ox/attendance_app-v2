@@ -392,8 +392,8 @@ export default function EmployeePortal({
     setBiometricMessage('🔐 جاري تجهيز تسجيل البصمة...');
 
     try {
-      const token = localStorage.getItem('authToken');
-      if (!token) throw new Error('يجب تسجيل الدخول أولاً');
+      const token = employee?.token;
+        if (!token) throw new Error('يجب تسجيل الدخول أولاً');
 
       const optionsRes = await fetch('/api/auth/webauthn-register-options', {
         method: 'POST',
