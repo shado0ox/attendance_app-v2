@@ -9,9 +9,9 @@
     "start": "NODE_ENV=production node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
-
   },
   "dependencies": {
+    "@simplewebauthn/server": "^13.3.2",
     "@tailwindcss/vite": "^4.1.14",
     "@types/pg": "^8.20.0",
     "@vitejs/plugin-react": "^5.0.4",
