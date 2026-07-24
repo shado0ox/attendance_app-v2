@@ -101,3 +101,17 @@ export const requests = pgTable('requests', {
   
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+// 6. WebAuthn Biometric Credentials
+export const webauthnCredentials = pgTable('webauthn_credentials', {
+  id: serial('id').primaryKey(),
+  empId: text('emp_id').notNull(),
+  companyId: text('company_id').default('default'),
+  credentialId: text('credential_id').notNull().unique(),
+  publicKey: text('public_key').notNull(),
+  counter: text('counter').default('0'),
+  deviceType: text('device_type').default(''),
+  backedUp: text('backed_up').default('false'),
+  transports: text('transports').default(''),
+  createdAt: timestamp('created_at').defaultNow(),
+});
