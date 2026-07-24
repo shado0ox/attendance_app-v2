@@ -518,7 +518,7 @@ app.post('/api/auth/webauthn-register-options', requireAuth(['employee', 'admin'
     const options = await generateRegistrationOptions({
       rpName: WEBAUTHN_RP_NAME,
       rpID: WEBAUTHN_RP_ID,
-      userID: String(employee.id),
+      userID: new Uint8Array(Buffer.from(String(employee.id))),
       userName: employee.username || employee.phone || String(employee.id),
       userDisplayName: employee.name || employee.username || 'Employee',
       attestationType: 'none',
