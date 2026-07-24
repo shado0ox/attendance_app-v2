@@ -509,11 +509,11 @@ app.post('/api/auth/webauthn-register-options', requireAuth(['employee', 'admin'
       return res.status(404).json({ error: 'الموظف غير موجود' });
     }
 
-    const excludeCredentials = (employee.webauthnCredentials || []).map((cred: StoredWebAuthnCredential) => ({
-      id: bufferFromBase64url(cred.id),
-      type: 'public-key' as const,
-      transports: (cred.transports || ['internal']) as AuthenticatorTransport[],
-    }));
+    const excludeCredentials = employee.webauthnCredentials?.map((cred: StoredWebAuthnCredential) => ({
+     id: cred.id,
+     type: 'public-key' as const,
+     transports: (cred.transports || ['internal']) as AuthenticatorTransport[],
+   })) || [];
 
     const options = await generateRegistrationOptions({
       rpName: WEBAUTHN_RP_NAME,
@@ -636,11 +636,11 @@ app.post('/api/auth/webauthn-challenge', async (req, res) => {
       rpID: WEBAUTHN_RP_ID,
       userVerification: 'required',
       allowCredentials: creds.map((cred) => ({
-        id: bufferFromBase64url(cred.id),
-        type: 'public-key' as const,
-        transports: (cred.transports || ['internal']) as AuthenticatorTransport[],
+      id: cred.id,
+      type: 'public-key' as const,
+      transports: (cred.transports || ['internal']) as AuthenticatorTransport[],
       })),
-    });
+   });
 
     setStoredChallenge(companyId, employee.id, 'authentication', options.challenge);
 
