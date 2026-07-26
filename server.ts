@@ -998,14 +998,37 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
           return res.status(403).json({ error: 'لا يمكنك تعديل سجل حضور موظف آخر' });
         }
       }
-      // Update existing record in PostgreSQL
+      // Update existing record in PostgreSQL.
+      // IMPORTANT: only touch fields that were actually sent in this request.
+      // A checkout ping only sends {id, checkOut, checkOutTs, ...} — if we blindly
+      // set every column from the destructured body, the fields that weren't sent
+      // (checkIn, checkInTs, etc.) come back as `undefined`, and the old
+      // `checkInTs ? String(checkInTs) : null` ternary would turn that into an
+      // explicit NULL, wiping the check-in timestamp that had been saved moments
+      // earlier — which is exactly why "duration" next to the times went blank.
+      const updateData: Record<string, any> = {};
+      if (empId !== undefined) updateData.empId = empId;
+      if (empName !== undefined) updateData.empName = empName;
+      if (dept !== undefined) updateData.dept = dept;
+      if (date !== undefined) updateData.date = date;
+      if (checkIn !== undefined) updateData.checkIn = checkIn;
+      if (checkInTs !== undefined) updateData.checkInTs = checkInTs ? String(checkInTs) : null;
+      if (checkOut !== undefined) updateData.checkOut = checkOut;
+      if (checkOutTs !== undefined) updateData.checkOutTs = checkOutTs ? String(checkOutTs) : null;
+      if (checkInLat !== undefined) updateData.checkInLat = checkInLat;
+      if (checkInLng !== undefined) updateData.checkInLng = checkInLng;
+      if (checkIn2 !== undefined) updateData.checkIn2 = checkIn2;
+      if (checkInTs2 !== undefined) updateData.checkInTs2 = checkInTs2 ? String(checkInTs2) : null;
+      if (checkOut2 !== undefined) updateData.checkOut2 = checkOut2;
+      if (checkOutTs2 !== undefined) updateData.checkOutTs2 = checkOutTs2 ? String(checkOutTs2) : null;
+      if (checkInLat2 !== undefined) updateData.checkInLat2 = checkInLat2;
+      if (checkInLng2 !== undefined) updateData.checkInLng2 = checkInLng2;
+      if (status !== undefined) updateData.status = status;
+      if (source !== undefined) updateData.source = source;
+      if (note !== undefined) updateData.note = note;
+
       const updated = await db.update(schema.attendance)
-        .set({
-          empId, empName, dept, date,
-          checkIn, checkInTs: checkInTs ? String(checkInTs) : null, checkOut, checkOutTs: checkOutTs ? String(checkOutTs) : null, checkInLat, checkInLng,
-          checkIn2, checkInTs2: checkInTs2 ? String(checkInTs2) : null, checkOut2, checkOutTs2: checkOutTs2 ? String(checkOutTs2) : null, checkInLat2, checkInLng2,
-          status, source, note
-        })
+        .set(updateData)
         .where(eq(schema.attendance.id, parseInt(id)))
         .returning();
       return res.json(updated[0]);

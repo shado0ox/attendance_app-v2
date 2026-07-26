@@ -57,9 +57,13 @@ export default function AttendanceView({
     attendanceRecords.forEach((r) => {
       const deptObj = departments.find((d) => d.id === r.dept);
       const fSource = r.source || (r.note?.includes('الإدارة') || r.note?.includes('الادارة') ? 'الإدارة' : 'المقر');
-      csv += `${r.date},${r.empName},${deptObj ? deptObj.name : r.dept},${r.checkIn},${r.checkOut || 'لم يسجل'},${
-        r.checkOutTs && r.checkInTs ? Math.round((r.checkOutTs - r.checkInTs) / 60000) + ' د' : ''
-      },${fSource}\n`;
+      let durationMins = '';
+      if (r.checkInTs && r.checkOutTs) {
+        let diffMs = Number(r.checkOutTs) - Number(r.checkInTs);
+        if (r.checkInTs2 && r.checkOutTs2) diffMs += Number(r.checkOutTs2) - Number(r.checkInTs2);
+        durationMins = Math.round(diffMs / 60000) + ' د';
+      }
+      csv += `${r.date},${r.empName},${deptObj ? deptObj.name : r.dept},${r.checkIn},${r.checkOut || 'لم يسجل'},${durationMins},${fSource}\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const link = document.createElement('a');
@@ -224,7 +228,11 @@ export default function AttendanceView({
 
                 let duration = '-';
                 if (rec.checkInTs && rec.checkOutTs) {
-                  const diffMins = Math.round((rec.checkOutTs - rec.checkInTs) / 60000);
+                  let diffMs = Number(rec.checkOutTs) - Number(rec.checkInTs);
+                  if (rec.checkInTs2 && rec.checkOutTs2) {
+                    diffMs += Number(rec.checkOutTs2) - Number(rec.checkInTs2);
+                  }
+                  const diffMins = Math.round(diffMs / 60000);
                   duration = `${Math.floor(diffMins / 60)}ساعة ${diffMins % 60}د`;
                 }
 
