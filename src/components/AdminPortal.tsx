@@ -11,6 +11,14 @@ import { jsPDF } from 'jspdf';
 import AdminSidebar from './AdminSidebar';
 import DashboardView from '../pages/admin/DashboardView';
 import AttendanceView from '../pages/admin/AttendanceView';
+import ScheduleView from '../pages/admin/ScheduleView';
+import AlertsView from '../pages/admin/AlertsView';
+import EmployeesView from '../pages/admin/EmployeesView';
+import DepartmentsView from '../pages/admin/DepartmentsView';
+import RequestsView from '../pages/admin/RequestsView';
+import ShiftTypesView from '../pages/admin/ShiftTypesView';
+import SettingsView from '../pages/admin/SettingsView';
+import CompaniesView from '../pages/admin/CompaniesView';
 
 interface AdminPortalProps {
   admin: any;
@@ -1053,7 +1061,7 @@ export default function AdminPortal({
                   setSmEmployee(employees[0]?.id || '');
                   setSmShiftType('S');
                   setSmNote('');
-                  setSmDate(getAttTodayStr);
+                  setSmDate(getAttTodayStr());
                   setShiftModalOpen(true);
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold text-xs shadow transition-all"
@@ -1095,143 +1103,28 @@ export default function AdminPortal({
 
           {/* View: Schedule */}
           {activeView === 'schedule' && (
-            <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-5">
-              
-              {/* Department filtering tabs */}
-              <div className="flex justify-between items-center flex-wrap gap-4 border-b pb-3">
-                <div className="flex p-0.5 bg-slate-100 rounded-xl flex-wrap">
-                  {departments.map((d) => (
-                    <button
-                      key={d.id}
-                      onClick={() => setSelectedDept(d.id)}
-                      className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${
-                        selectedDept === d.id ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500'
-                      }`}
-                    >
-                      {d.name}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => {
-                      const [y, m] = scheduleMonth.split('-').map(Number);
-                      const target = new Date(y, m - 2, 1);
-                      setScheduleMonth(`${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}`);
-                    }}
-                    className="p-1.5 border hover:bg-slate-50 rounded-lg"
-                  >
-                    <ChevronRight size={15} />
-                  </button>
-                  <input
-                    type="month"
-                    value={scheduleMonth}
-                    onChange={(e) => setScheduleMonth(e.target.value)}
-                    className="px-3 py-1 border rounded-lg text-xs font-extrabold focus:outline-none bg-sky-50 text-sky-800"
-                  />
-                  <button
-                    onClick={() => {
-                      const [y, m] = scheduleMonth.split('-').map(Number);
-                      const target = new Date(y, m, 1);
-                      setScheduleMonth(`${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}`);
-                    }}
-                    className="p-1.5 border hover:bg-slate-50 rounded-lg"
-                  >
-                    <ChevronLeft size={15} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Dynamic schedule table grid */}
-              <div className="overflow-auto max-h-[72vh] rounded-xl border border-sky-100 shadow-2xs relative">
-                <table className="w-full border-collapse text-right text-xs relative">
-                  <thead className="sticky top-0 z-20 bg-sky-50 shadow-xs">
-                    <tr className="bg-sky-50 text-sky-900 border-b">
-                      <th className="p-3 font-extrabold bg-sky-50 sticky right-0 z-30 shadow-2xs">التاريخ</th>
-                      <th className="p-3 font-extrabold bg-sky-50 border-l border-sky-100 sticky right-[82px] z-30 shadow-2xs">اليوم</th>
-                      {employees
-                        .filter((e) => e.dept === selectedDept)
-                        .map((emp) => (
-                          <th key={emp.id} className="p-3 font-extrabold text-center border-r border-sky-100 bg-sky-50">
-                            {emp.name}
-                          </th>
-                        ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {getDaysInSelectedMonth().map(({ dateStr, date }) => {
-                      const isFri = date.getDay() === 5;
-                      const isToday = dateStr === getAttTodayStr();
-                      const cellBg = isToday ? 'bg-amber-50' : isFri ? 'bg-slate-50/90' : 'bg-white';
-                      
-                      return (
-                        <tr
-                          key={dateStr}
-                          className={`border-b last:border-0 hover:bg-sky-50/20 transition-colors ${
-                            isToday ? 'border-y-2 border-amber-300' : ''
-                          }`}
-                        >
-                          <td className={`p-3 font-extrabold text-slate-700 sticky right-0 z-10 shadow-2xs ${cellBg}`}>{dateStr}</td>
-                          <td className={`p-3 font-bold sticky right-[82px] z-10 border-l border-sky-100 shadow-2xs ${isFri ? 'text-indigo-600' : 'text-slate-500'} ${cellBg}`}>{DAYS_AR[date.getDay()]}</td>
-                          {employees
-                            .filter((e) => e.dept === selectedDept)
-                            .map((emp) => {
-                              const entry = schedule[dateStr]?.[emp.id];
-                              const stType = entry?.shiftType || 'A';
-
-                              const st = (shiftTypes || []).find((t: any) => t.id === stType);
-                              let badgeStyle = 'text-slate-400 bg-slate-100 font-medium';
-                              let badgeLabel = '🏝️ إجازة';
-
-                              if (st) {
-                                if (st.id === 'S') {
-                                  badgeStyle = 'text-emerald-700 bg-emerald-50 border border-emerald-200/60 font-bold';
-                                  badgeLabel = `🌅 ${st.name}`;
-                                } else if (st.id === 'E') {
-                                  badgeStyle = 'text-indigo-700 bg-indigo-50 border border-indigo-200/60 font-bold';
-                                  badgeLabel = `🌙 ${st.name}`;
-                                } else if (st.type === 'double') {
-                                  badgeStyle = 'text-amber-700 bg-amber-50 border border-amber-200/60 font-bold animate-pulse';
-                                  badgeLabel = `🔄 ${st.name} (كامل)`;
-                                } else {
-                                  badgeStyle = 'text-sky-700 bg-sky-50 border border-sky-300/30 font-bold';
-                                  badgeLabel = `⏱️ ${st.name}`;
-                                }
-                              }
-
-                              return (
-                                <td
-                                  key={emp.id}
-                                  onClick={() => {
-                                    if (!hasPermission('canEditSchedule')) return;
-                                    setSmEmployee(emp.id);
-                                    setSmDate(dateStr);
-                                    setSmShiftType(stType);
-                                    setSmNote(entry?.note || '');
-                                    setSmMode('single');
-                                    setShiftModalOpen(true);
-                                  }}
-                                  className="p-2 border-r border-sky-100 text-center cursor-pointer transition-all hover:bg-sky-100/30"
-                                >
-                                  <span className={`inline-block px-2.5 py-1 rounded-full font-bold text-[10px] ${badgeStyle}`}>
-                                    {badgeLabel}
-                                  </span>
-                                  {entry?.note && (
-                                    <span className="block text-[8px] text-slate-400 mt-0.5 truncate max-w-[80px] mx-auto">
-                                      {entry.note}
-                                    </span>
-                                  )}
-                                </td>
-                              );
-                            })}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <ScheduleView
+              departments={departments}
+              employees={employees}
+              shiftTypes={shiftTypes}
+              schedule={schedule}
+              selectedDept={selectedDept}
+              setSelectedDept={setSelectedDept}
+              scheduleMonth={scheduleMonth}
+              setScheduleMonth={setScheduleMonth}
+              hasPermission={hasPermission}
+              getDaysInSelectedMonth={getDaysInSelectedMonth}
+              getAttTodayStr={getAttTodayStr}
+              DAYS_AR={DAYS_AR}
+              onEditCell={(empId, dateStr, shiftType, note) => {
+                setSmEmployee(empId);
+                setSmDate(dateStr);
+                setSmShiftType(shiftType);
+                setSmNote(note);
+                setSmMode('single');
+                setShiftModalOpen(true);
+              }}
+            />
           )}
 
           {/* View: Attendance Records list */}
@@ -1267,1148 +1160,285 @@ export default function AdminPortal({
 
           {/* View: Department Coverage Alerts */}
           {activeView === 'alerts' && (
-            <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4 text-right animate-fade-in" dir="rtl">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-slate-100">
-                <div>
-                  <h3 className="font-extrabold text-slate-800 text-sm">تنبيهات نقص التغطية الجارية لشهر {scheduleMonth}</h3>
-                  <p className="text-[10px] text-slate-400 mt-1">يتم الكشف التلقائي عن الأيام التي لا يوجد بها موظفون معينون في الشيفتات.</p>
-                </div>
-                
-                <div className="flex flex-wrap gap-2">
-                  {getShiftGaps().filter(g => !(appSettings.readAlerts || []).includes(g.id)).length > 0 && (
-                    <button
-                      onClick={() => {
-                        const unreadIds = getShiftGaps()
-                          .filter(g => !(appSettings.readAlerts || []).includes(g.id))
-                          .map(g => g.id);
-                        markAllAlertsAsRead(unreadIds);
-                      }}
-                      className="px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-lg text-[10px] font-extrabold transition-all border border-sky-200/50 flex items-center gap-1"
-                    >
-                      <Check size={12} className="text-sky-600" />
-                      <span>تحديد الكل كمقروء</span>
-                    </button>
-                  )}
-
-                  {getShiftGaps().length > 0 && (
-                    <button
-                      onClick={() => {
-                        requestConfirm('هل أنت متأكد من رغبتك في حذف جميع التنبيهات الحالية؟', () => {
-                          const allIds = getShiftGaps().map(g => g.id);
-                          dismissAllAlerts(allIds);
-                        });
-                      }}
-                      className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-[10px] font-extrabold transition-all border border-rose-200/50 flex items-center gap-1"
-                    >
-                      <Trash2 size={12} className="text-rose-600" />
-                      <span>حذف كافة التنبيهات</span>
-                    </button>
-                  )}
-
-                  {((appSettings.readAlerts || []).length > 0 || (appSettings.deletedAlerts || []).length > 0) && (
-                    <button
-                      onClick={() => {
-                        onUpdateSettings({ ...appSettings, readAlerts: [], deletedAlerts: [] });
-                      }}
-                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-extrabold transition-all flex items-center gap-1"
-                    >
-                      <span>إعادة تعيين الكل</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-              
-              <div className="flex flex-col gap-3">
-                {getShiftGaps().filter(g => !(appSettings.readAlerts || []).includes(g.id)).map((g) => {
-                  const isRead = (appSettings.readAlerts || []).includes(g.id);
-                  return (
-                    <div 
-                      key={g.id} 
-                      className={`p-4 border rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs transition-all duration-200 ${
-                        isRead 
-                          ? 'bg-slate-50/70 border-slate-200 text-slate-400 opacity-70' 
-                          : 'bg-amber-50/50 border-amber-100 text-amber-900 shadow-xs'
-                      }`}
-                    >
-                      <div className="flex gap-3 text-right">
-                        <AlertTriangle size={16} className={`mt-0.5 flex-shrink-0 ${isRead ? 'text-slate-400' : 'text-amber-600 animate-pulse'}`} />
-                        <div>
-                          <span className={`font-extrabold text-[13px] block mb-0.5 ${isRead ? 'text-slate-500' : 'text-slate-800'}`}>{g.dept}</span>
-                          تاريخ النقص: <strong className="font-extrabold font-mono text-slate-700">{g.date}</strong> — <span className={isRead ? 'text-slate-400' : 'text-amber-800'}>{g.msg}</span>
-                        </div>
-                      </div>
-                      
-                      <div className="flex gap-2 self-end sm:self-center">
-                        <button
-                          onClick={() => toggleAlertRead(g.id)}
-                          className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 flex-shrink-0 ${
-                            isRead 
-                              ? 'bg-slate-200 hover:bg-slate-300 text-slate-600' 
-                              : 'bg-white hover:bg-slate-100 text-amber-800 border border-amber-200 shadow-xs'
-                          }`}
-                        >
-                          {isRead ? 'تحديد كغير مقروء' : 'تعليم كمقروء'}
-                        </button>
-
-                        <button
-                          onClick={() => dismissAlert(g.id)}
-                          className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg border border-transparent hover:border-rose-100 transition-all flex-shrink-0"
-                          title="حذف التنبيه"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {getShiftGaps().filter(g => !(appSettings.readAlerts || []).includes(g.id)).length === 0 && (
-                <div className="py-12 text-center text-xs text-slate-400 font-medium bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                  🎉 ممتاز! لا توجد تنبيهات نشطة غير مقروءة حالياً في كافة الأقسام النشطة!
-                </div>
-              )}
-            </div>
+            <AlertsView
+              appSettings={appSettings}
+              scheduleMonth={scheduleMonth}
+              getShiftGaps={getShiftGaps}
+              toggleAlertRead={toggleAlertRead}
+              dismissAlert={dismissAlert}
+              dismissAllAlerts={dismissAllAlerts}
+              markAllAlertsAsRead={markAllAlertsAsRead}
+              onUpdateSettings={onUpdateSettings}
+              requestConfirm={requestConfirm}
+            />
           )}
 
           {/* View: Employees CRUD */}
           {activeView === 'employees' && (
-            <div className="flex flex-col gap-4">
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="text-sm font-extrabold text-slate-800">قائمة بطاقات وموظفو الدوام</h3>
-                <button
-                  onClick={() => {
-                    setEditingEmpId(null);
-                    setEmName('');
-                    setEmDept(departments[0]?.id || '');
-                    setEmUsername('');
-                    setEmPhone('');
-                    setEmColor('#01696f');
-                    setEmPassword('');
-                    setEmpModalOpen(true);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold text-xs shadow-sm transition-all"
-                >
-                  <Plus size={14} />
-                  <span>إضافة موظف جديد</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {employees.map((emp) => {
-                  const empDept = departments.find((d) => d.id === emp.dept);
-                  return (
-                    <div key={emp.id} className="p-5 bg-white border border-sky-100 rounded-xl shadow-sm flex flex-col gap-3 relative overflow-hidden text-right" dir="rtl">
-                      <div className="absolute top-0 right-0 w-2.5 h-full" style={{ backgroundColor: emp.color }}></div>
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="flex items-center justify-center w-10 h-10 text-sm font-black text-white rounded-full shadow-sm"
-                          style={{ backgroundColor: emp.color }}
-                        >
-                          {emp.name.charAt(0)}
-                        </div>
-                        <div>
-                          <h4 className="font-extrabold text-slate-800 text-xs text-right">{emp.name}</h4>
-                          <p className="text-[10px] text-slate-400 mt-0.5 text-right">{empDept ? empDept.name : 'بدون فرع'}</p>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col gap-1 text-[10px] text-slate-500 font-medium">
-                        <div>الجوال/واتساب: <strong className="font-extrabold text-slate-700">{emp.phone || 'غير مسجل'}</strong></div>
-                        <div>حساب البوابة: <strong className="font-extrabold text-slate-700">{emp.username || 'غير مسجل'}</strong></div>
-                        <div>الرمز السري: <strong className="font-extrabold text-emerald-600">{emp.password || '123456'}</strong></div>
-                      </div>
-
-                      <div className="flex gap-1.5 justify-end mt-2 pt-2 border-t text-[10px]">
-                        <button
-                          onClick={() => handleOpenWaModal(emp.id)}
-                          className="flex items-center gap-1 px-2.5 py-1 text-sky-600 hover:bg-sky-50 rounded font-bold"
-                        >
-                          <MessageCircle size={12} />
-                          <span>إرسال الجدول</span>
-                        </button>
-                        
-                        <button
-                          onClick={() => {
-                            setEditingEmpId(emp.id);
-                            setEmName(emp.name);
-                            setEmDept(emp.dept);
-                            setEmUsername(emp.username || '');
-                            setEmPhone(emp.phone || '');
-                            setEmColor(emp.color || '#01696f');
-                            setEmPassword(emp.password || '');
-                            setEmpModalOpen(true);
-                          }}
-                          className="px-2.5 py-1 hover:bg-slate-50 text-slate-500 rounded font-bold"
-                        >
-                          تعديل
-                        </button>
-
-                        <button
-                          onClick={() => handleDeleteEmployee(emp.id)}
-                          className="px-2.5 py-1 hover:bg-rose-50 text-rose-500 rounded font-bold"
-                        >
-                          حذف
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <EmployeesView
+              employees={employees}
+              departments={departments}
+              onAddNew={() => {
+                setEditingEmpId(null);
+                setEmName('');
+                setEmDept(departments[0]?.id || '');
+                setEmUsername('');
+                setEmPhone('');
+                setEmColor('#01696f');
+                setEmPassword('');
+                setEmpModalOpen(true);
+              }}
+              onEdit={(emp) => {
+                setEditingEmpId(emp.id);
+                setEmName(emp.name);
+                setEmDept(emp.dept);
+                setEmUsername(emp.username || '');
+                setEmPhone(emp.phone || '');
+                setEmColor(emp.color || '#01696f');
+                setEmPassword(emp.password || '');
+                setEmpModalOpen(true);
+              }}
+              onDelete={handleDeleteEmployee}
+              onOpenWhatsApp={handleOpenWaModal}
+            />
           )}
 
           {/* View: Departments CRUD */}
           {activeView === 'departments' && (
-            <div className="flex flex-col gap-5">
-              <div className="flex justify-between items-center pb-2 border-b">
-                <h3 className="text-sm font-extrabold text-slate-800">إدارة الأقسام والشيفتات النشطة</h3>
-                <button
-                  onClick={() => {
-                    setEditingDeptId(null);
-                    setDmName('');
-                    setDmMorning(true);
-                    setDmEvening(true);
-                    setDmFriday('off');
-                    setDeptModalOpen(true);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold text-xs shadow-sm transition-all"
-                >
-                  <Plus size={14} />
-                  <span>إضافة قسم جديد</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {departments.map((dept) => {
-                  const deptEmps = employees.filter((e) => e.dept === dept.id);
-                  return (
-                    <div key={dept.id} className="p-5 bg-white border border-sky-100 rounded-xl shadow-sm flex flex-col gap-4">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <h4 className="font-extrabold text-slate-800 text-sm">{dept.name}</h4>
-                          <span className="inline-block mt-1 px-2.5 py-0.5 bg-sky-50 text-sky-700 text-[10px] font-extrabold rounded-full">
-                            📋 {deptEmps.length} موظف نشط
-                          </span>
-                        </div>
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => {
-                              setEditingDeptId(dept.id);
-                              setDmName(dept.name);
-                              setDmMorning(dept.needsMorning);
-                              setDmEvening(dept.needsEvening);
-                              setDmFriday(dept.friday || 'off');
-                              setDeptModalOpen(true);
-                            }}
-                            className="p-1 hover:bg-slate-50 text-slate-500 rounded"
-                          >
-                            تعديل
-                          </button>
-                          <button
-                            onClick={() => {
-                              requestConfirm('هل تريد حذف هذا القسم بالكامل؟', () => {
-                                const updated = departments.filter((d) => d.id !== dept.id);
-                                onUpdateAppData({ ...appData, departments: updated });
-                              });
-                            }}
-                            className="p-1 hover:bg-rose-50 text-rose-500 rounded"
-                          >
-                            حذف
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2 text-center text-[10px] font-bold">
-                        <div className={`p-2 rounded-lg ${dept.needsMorning ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-400'}`}>
-                          صباحي: {dept.needsMorning ? 'مطلوب' : 'لا'}
-                        </div>
-                        <div className={`p-2 rounded-lg ${dept.needsEvening ? 'bg-amber-50 text-amber-700' : 'bg-slate-50 text-slate-400'}`}>
-                          مسائي: {dept.needsEvening ? 'مطلوب' : 'لا'}
-                        </div>
-                        <div className="p-2 rounded-lg bg-rose-50 text-rose-700">
-                          الجمعة: {dept.friday === 'off' ? 'إجازة' : dept.friday === 'partial' ? 'دوام جزئي' : 'عادي'}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-1.5">
-                        {deptEmps.map((emp) => (
-                          <span key={emp.id} className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[9px] font-bold">
-                            👤 {emp.name}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <DepartmentsView
+              departments={departments}
+              employees={employees}
+              onAddNew={() => {
+                setEditingDeptId(null);
+                setDmName('');
+                setDmMorning(true);
+                setDmEvening(true);
+                setDmFriday('off');
+                setDeptModalOpen(true);
+              }}
+              onEdit={(dept) => {
+                setEditingDeptId(dept.id);
+                setDmName(dept.name);
+                setDmMorning(dept.needsMorning);
+                setDmEvening(dept.needsEvening);
+                setDmFriday(dept.friday || 'off');
+                setDeptModalOpen(true);
+              }}
+              onDelete={(deptId) => {
+                requestConfirm('هل تريد حذف هذا القسم بالكامل؟', () => {
+                  const updated = departments.filter((d) => d.id !== deptId);
+                  onUpdateAppData({ ...appData, departments: updated });
+                });
+              }}
+            />
           )}
 
           {/* View: Received Requests approval */}
           {activeView === 'requests' && (
-            <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
-              <h3 className="font-extrabold text-slate-800 text-sm mb-3">طلبات الإجازات والشيفتات الواردة</h3>
-              
-              {requestsLoading ? (
-                <div className="py-8 text-center text-xs text-slate-400">جاري تحميل الطلبات الواردة...</div>
-              ) : adminRequests.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-400">لا توجد طلبات معلقة بانتظار المراجعة.</div>
-              ) : (
-                <div className="flex flex-col gap-4">
-                  {adminRequests.map((req) => {
-                    const isPending = req.status === 'pending';
-                    const isApproved = req.status === 'approved';
-
-                    let typeLabel = 'طلب إجازة';
-                    if (req.type === 'shift_change') typeLabel = 'تغيير شيفت الدوام';
-                    if (req.type === 'swap') typeLabel = `تبديل شيفت مع ${req.swapWithEmpName}`;
-                    if (req.type === 'attendance_adjustment') typeLabel = 'تعديل لقطات البصمة';
-
-                    return (
-                      <div key={req.id} className="p-4 border border-sky-50 rounded-xl bg-slate-50/50 flex justify-between items-start flex-wrap gap-3 text-xs">
-                        <div>
-                          <div className="font-extrabold text-slate-800 text-xs">👤 الموظف: {req.empName}</div>
-                          <div className="text-[10px] text-slate-400 mt-1">
-                            نوع الطلب: <strong className="font-extrabold text-sky-700">{typeLabel}</strong> | التاريخ:{' '}
-                            <strong className="font-extrabold">{req.date}</strong>
-                            {req.type === 'attendance_adjustment' && (
-                              <span className="block mt-1 bg-sky-50 text-sky-800 p-1.5 rounded border border-sky-100">
-                                ⏱️ الفترات المطلوبة للبصمة: حضور <strong className="font-black text-slate-900">({req.checkInTime || '-'})</strong> • انصراف <strong className="font-black text-slate-900">({req.checkOutTime || '-'})</strong>
-                              </span>
-                            )}
-                          </div>
-                          {req.note && <div className="p-2 bg-white rounded mt-1.5 border leading-relaxed text-[11px]">{req.note}</div>}
-                          
-                          {!isPending && (req.reviewedBy || req.reviewedAt) && (
-                            <div className="mt-2 text-[10px] text-slate-600 bg-slate-100/60 p-2 border border-slate-200/50 rounded-lg flex items-center gap-2 flex-wrap">
-                              <span>👮 مراجع البوبة: <strong className="font-extrabold text-slate-900">{req.reviewedBy || 'المدير'}</strong></span>
-                              <span className="text-slate-300">|</span>
-                              <span>وقت الإجراء: <strong className="font-extrabold text-slate-700">{req.reviewedAt}</strong></span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex flex-col items-end gap-2">
-                          <span
-                            className={`px-3 py-1 rounded-full font-bold text-[9px] ${
-                              isPending
-                                ? 'bg-amber-100 text-amber-800'
-                                : isApproved
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-rose-100 text-rose-800'
-                            }`}
-                          >
-                            {isPending ? '⏳ قيد المراجع' : isApproved ? '✅ معتمد مقبولة' : '❌ مرفوض'}
-                          </span>
-
-                          {isPending && (
-                            <div className="flex gap-1.5 mt-2">
-                              <button
-                                onClick={() => handleReviewRequest(req.id, 'approved')}
-                                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold transition-all"
-                              >
-                                قبول واعتماد
-                              </button>
-                              <button
-                                onClick={() => handleReviewRequest(req.id, 'rejected')}
-                                className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-[10px] font-bold transition-all"
-                              >
-                                رفض
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <RequestsView adminRequests={adminRequests} requestsLoading={requestsLoading} onReview={handleReviewRequest} />
           )}
 
           {/* View: Shift Types Management */}
           {activeView === 'shifttypes' && (
-            <div className="flex flex-col gap-5 text-right animate-fade-in" dir="rtl">
-              <div className="flex justify-between items-center pb-2 border-b border-sky-100">
-                <div>
-                  <h3 className="text-sm font-extrabold text-slate-800">إدارة أنواع وفترات ومدد الشيفتات</h3>
-                  <p className="text-[10px] text-slate-400 mt-1">قم بإدارة وتعيين فترات العمل اليومية المتوفرة للجدولة كشيفتات الصباح والمساء والليل.</p>
-                </div>
-                <button
-                  onClick={() => {
-                    setEditingStId(null);
-                    setStCode('');
-                    setStName('');
-                    setStStart('08:00');
-                    setStEnd('16:00');
-                    setStStart2('17:00');
-                    setStEnd2('21:00');
-                    setStType('morning');
-                    setShiftTypeModalOpen(true);
-                  }}
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold text-xs shadow-sm transition-all"
-                >
-                  <Plus size={14} />
-                  <span>إضافة نوع شيفت جديد</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {(shiftTypes || []).map((st: any) => {
-                  return (
-                    <div key={st.id} className="p-5 bg-white border border-sky-100 rounded-xl shadow-xs flex flex-col gap-4 hover:shadow-md transition-all">
-                      <div className="flex justify-between items-start">
-                        <div className="flex items-start gap-2.5">
-                          <span className="w-9 h-9 rounded-xl bg-sky-50 text-sky-600 font-black flex items-center justify-center text-xs font-mono border border-sky-100 shadow-2xs">
-                            {st.id}
-                          </span>
-                          <div>
-                            <h4 className="font-extrabold text-slate-800 text-xs">{st.name}</h4>
-                            <div className="flex flex-col gap-1 mt-1">
-                              {st.type === 'double' ? (
-                                <>
-                                  <div className="flex items-center gap-1.5 text-[10px] text-slate-600 font-extrabold">
-                                    <span className="text-amber-600">🌅 الصباحية:</span>
-                                    <span>{st.start} إلى {st.end}</span>
-                                    <span className="text-[9px] bg-amber-50 text-amber-700 px-1 rounded-sm">
-                                      ({(() => {
-                                        const [sh, sm] = st.start.split(':').map(Number);
-                                        const [eh, em] = st.end.split(':').map(Number);
-                                        let diff = (eh * 60 + em) - (sh * 60 + sm);
-                                        if (diff < 0) diff += 24 * 60;
-                                        return `${Math.round(diff / 60)} س`;
-                                      })()})
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-1.5 text-[10px] text-slate-600 font-extrabold">
-                                    <span className="text-indigo-600">🌙 المسائية:</span>
-                                    <span>{st.start2 || '17:00'} إلى {st.end2 || '21:00'}</span>
-                                    <span className="text-[9px] bg-indigo-50 text-indigo-700 px-1 rounded-sm">
-                                      ({(() => {
-                                        const [sh, sm] = (st.start2 || '17:00').split(':').map(Number);
-                                        const [eh, em] = (st.end2 || '21:00').split(':').map(Number);
-                                        let diff = (eh * 60 + em) - (sh * 60 + sm);
-                                        if (diff < 0) diff += 24 * 60;
-                                        return `${Math.round(diff / 60)} س`;
-                                      })()})
-                                    </span>
-                                  </div>
-                                </>
-                              ) : (
-                                <span className="inline-block px-2.5 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-extrabold rounded-full max-w-max">
-                                  🕒 {st.start} إلى {st.end}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => {
-                              setEditingStId(st.id);
-                              setStCode(st.id);
-                              setStName(st.name);
-                              setStStart(st.start);
-                              setStEnd(st.end);
-                              setStStart2(st.start2 || '17:00');
-                              setStEnd2(st.end2 || '21:00');
-                              setStType(st.type || 'morning');
-                              setShiftTypeModalOpen(true);
-                            }}
-                            className="px-2.5 py-1 hover:bg-sky-50 text-sky-600 border border-sky-100 rounded text-[10px] font-extrabold transition-all"
-                          >
-                            تعديل
-                          </button>
-                          <button
-                            onClick={() => handleDeleteShiftType(st.id)}
-                            className="px-2.5 py-1 hover:bg-rose-50 text-rose-500 border border-transparent hover:border-rose-100 rounded text-[10px] font-extrabold transition-all"
-                          >
-                            حذف
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 text-center text-[10px] font-semibold">
-                        <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-slate-700">
-                          نطاق الشيفت: <span className="font-extrabold text-indigo-700">
-                            {st.type === 'double' ? 'شيفت يجمع فترتين' : (st.type === 'morning' ? 'دوام صباحي' : 'دوام مسائي / ليلي')}
-                          </span>
-                        </div>
-                        <div className="p-2.5 bg-sky-50 border border-sky-100 rounded-lg text-sky-800">
-                          المدة الإجمالية: <span className="font-extrabold text-sky-600">
-                            {(() => {
-                              const [sh, sm] = st.start.split(':').map(Number);
-                              const [eh, em] = st.end.split(':').map(Number);
-                              let diff = (eh * 60 + em) - (sh * 60 + sm);
-                              if (diff < 0) diff += 24 * 60; // overnight check
-                              
-                              if (st.type === 'double') {
-                                const [sh2, sm2] = (st.start2 || '17:00').split(':').map(Number);
-                                const [eh2, em2] = (st.end2 || '21:00').split(':').map(Number);
-                                let diff2 = (eh2 * 60 + em2) - (sh2 * 60 + sm2);
-                                if (diff2 < 0) diff2 += 24 * 60;
-                                diff += diff2;
-                              }
-                              
-                              const hours = Math.floor(diff / 60);
-                              const mins = diff % 60;
-                              return mins > 0 ? `${hours} س و ${mins} د` : `${hours} سَاعات`;
-                            })()}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <ShiftTypesView
+              shiftTypes={shiftTypes}
+              onAddNew={() => {
+                setEditingStId(null);
+                setStCode('');
+                setStName('');
+                setStStart('08:00');
+                setStEnd('16:00');
+                setStStart2('17:00');
+                setStEnd2('21:00');
+                setStType('morning');
+                setShiftTypeModalOpen(true);
+              }}
+              onEdit={(st) => {
+                setEditingStId(st.id);
+                setStCode(st.id);
+                setStName(st.name);
+                setStStart(st.start);
+                setStEnd(st.end);
+                setStStart2(st.start2 || '17:00');
+                setStEnd2(st.end2 || '21:00');
+                setStType(st.type || 'morning');
+                setShiftTypeModalOpen(true);
+              }}
+              onDelete={handleDeleteShiftType}
+            />
           )}
 
           {/* View: General Settings */}
           {activeView === 'settings' && (
-            <div className="flex flex-col gap-6">
-              
-              {/* Company Info section */}
-              <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
-                <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
-                  <Building2 size={16} className="text-sky-500" />
-                  <span>إعدادات الشركة واللوغو الرسمي</span>
-                </h3>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[11px] font-bold text-slate-600">اسم الشركة / المؤسسة</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={companySettingsName}
-                      onChange={(e) => setCompanySettingsName(e.target.value)}
-                      placeholder="مثال: شركة النجوم للاستقدام"
-                      className="px-3.5 py-2.5 text-xs border rounded-lg focus:outline-none flex-1 font-bold"
-                    />
-                    <button
-                      onClick={() => {
-                        onUpdateSettings({ ...appSettings, companyName: companySettingsName });
-                        alert('✅ تم تحديث اسم الشركة العام بنجاح.');
-                      }}
-                      className="flex items-center gap-1.5 px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg text-xs shadow transition-all"
-                    >
-                      <Save size={13} />
-                      <span>حفظ الاسم</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="pt-2">
-                  <label className="text-[11px] font-bold text-slate-600 block mb-2">لوجو الشركة العام</label>
-                  <div className="flex items-center gap-4 flex-wrap">
-                    <button
-                      onClick={() => document.getElementById('logo-file-picker-input')?.click()}
-                      className="flex items-center gap-2 px-5 py-3 hover:bg-sky-50 border-2 border-dashed border-sky-100 hover:border-sky-300 rounded-xl text-slate-500 font-bold text-xs transition-all shadow-sm bg-sky-50 bg-opacity-30"
-                    >
-                      <UploadCloud size={16} className="text-sky-500" />
-                      <span>اضغط لرفع اللوجو (PNG أو JPG)</span>
-                    </button>
-                    <input
-                      type="file"
-                      id="logo-file-picker-input"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleLogoUpload}
-                    />
-                    {appSettings?.logoDataUrl && (
-                      <div className="relative pt-1">
-                        <img
-                          src={appSettings.logoDataUrl}
-                          alt="Company Logo Preview"
-                          className="w-14 h-14 p-1 rounded-xl border object-contain bg-sky-50 shadow-sm"
-                          referrerPolicy="no-referrer"
-                        />
-                        <button
-                          onClick={() => {
-                            requestConfirm('هل تريد حذف الشعار الحالي؟', () => {
-                              onUpdateSettings({ ...appSettings, logoDataUrl: '' });
-                            });
-                          }}
-                          className="absolute -top-1 -left-1 p-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded-full transition-all"
-                        >
-                          <X size={10} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Geo Fence check-in coordinates configuration */}
-              <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
-                <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
-                  <Crosshair size={16} className="text-sky-500 animate-pulse" />
-                  <span>موقع الشركة الجغرافي ونطاق الحضور</span>
-                </h3>
-
-                <div className="p-3.5 bg-sky-50 border border-sky-100 rounded-xl text-xs text-sky-800 leading-relaxed font-medium">
-                  📍 عند وضع إحداثيات GPS مقر الشركة وتحديد المسافة الجغرافية المعتمدة للبحث، سيمنع النظام الموظفين من البصمة إلا إذا كانوا داخل هذا النطاق المعتمد.
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[11px] font-bold text-slate-600">خط العرض (Latitude)</label>
-                    <input
-                      type="number"
-                      step="any"
-                      value={appSettings?.officeLocation?.lat || ''}
-                      onChange={(e) =>
-                        onUpdateSettings({
-                          ...appSettings,
-                          officeLocation: {
-                            ...appSettings.officeLocation,
-                            lat: e.target.value === '' ? '' : parseFloat(e.target.value)
-                          }
-                        })
-                      }
-                      placeholder="مثال: 24.71360"
-                      className="px-3 py-2 text-xs border rounded-lg focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[11px] font-bold text-slate-600">خط الطول (Longitude)</label>
-                    <input
-                      type="number"
-                      step="any"
-                      value={appSettings?.officeLocation?.lng || ''}
-                      onChange={(e) =>
-                        onUpdateSettings({
-                          ...appSettings,
-                          officeLocation: {
-                            ...appSettings.officeLocation,
-                            lng: e.target.value === '' ? '' : parseFloat(e.target.value)
-                          }
-                        })
-                      }
-                      placeholder="مثال: 46.67530"
-                      className="px-3 py-2 text-xs border rounded-lg focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[11px] font-bold text-slate-600">نطاق البصمة المسموح (بالمتر)</label>
-                    <input
-                      type="number"
-                      value={appSettings?.officeLocation?.radius || 150}
-                      onChange={(e) =>
-                        onUpdateSettings({
-                          ...appSettings,
-                          officeLocation: {
-                            ...appSettings.officeLocation,
-                            radius: parseInt(e.target.value) || 150
-                          }
-                        })
-                      }
-                      className="px-3 py-2 text-xs border rounded-lg focus:outline-none focus:border-sky-500 font-extrabold"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 bg-sky-50 bg-opacity-30 p-3.5 rounded-xl border border-sky-100/50">
-                  <input
-                    type="checkbox"
-                    id="preventOutCheckout"
-                    checked={!!appSettings?.officeLocation?.preventOutCheckout}
-                    onChange={(e) =>
-                      onUpdateSettings({
-                        ...appSettings,
-                        officeLocation: {
-                          ...appSettings.officeLocation,
-                          preventOutCheckout: e.target.checked
-                        }
-                      })
+            <SettingsView
+              admin={admin}
+              appSettings={appSettings}
+              onUpdateSettings={onUpdateSettings}
+              employees={employees}
+              departments={departments}
+              appData={appData}
+              companyId={companyId}
+              requestConfirm={requestConfirm}
+              companySettingsName={companySettingsName}
+              setCompanySettingsName={setCompanySettingsName}
+              handleLogoUpload={handleLogoUpload}
+              handleDetectGPS={handleDetectGPS}
+              geoSettingStatus={geoSettingStatus}
+              settingsNewPwd={settingsNewPwd}
+              setSettingsNewPwd={setSettingsNewPwd}
+              settingsConfirmPwd={settingsConfirmPwd}
+              setSettingsConfirmPwd={setSettingsConfirmPwd}
+              settingsPwdMsg={settingsPwdMsg}
+              handleUpdatePassword={handleUpdatePassword}
+              subAdmins={subAdmins}
+              subAdminsLoading={subAdminsLoading}
+              onAddSubAdmin={() => {
+                setEditingAdmId(null);
+                setAdmName('');
+                setAdmUsername('');
+                setAdmEmail('');
+                setAdmPwd('');
+                setAdmPerms({
+                  canEditSchedule: false,
+                  canManageEmployees: false,
+                  canManageDepts: false,
+                  canApproveRequests: false,
+                  canViewReports: false,
+                  canManageSettings: false,
+                  canPrint: false
+                });
+                setSubAdminModalOpen(true);
+              }}
+              onEditSubAdmin={(item) => {
+                setEditingAdmId(item.id);
+                setAdmName(item.name || '');
+                setAdmUsername(item.username || '');
+                setAdmEmail(item.email || '');
+                setAdmPwd('');
+                setAdmPerms({
+                  canEditSchedule: !!item.permissions?.canEditSchedule,
+                  canManageEmployees: !!item.permissions?.canManageEmployees,
+                  canManageDepts: !!item.permissions?.canManageDepts,
+                  canApproveRequests: !!item.permissions?.canApproveRequests,
+                  canViewReports: !!item.permissions?.canViewReports,
+                  canManageSettings: !!item.permissions?.canManageSettings,
+                  canPrint: !!item.permissions?.canPrint
+                });
+                setSubAdminModalOpen(true);
+              }}
+              onDeleteSubAdmin={(id) =>
+                new Promise<void>((resolve) => {
+                  requestConfirm('هل تريد إلغاء صلاحية هذا المسؤول وحذفه؟', async () => {
+                    try {
+                      const response = await fetch(`/api/admins/${id}`, { method: 'DELETE' });
+                      if (!response.ok) throw new Error();
+                      loadSubAdmins();
+                    } catch (err) {
+                      alert('فشل الإجراء');
                     }
-                    className="w-4 h-4 text-sky-600 border-gray-300 rounded focus:ring-sky-500 cursor-pointer"
-                  />
-                  <label htmlFor="preventOutCheckout" className="text-xs font-extrabold text-slate-700 cursor-pointer select-none">
-                    🔒 تفعيل خدمة عدم تسجيل انصراف خارج الموقع (التحقق من بقاء الموظف ضمن النطاق المسموح جغرافياً عند تسجيل الانصراف)
-                  </label>
-                </div>
+                    resolve();
+                  });
+                })
+              }
+              registrationRequests={registrationRequests}
+              onApproveRegistration={(it) =>
+                new Promise<void>((resolve) => {
+                  requestConfirm('موافقة وقبول التسجيل؟', async () => {
+                    try {
+                      const response = await fetch(`/api/registration-requests/${it.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ status: 'approved' })
+                      });
+                      if (!response.ok) throw new Error();
 
-                <div className="flex gap-2 flex-wrap items-center mt-1">
-                  <button
-                    onClick={handleDetectGPS}
-                    className="flex items-center gap-1.5 px-4 py-2 border border-sky-100 bg-sky-50 text-sky-700 hover:bg-sky-100 rounded-xl font-bold text-xs transition-all shadow-sm"
-                  >
-                    <Crosshair size={13} />
-                    <span>تحديد موقعي المباشر الحالي</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      alert('✅ تم حفظ كافة إعدادات سياج البصمة بنجاح.');
-                    }}
-                    className="flex items-center gap-1.5 px-5 py-2 hover:bg-sky-700 bg-sky-600 text-white rounded-xl font-bold text-xs font-medium transition-all shadow-sm"
-                  >
-                    <span>حفظ التعديلات الجغرافية</span>
-                  </button>
-                </div>
-
-                {geoSettingStatus && (
-                  <div className="text-[11px] font-bold text-slate-600 bg-slate-50 border p-2.5 rounded-xl">
-                    {geoSettingStatus}
-                  </div>
-                )}
-              </div>
-
-              {/* General Admin Password updates */}
-              <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
-                <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
-                  <Key size={16} className="text-sky-500" />
-                  <span>تحديث الرمز السري للوحة التحكم العامة</span>
-                </h3>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[11px] font-bold text-slate-600">رمز الدخول الجديد المطلوب</label>
-                    <input
-                      type="password"
-                      value={settingsNewPwd}
-                      onChange={(e) => setSettingsNewPwd(e.target.value)}
-                      placeholder="••••••"
-                      className="px-3 py-2.5 text-xs border rounded-lg focus:outline-none"
-                    />
-                  </div>
-                  
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[11px] font-bold text-slate-600">تأكيد الرمز المطلوب</label>
-                    <input
-                      type="password"
-                      value={settingsConfirmPwd}
-                      onChange={(e) => setSettingsConfirmPwd(e.target.value)}
-                      placeholder="••••••"
-                      className="px-3 py-2.5 text-xs border rounded-lg focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-2 mt-1">
-                  <button
-                    onClick={handleUpdatePassword}
-                    className="flex items-center gap-1.5 px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg text-xs shadow transition-all"
-                  >
-                    <span>تحديث كلمة المرور</span>
-                  </button>
-                </div>
-
-                {settingsPwdMsg && (
-                  <div className="text-[11px] font-bold text-sky-700 bg-sky-50 border border-sky-100 p-2.5 rounded-xl text-center">
-                    {settingsPwdMsg}
-                  </div>
-                )}
-              </div>
-
-              {/* Sub Admins CRUD queue */}
-              {admin.role === 'superadmin' && (
-                <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
-                  <div className="flex justify-between items-center pb-2 border-b">
-                    <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
-                      <Shield size={16} className="text-sky-500" />
-                      <span>إدارة المسؤولين والمدراء الفرعيين</span>
-                    </h3>
-                    <button
-                      onClick={() => {
-                        setAdmName('');
-                        setAdmUsername('');
-                        setAdmEmail('');
-                        setAdmPwd('');
-                        setAdmPerms({
-                          canEditSchedule: false,
-                          canManageEmployees: false,
-                          canManageDepts: false,
-                          canApproveRequests: false,
-                          canViewReports: false,
-                          canManageSettings: false,
-                          canPrint: false
+                      if (it.type === 'employee') {
+                        const updated = [...employees, {
+                          id: 'e' + Date.now(),
+                          name: it.name,
+                          dept: departments[0]?.id || '',
+                          phone: it.phone,
+                          username: it.username || it.name.replace(/\s+/g, '_').toLowerCase(),
+                          password: it.password || '123456',
+                          color: '#01696f'
+                        }];
+                        onUpdateAppData({ ...appData, employees: updated });
+                      } else if (it.type === 'admin') {
+                        const adminData = {
+                          name: it.name,
+                          username: (it.username || it.name.replace(/\s+/g, '_')).toLowerCase(),
+                          email: `${(it.username || it.name.replace(/\s+/g, '_')).toLowerCase()}@company.com`,
+                          password: it.password,
+                          role: 'admin',
+                          companyId: companyId || 'default',
+                          permissions: {
+                            canEditSchedule: true,
+                            canManageEmployees: true,
+                            canManageDepts: true,
+                            canApproveRequests: true,
+                            canViewReports: true,
+                            canManageSettings: true,
+                            canPrint: true
+                          }
+                        };
+                        const resAdmin = await fetch('/api/admins', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(adminData)
                         });
-                        setSubAdminModalOpen(true);
-                      }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold text-[10px] shadow transition-all"
-                    >
-                      <Plus size={12} />
-                      <span>إضافة مسؤول فرعي</span>
-                    </button>
-                  </div>
-
-                  {subAdminsLoading ? (
-                    <div className="text-xs text-slate-400 py-3 text-center">جاري تحميل قائمة المسؤولين...</div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {subAdmins.map((item) => (
-                        <div key={item.id} className="p-4 border rounded-xl bg-slate-50 flex justify-between items-start gap-3">
-                          <div>
-                            <div className="font-extrabold text-xs text-slate-800">{item.name}</div>
-                            <div className="text-[10px] text-slate-400 mt-0.5">{item.email || 'بدون بريد فرعي'}</div>
-                            <div className="flex flex-wrap gap-1.5 mt-2.5">
-                              {Object.entries(item.permissions || {})
-                                .filter(([, val]) => val === true)
-                                .map(([key]) => (
-                                  <span key={key} className="px-2 py-0.5 bg-sky-50 border border-sky-100 text-sky-700 rounded text-[9px] font-bold">
-                                    {key === 'canEditSchedule' && '📅 الجداول'}
-                                    {key === 'canManageEmployees' && '👥 الموظفين'}
-                                    {key === 'canManageDepts' && '🏢 الأقسام'}
-                                    {key === 'canApproveRequests' && '✅ الاعتمادات'}
-                                    {key === 'canViewReports' && '📊 التقارير'}
-                                    {key === 'canManageSettings' && '⚙️ الإعدادات'}
-                                    {key === 'canPrint' && '🖨️ الطباعة'}
-                                  </span>
-                                ))}
-                            </div>
-                          </div>
-                          
-                          <div className="flex gap-1.5 flex-shrink-0">
-                            <button
-                              onClick={() => {
-                                setEditingAdmId(item.id);
-                                setAdmName(item.name || '');
-                                setAdmUsername(item.username || '');
-                                setAdmEmail(item.email || '');
-                                setAdmPwd('');
-                                setAdmPerms({
-                                  canEditSchedule: !!item.permissions?.canEditSchedule,
-                                  canManageEmployees: !!item.permissions?.canManageEmployees,
-                                  canManageDepts: !!item.permissions?.canManageDepts,
-                                  canApproveRequests: !!item.permissions?.canApproveRequests,
-                                  canViewReports: !!item.permissions?.canViewReports,
-                                  canManageSettings: !!item.permissions?.canManageSettings,
-                                  canPrint: !!item.permissions?.canPrint
-                                });
-                                setSubAdminModalOpen(true);
-                              }}
-                              className="p-1.5 hover:bg-sky-50 text-sky-600 rounded transition-all"
-                              title="تعديل بيانات المسؤول"
-                            >
-                              <Edit size={13} />
-                            </button>
-
-                            <button
-                              onClick={() => {
-                                requestConfirm('هل تريد إلغاء صلاحية هذا المسؤول وحذفه؟', async () => {
-                                  try {
-                                    const response = await fetch(`/api/admins/${item.id}`, {
-                                      method: 'DELETE'
-                                    });
-                                    if (!response.ok) {
-                                      throw new Error();
-                                    }
-                                    loadSubAdmins();
-                                  } catch (err) {
-                                    alert('فشل الإجراء');
-                                  }
-                                });
-                              }}
-                              className="p-1.5 hover:bg-rose-50 text-rose-500 rounded transition-all"
-                              title="حذف المسؤول"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Registration Request inbox queues */}
-              {admin.role === 'superadmin' && (
-                <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
-                  <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5 border-b pb-2">
-                    <UserCheck size={16} className="text-sky-500" />
-                    <span>طلبات التسجيل المعلقة بانتظار الاعتماد</span>
-                  </h3>
-                  
-                  <div className="flex flex-col gap-3">
-                    {registrationRequests.filter((r) => r.status === 'pending').map((it) => (
-                      <div key={it.id} className="p-4 border rounded-xl bg-slate-50 flex justify-between items-center text-xs flex-wrap gap-2">
-                        <div>
-                          <div className="font-extrabold text-slate-800 text-xs">👤 الاسم: {it.name}</div>
-                          <div className="text-[10px] text-slate-400 mt-1">
-                            النوع:{' '}
-                            <strong className="font-bold text-sky-700">
-                              {it.type === 'employee' ? 'موظف' : 'مسؤول فرعي'}
-                            </strong>{' '}
-                            | الجوال/الهاتف: <strong className="font-bold">{it.phone}</strong>
-                          </div>
-                        </div>
-                        
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => {
-                              requestConfirm('موافقة وقبول التسجيل؟', async () => {
-                                try {
-                                  const response = await fetch(`/api/registration-requests/${it.id}`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ status: 'approved' })
-                                  });
-                                  if (!response.ok) {
-                                    throw new Error();
-                                  }
-                                  
-                                  if (it.type === 'employee') {
-                                    const updated = [...employees, {
-                                      id: 'e' + Date.now(),
-                                      name: it.name,
-                                      dept: departments[0]?.id || '',
-                                      phone: it.phone,
-                                      username: it.username || it.name.replace(/\s+/g, '_').toLowerCase(),
-                                      password: it.password || '123456',
-                                      color: '#01696f'
-                                    }];
-                                    onUpdateAppData({ ...appData, employees: updated });
-                                  } else if (it.type === 'admin') {
-                                    const adminData = {
-                                      name: it.name,
-                                      username: (it.username || it.name.replace(/\s+/g, '_')).toLowerCase(),
-                                      email: `${(it.username || it.name.replace(/\s+/g, '_')).toLowerCase()}@company.com`,
-                                      password: it.password,
-                                      role: 'admin',
-                                      companyId: companyId || 'default',
-                                      permissions: {
-                                        canEditSchedule: true,
-                                        canManageEmployees: true,
-                                        canManageDepts: true,
-                                        canApproveRequests: true,
-                                        canViewReports: true,
-                                        canManageSettings: true,
-                                        canPrint: true
-                                      }
-                                    };
-                                    const resAdmin = await fetch('/api/admins', {
-                                      method: 'POST',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify(adminData)
-                                    });
-                                    if (!resAdmin.ok) {
-                                      throw new Error();
-                                    }
-                                  }
-                                  alert('تم اعتماد وتسجيل الحساب بنجاح.');
-                                  loadRequests();
-                                } catch (e) {
-                                  alert('فشل الإجراء');
-                                }
-                              });
-                            }}
-                            className="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded text-[10px] font-bold"
-                          >
-                            قبول واعتماد
-                          </button>
-                          <button
-                            onClick={() => {
-                              requestConfirm('رفض طلب التسجيل هذا؟', async () => {
-                                try {
-                                  const response = await fetch(`/api/registration-requests/${it.id}`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ status: 'rejected' })
-                                  });
-                                  if (!response.ok) {
-                                    throw new Error();
-                                  }
-                                  alert('تم رفض الطلب.');
-                                  loadRequests();
-                                } catch (e) {
-                                  alert('فشل الإجراء');
-                                }
-                              });
-                            }}
-                            className="px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded text-[10px] font-bold"
-                          >
-                            رفض
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-
-                    {registrationRequests.filter((r) => r.status === 'pending').length === 0 && (
-                      <div className="py-8 text-center text-xs text-slate-400 font-medium">
-                        لا توجد حالياً طلبات تسجيل حسابات جديدة في الانتظار.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
+                        if (!resAdmin.ok) throw new Error();
+                      }
+                      alert('تم اعتماد وتسجيل الحساب بنجاح.');
+                      loadRequests();
+                    } catch (e) {
+                      alert('فشل الإجراء');
+                    }
+                    resolve();
+                  });
+                })
+              }
+              onRejectRegistration={(it) =>
+                new Promise<void>((resolve) => {
+                  requestConfirm('رفض طلب التسجيل هذا؟', async () => {
+                    try {
+                      const response = await fetch(`/api/registration-requests/${it.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ status: 'rejected' })
+                      });
+                      if (!response.ok) throw new Error();
+                      alert('تم رفض الطلب.');
+                      loadRequests();
+                    } catch (e) {
+                      alert('فشل الإجراء');
+                    }
+                    resolve();
+                  });
+                })
+              }
+            />
           )}
 
           {/* View: Companies & Subscriptions Management */}
+          {/* View: Companies & Subscriptions Management */}
           {activeView === 'companies' && admin.role === 'superadmin' && companyId === 'default' && (
-            <div className="flex flex-col gap-6" dir="rtl">
-              
-              {/* Stats Overview */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="p-5 bg-white border border-sky-100 rounded-2xl shadow-sm flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] font-bold text-slate-400 block mb-1">الشركات المسجلة</span>
-                    <strong className="text-xl font-extrabold text-slate-800 font-mono">{companiesList.length}</strong>
-                  </div>
-                  <div className="p-3 bg-sky-50 text-sky-600 rounded-xl">
-                    <Building2 size={20} />
-                  </div>
-                </div>
-
-                <div className="p-5 bg-white border border-sky-100 rounded-2xl shadow-sm flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] font-bold text-slate-400 block mb-1">الاشتراكات النشطة</span>
-                    <strong className="text-xl font-extrabold text-emerald-600 font-mono">
-                      {companiesList.filter(c => c.subscriptionStatus === 'active').length}
-                    </strong>
-                  </div>
-                  <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
-                    <Check size={20} />
-                  </div>
-                </div>
-
-                <div className="p-5 bg-white border border-sky-100 rounded-2xl shadow-sm flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] font-bold text-slate-400 block mb-1">الإيراد المتوقع (شهرياً)</span>
-                    <strong className="text-xl font-extrabold text-sky-700 font-mono">
-                      {companiesList.reduce((acc, curr) => acc + (parseFloat(curr.monthlyFee) || 0), 0)} <span className="text-xs">ريال</span>
-                    </strong>
-                  </div>
-                  <div className="p-3 bg-sky-50 text-sky-600 rounded-xl font-bold">
-                    <span>ريال</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action and Companies List */}
-              <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
-                <div className="flex items-center justify-between border-b pb-4 flex-wrap gap-2">
-                  <div>
-                    <h3 className="font-extrabold text-slate-800 text-sm">قائمة مساحات العمل والشركات المشتركة</h3>
-                    <p className="text-[10px] text-slate-400 mt-1">يمكنك إدارة الشركات وتوليد مساحات عمل مخصصة والتحكم بحالة اشتراك كل منها.</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setEditingCompId(null);
-                      setCompName('');
-                      setCompSlug('');
-                      setCompLogoUrl('');
-                      setCompMonthlyFee('150');
-                      setCompAdminUsername('');
-                      setCompAdminPassword('');
-                      setCompMonths('12');
-                      setCompanyModalOpen(true);
-                    }}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl text-xs shadow transition-all"
-                  >
-                    <Plus size={14} />
-                    <span>تسجيل شركة جديدة</span>
-                  </button>
-                </div>
-
-                {companiesList.length === 0 ? (
-                  <div className="py-12 text-center text-xs text-slate-400">
-                    لا توجد شركات مسجلة باشتراك شهري حالياً. اضغط على زر تسجيل شركة جديدة للبدء.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {companiesList.map((comp: any) => {
-                      const isExpired = comp.subscriptionStatus !== 'active' || 
-                        (comp.subscriptionExpiresAt && new Date(comp.subscriptionExpiresAt) < new Date());
-                      
-                      return (
-                        <div key={comp.id} className="p-4 border rounded-xl bg-slate-50 border-slate-100 flex flex-col gap-3 justify-between">
-                          <div>
-                            {/* Company Header */}
-                            <div className="flex items-center gap-3">
-                              {comp.logoUrl ? (
-                                <img
-                                  src={comp.logoUrl}
-                                  alt="Logo"
-                                  className="w-10 h-10 rounded-lg object-contain bg-white p-1 border"
-                                  referrerPolicy="no-referrer"
-                                />
-                              ) : (
-                                <div className="w-10 h-10 rounded-lg bg-sky-600 text-white font-bold text-center flex items-center justify-center text-sm">
-                                  {comp.name.charAt(0)}
-                                </div>
-                              )}
-                              <div>
-                                <h4 className="font-extrabold text-slate-800 text-xs">{comp.name}</h4>
-                                <span className="text-[10px] text-sky-700 font-mono font-bold">مساحة العمل: /{comp.id}</span>
-                              </div>
-                            </div>
-
-                            {/* Details Grid */}
-                            <div className="grid grid-cols-2 gap-2 mt-3 pt-2 border-t border-dashed text-[10px] text-slate-500">
-                              <div>
-                                <span className="block text-slate-400">حساب المدير المسؤول:</span>
-                                <span className="font-bold text-slate-700 font-mono">{comp.adminUsername} / {comp.adminPassword}</span>
-                              </div>
-                              <div>
-                                <span className="block text-slate-400">رمز الشركة (للتحقق):</span>
-                                <span className="font-bold text-sky-700 font-mono">{comp.companyCode || '0'}</span>
-                              </div>
-                              <div>
-                                <span className="block text-slate-400">قيمة الاشتراك الشهري:</span>
-                                <span className="font-bold text-slate-700">{comp.monthlyFee || '150'} ريال</span>
-                              </div>
-                              <div>
-                                <span className="block text-slate-400">حالة الاشتراك:</span>
-                                <span className={`inline-block px-2 py-0.5 rounded-full font-bold text-[9px] mt-0.5 ${
-                                  comp.subscriptionStatus === 'suspended'
-                                    ? 'bg-slate-200 text-slate-600'
-                                    : isExpired
-                                    ? 'bg-rose-50 text-rose-600'
-                                    : 'bg-emerald-50 text-emerald-600'
-                                }`}>
-                                  {comp.subscriptionStatus === 'suspended'
-                                    ? '⏳ موقوف مؤقتاً'
-                                    : isExpired
-                                    ? '⚠️ منتهي الصلاحية'
-                                    : '✅ نشط وساري'}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="block text-slate-400">تاريخ انتهاء الاشتراك:</span>
-                                <span className="font-bold text-slate-700">
-                                  {comp.subscriptionExpiresAt 
-                                    ? new Date(comp.subscriptionExpiresAt).toLocaleDateString('ar-EG') 
-                                    : 'غير محدد'}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Quick Actions */}
-                          <div className="flex gap-2 border-t pt-3 mt-1 text-[11px]">
-                            <button
-                              onClick={() => handleExtendCompanySubscription(comp)}
-                              className="px-2.5 py-1.5 bg-sky-50 text-sky-700 hover:bg-sky-100 rounded font-bold transition-all flex-1"
-                            >
-                              🗓️ تمديد 30 يوم
-                            </button>
-                            <button
-                              onClick={() => handleToggleCompanyStatus(comp)}
-                              className="px-2.5 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded font-bold transition-all flex-1"
-                            >
-                              {comp.subscriptionStatus === 'active' ? '❄️ تجميد' : '🔥 تفعيل'}
-                            </button>
-                            <button
-                              onClick={() => handleDeleteCompanySpace(comp.id)}
-                              className="px-2.5 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded font-bold transition-all"
-                              title="حذف مساحة العمل بالكامل"
-                            >
-                              🗑️ حذف
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
+            <CompaniesView
+              companiesList={companiesList}
+              onAddNew={() => {
+                setEditingCompId(null);
+                setCompName('');
+                setCompSlug('');
+                setCompLogoUrl('');
+                setCompMonthlyFee('150');
+                setCompAdminUsername('');
+                setCompAdminPassword('');
+                setCompMonths('12');
+                setCompanyModalOpen(true);
+              }}
+              onExtendSubscription={handleExtendCompanySubscription}
+              onToggleStatus={handleToggleCompanyStatus}
+              onDeleteCompany={handleDeleteCompanySpace}
+            />
           )}
 
 
