@@ -40,16 +40,19 @@ function NavItem({
     <Link
       to={to}
       onClick={onNavigate}
-      className={`flex items-center justify-between gap-3 px-3 py-2 text-xs font-bold rounded-xl transition-all w-full ${
-        active ? 'bg-white text-sky-800 shadow-sm' : 'hover:bg-sky-700/40 text-sky-50'
+      className={`relative flex items-center justify-between gap-3 px-3 py-2.5 text-xs font-bold rounded-xl transition-all w-full ${
+        active
+          ? 'bg-white text-sky-800 shadow-md'
+          : 'text-sky-100/90 hover:bg-white/10 hover:text-white'
       }`}
     >
+      {active && <span className="absolute right-0 top-1.5 bottom-1.5 w-1 rounded-full bg-amber-400" />}
       <div className="flex items-center gap-3">
-        {icon}
+        <span className={active ? 'text-sky-600' : 'text-sky-300'}>{icon}</span>
         <span>{label}</span>
       </div>
       {!!badge && badge > 0 && (
-        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] text-white font-extrabold font-mono shadow-sm">
+        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] text-white font-extrabold font-mono shadow-sm">
           {badge}
         </span>
       )}
@@ -82,32 +85,35 @@ export default function AdminSidebar({
       )}
 
       <aside
-        className={`fixed top-0 bottom-0 right-0 z-50 flex flex-col w-64 bg-sky-800 text-white border-l transition-all md:sticky md:top-0 md:h-screen md:translate-x-0 flex-shrink-0 ${
+        className={`fixed top-0 bottom-0 right-0 z-50 flex flex-col w-64 bg-gradient-to-b from-sky-900 via-sky-800 to-sky-900 text-white border-l border-sky-950/40 shadow-2xl transition-all md:sticky md:top-0 md:h-screen md:translate-x-0 flex-shrink-0 ${
           sidebarOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'
         }`}
       >
-        <div className="flex items-center gap-3 px-6 py-5 border-b border-sky-700/60 bg-sky-900/10">
+        {/* Slim gold identity strip along the top edge */}
+        <div className="h-1 bg-gradient-to-l from-amber-400 via-amber-300 to-sky-400" />
+
+        <div className="flex items-center gap-3 px-6 py-5 border-b border-white/10">
           {appSettings?.logoDataUrl ? (
             <img
               src={appSettings.logoDataUrl}
               alt="Logo"
-              className="w-10 h-10 object-contain rounded-xl bg-white p-1 border shadow-sm"
+              className="w-11 h-11 object-contain rounded-xl bg-white p-1 border border-white/20 shadow-lg"
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="flex items-center justify-center w-10 h-10 text-lg font-black text-white bg-sky-600 rounded-xl shadow-md border">
+            <div className="flex items-center justify-center w-11 h-11 text-lg font-black text-sky-900 bg-gradient-to-br from-amber-300 to-amber-500 rounded-xl shadow-lg ring-2 ring-white/10">
               {(appSettings?.companyName || 'د').charAt(0)}
             </div>
           )}
           <div>
-            <h2 className="font-extrabold text-[15px]">{appSettings?.companyName || 'نظام الدوام'}</h2>
-            <p className="text-[10px] text-sky-200">التحكم والتقارير العامة</p>
+            <h2 className="font-extrabold text-[15px] tracking-tight">{appSettings?.companyName || 'نظام الدوام'}</h2>
+            <p className="text-[10px] text-sky-300 font-medium tracking-wide">التحكم والتقارير العامة</p>
           </div>
         </div>
 
         <nav className="flex-1 py-6 px-4 flex flex-col gap-6 overflow-y-auto">
           <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-bold text-sky-200 uppercase tracking-widest px-3 mb-1">الرئيسية</span>
+            <span className="text-[10px] font-bold text-amber-300/80 uppercase tracking-widest px-3 mb-1">الرئيسية</span>
 
             <NavItem
               to="/admin/dashboard"
@@ -146,7 +152,7 @@ export default function AdminSidebar({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-bold text-sky-200 uppercase tracking-widest px-3 mb-1">التنظيم والتنسيق</span>
+            <span className="text-[10px] font-bold text-amber-300/80 uppercase tracking-widest px-3 mb-1">التنظيم والتنسيق</span>
 
             {hasPermission('canManageEmployees') && (
               <NavItem
@@ -211,19 +217,24 @@ export default function AdminSidebar({
           </div>
         </nav>
 
-        <div className="px-5 py-2.5 border-t border-sky-700/40 text-center text-[10px] text-sky-200 font-sans tracking-wide bg-sky-900/10">
+        <div className="px-5 py-2.5 border-t border-white/10 text-center text-[10px] text-sky-300 font-sans tracking-wide">
           التصميم والتطوير عن طريق <span className="font-extrabold text-white">SHADY NASSEF</span>
         </div>
 
-        <div className="p-4 border-t border-sky-700/60 bg-sky-900/10 flex items-center justify-between text-xs">
-          <div className="truncate">
-            <span className="block text-[10px] text-sky-300">المستخدم النشط:</span>
-            <span className="font-extrabold">{admin.name || 'مدير الدوام'}</span>
+        <div className="p-4 border-t border-white/10 bg-black/10 flex items-center justify-between text-xs">
+          <div className="truncate flex items-center gap-2.5">
+            <span className="w-8 h-8 flex-shrink-0 rounded-full bg-gradient-to-br from-amber-300 to-amber-500 text-sky-900 font-black flex items-center justify-center text-xs">
+              {(admin.name || 'م').charAt(0)}
+            </span>
+            <div>
+              <span className="block text-[9px] text-sky-300">المستخدم النشط</span>
+              <span className="font-extrabold text-white">{admin.name || 'مدير الدوام'}</span>
+            </div>
           </div>
           <button
             onClick={onLogout}
             title="تسجيل الخروج"
-            className="p-1.5 hover:bg-rose-600 rounded-lg text-rose-200 hover:text-white transition-all"
+            className="p-1.5 hover:bg-rose-500 rounded-lg text-rose-200 hover:text-white transition-all flex-shrink-0"
           >
             <LogOut size={16} />
           </button>

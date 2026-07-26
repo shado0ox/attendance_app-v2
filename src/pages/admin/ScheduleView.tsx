@@ -99,20 +99,33 @@ export default function ScheduleView({
             {getDaysInSelectedMonth().map(({ dateStr, date }) => {
               const isFri = date.getDay() === 5;
               const isToday = dateStr === getAttTodayStr();
-              const cellBg = isToday ? 'bg-amber-50' : isFri ? 'bg-slate-50/90' : 'bg-white';
+              const rowBg = isToday ? 'bg-amber-50' : isFri ? 'bg-slate-50/90' : 'bg-white';
 
               return (
                 <tr
                   key={dateStr}
-                  className={`border-b last:border-0 hover:bg-sky-50/20 transition-colors ${
-                    isToday ? 'border-y-2 border-amber-300' : ''
+                  className={`border-b last:border-0 transition-colors ${
+                    isToday ? 'bg-amber-50 ring-2 ring-inset ring-amber-300 relative z-[1]' : 'hover:bg-sky-50/20'
                   }`}
                 >
-                  <td className={`p-3 font-extrabold text-slate-700 sticky right-0 z-10 shadow-2xs ${cellBg}`}>{dateStr}</td>
+                  <td
+                    className={`p-3 font-extrabold text-slate-700 sticky right-0 z-10 shadow-2xs ${rowBg} ${
+                      isToday ? 'border-r-4 border-amber-400' : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>{dateStr}</span>
+                      {isToday && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-400 text-amber-950 text-[8px] font-black animate-pulse whitespace-nowrap">
+                          ● اليوم
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td
                     className={`p-3 font-bold sticky right-[82px] z-10 border-l border-sky-100 shadow-2xs ${
-                      isFri ? 'text-indigo-600' : 'text-slate-500'
-                    } ${cellBg}`}
+                      isFri ? 'text-indigo-600' : isToday ? 'text-amber-700' : 'text-slate-500'
+                    } ${rowBg}`}
                   >
                     {DAYS_AR[date.getDay()]}
                   </td>
@@ -147,7 +160,9 @@ export default function ScheduleView({
                           if (!hasPermission('canEditSchedule')) return;
                           onEditCell(emp.id, dateStr, stType, entry?.note || '');
                         }}
-                        className="p-2 border-r border-sky-100 text-center cursor-pointer transition-all hover:bg-sky-100/30"
+                        className={`p-2 border-r border-sky-100 text-center cursor-pointer transition-all hover:bg-sky-100/30 ${
+                          isToday ? 'bg-amber-50/70' : ''
+                        }`}
                       >
                         <span className={`inline-block px-2.5 py-1 rounded-full font-bold text-[10px] ${badgeStyle}`}>
                           {badgeLabel}

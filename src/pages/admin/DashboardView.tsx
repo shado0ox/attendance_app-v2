@@ -132,11 +132,16 @@ export default function DashboardView({
                     <th
                       key={index}
                       className={`p-3 font-extrabold text-center border-r border-sky-50 leading-tight ${
-                        wd.isToday ? 'bg-amber-100/60 text-amber-950 font-black' : ''
+                        wd.isToday ? 'bg-amber-400 text-amber-950 font-black shadow-sm relative' : ''
                       }`}
                     >
-                      <div>{wd.name}</div>
-                      <div className="text-[9px] text-slate-400 mt-0.5">
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span>{wd.name}</span>
+                        {wd.isToday && (
+                          <span className="text-[8px] bg-amber-950/10 px-1.5 rounded-full font-black tracking-wide">اليوم</span>
+                        )}
+                      </div>
+                      <div className={`text-[9px] mt-0.5 ${wd.isToday ? 'text-amber-900/70' : 'text-slate-400'}`}>
                         {String(wd.date.getDate()).padStart(2, '0')}/{String(wd.date.getMonth() + 1).padStart(2, '0')}
                       </div>
                     </th>
@@ -179,7 +184,7 @@ export default function DashboardView({
                             onEditCell(emp.id, wd.dateStr, stType, entry?.note || '');
                           }}
                           className={`p-2 border-r border-sky-50 text-center cursor-pointer transition-all hover:bg-sky-100/30 ${
-                            wd.isToday ? 'bg-amber-100/10' : ''
+                            wd.isToday ? 'bg-amber-50 ring-1 ring-inset ring-amber-200' : ''
                           }`}
                           title="انقر لتعديل هذه النوبة فورياً"
                         >
@@ -253,3 +258,4 @@ export default function DashboardView({
     </div>
   );
 }
+

@@ -1031,7 +1031,7 @@ export default function AdminPortal({
       <div className="flex-1 flex flex-col min-w-0">
         
         {/* Top Header */}
-        <header className="flex items-center justify-between px-6 py-4 bg-white border-b border-sky-100 shadow-sm">
+        <header className="flex items-center justify-between px-6 py-4 bg-white/90 backdrop-blur border-b border-sky-100 shadow-sm">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -1039,18 +1039,24 @@ export default function AdminPortal({
             >
               <LayoutDashboard size={18} />
             </button>
-            <h1 className="text-base font-extrabold text-slate-800">
-              {activeView === 'dashboard' && 'لوحة التحكم المباشرة'}
-              {activeView === 'schedule' && 'جدول وشيفتات الدوام'}
-              {activeView === 'attendance' && 'كشف حضور وانصراف الموظفين'}
-              {activeView === 'alerts' && 'تنبيهات غياب التغطية'}
-              {activeView === 'employees' && 'إدارة الموظفين والبطاقات'}
-              {activeView === 'shifttypes' && 'نوع ومدة الشيفت'}
-              {activeView === 'departments' && 'الأقسام والشيفتات'}
-              {activeView === 'requests' && 'صندوق طلبات الحضور والمسكن'}
-              {activeView === 'settings' && 'إعدادات الشركة والمنصات'}
-              {activeView === 'companies' && 'إدارة مساحات عمل الشركات والاشتراكات الشهرية'}
-            </h1>
+            <span className="hidden sm:block w-1 h-8 rounded-full bg-gradient-to-b from-amber-400 to-sky-600" />
+            <div>
+              <h1 className="text-base font-extrabold text-slate-800 tracking-tight">
+                {activeView === 'dashboard' && 'لوحة التحكم المباشرة'}
+                {activeView === 'schedule' && 'جدول وشيفتات الدوام'}
+                {activeView === 'attendance' && 'كشف حضور وانصراف الموظفين'}
+                {activeView === 'alerts' && 'تنبيهات غياب التغطية'}
+                {activeView === 'employees' && 'إدارة الموظفين والبطاقات'}
+                {activeView === 'shifttypes' && 'نوع ومدة الشيفت'}
+                {activeView === 'departments' && 'الأقسام والشيفتات'}
+                {activeView === 'requests' && 'صندوق طلبات الحضور والمسكن'}
+                {activeView === 'settings' && 'إعدادات الشركة والمنصات'}
+                {activeView === 'companies' && 'إدارة مساحات عمل الشركات والاشتراكات الشهرية'}
+              </h1>
+              <p className="hidden sm:block text-[10px] text-slate-400 font-bold mt-0.5">
+                {new Date().toLocaleDateString('ar-SA-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
