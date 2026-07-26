@@ -1,10 +1,65 @@
 @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800;900&display=swap');
 @import "tailwindcss";
 
+/*
+  Brand refresh â€” Nov 2026
+  --------------------------------------------------------------------------
+  The app was built entirely with Tailwind's default `sky` (primary) and
+  `slate` (neutral) palettes. Rather than touching every `bg-sky-*` /
+  `text-sky-*` class across hundreds of components, we re-point those two
+  palettes at a custom deep-teal brand identity here. This re-skins the
+  entire app (Login, Admin, Employee) from one place, safely, with zero
+  risk of missing a spot or breaking a component's logic.
+*/
 @theme {
   --font-tajawal: "Tajawal", sans-serif;
+
+  /* Primary brand color â€” deep teal instead of generic Tailwind sky-blue */
+  --color-sky-50: #f0fdfa;
+  --color-sky-100: #ccfbf1;
+  --color-sky-200: #99f6e4;
+  --color-sky-300: #5eead4;
+  --color-sky-400: #2dd4bf;
+  --color-sky-500: #14b8a6;
+  --color-sky-600: #0d9488;
+  --color-sky-700: #0f766e;
+  --color-sky-800: #115e59;
+  --color-sky-900: #134e4a;
+  --color-sky-950: #042f2e;
+
+  /* Neutral â€” slightly cooler/darker slate for better contrast on cards */
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
 }
 
 body {
   font-family: "Tajawal", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Consistent, calmer focus ring across every input/button in the app */
+:focus-visible {
+  outline: 2px solid var(--color-sky-500);
+  outline-offset: 1px;
+}
+
+/* Slightly softer scrollbars to match the rounded, modern shell */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-slate-300);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }

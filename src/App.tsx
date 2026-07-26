@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Loader, Key, X, AlertCircle, Smartphone } from 'lucide-react';
 
 import LoginScreen from './components/LoginScreen';
@@ -279,7 +280,11 @@ export default function App() {
     const storedSession = localStorage.getItem('app_session');
     if (storedSession) {
       try {
-        setSession(JSON.parse(storedSession));
+        const parsed = JSON.parse(storedSession);
+        setSession(parsed);
+        if (parsed?.role && (location.pathname === '/' || location.pathname === '/login')) {
+          navigate(parsed.role === 'employee' ? '/employee' : '/admin/dashboard', { replace: true });
+        }
       } catch (e) {}
     }
 
@@ -315,6 +320,9 @@ export default function App() {
     }
   };
 
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const persistSession = (role: 'superadmin' | 'admin' | 'employee' | null, info: any) => {
     const s = { role, info };
     setSession(s);
@@ -327,15 +335,18 @@ export default function App() {
 
   const handleEmployeeLoginSuccess = (emp: any) => {
     persistSession('employee', emp);
+    navigate('/employee', { replace: true });
   };
 
   const handleAdminLoginSuccess = (adm: any) => {
     persistSession(adm.role, adm);
+    navigate('/admin/dashboard', { replace: true });
   };
 
   const handleLogout = () => {
     requestConfirm('هل تريد تأكيد تسجيل الخروج وتأمين المنصة؟', () => {
       persistSession(null, null);
+      navigate('/login', { replace: true });
     });
   };
 
@@ -416,51 +427,94 @@ export default function App() {
   return (
     <div dir="rtl" className="font-tajawal text-slate-800 transition-all select-none">
       
-      {/* 1. Login Authentication View */}
-      {session.role === null ? (
-        <LoginScreen
-          appSettings={appSettings}
-          onAdminLogin={handleAdminLoginSuccess}
-          onEmployeeLogin={handleEmployeeLoginSuccess}
-          employees={appData.employees}
-          companyId={companyId}
-          setCompanyId={setCompanyId}
-          companiesList={companiesList}
+      {/*
+        Real, bookmarkable routes instead of one page that silently swaps
+        content based on local state:
+          /login            → sign-in screen
+          /employee          → employee self-service portal
+          /admin/:view       → admin dashboard, one URL per section
+            (e.g. /admin/attendance, /admin/employees, /admin/settings ...)
+        Each guard below redirects to /login if the visitor's session
+        doesn't match what the route requires.
+      */}
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            session.role === null ? (
+              <LoginScreen
+                appSettings={appSettings}
+                onAdminLogin={handleAdminLoginSuccess}
+                onEmployeeLogin={handleEmployeeLoginSuccess}
+                employees={appData.employees}
+                companyId={companyId}
+                setCompanyId={setCompanyId}
+                companiesList={companiesList}
+              />
+            ) : (
+              <Navigate to={session.role === 'employee' ? '/employee' : '/admin/dashboard'} replace />
+            )
+          }
         />
-      ) : session.role === 'employee' ? (
-        
-        /* 2. Employee Personal View */
-        <EmployeePortal
-          employee={session.info}
-          appSettings={appSettings}
-          departments={appData.departments}
-          employees={appData.employees}
-          shiftTypes={appData.shiftTypes}
-          schedule={appData.schedule}
-          onLogout={handleLogout}
-          onOpenChangePassword={handleOpenChangePassword}
-          companyId={companyId}
+
+        <Route
+          path="/employee"
+          element={
+            session.role === 'employee' ? (
+              <EmployeePortal
+                employee={session.info}
+                appSettings={appSettings}
+                departments={appData.departments}
+                employees={appData.employees}
+                shiftTypes={appData.shiftTypes}
+                schedule={appData.schedule}
+                onLogout={handleLogout}
+                onOpenChangePassword={handleOpenChangePassword}
+                companyId={companyId}
+              />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
         />
-      ) : (
-        
-        /* 3. Managers Dashboard Control */
-        <AdminPortal
-          admin={session.info}
-          appSettings={appSettings}
-          appData={appData}
-          departments={appData.departments}
-          employees={appData.employees}
-          shiftTypes={appData.shiftTypes}
-          schedule={appData.schedule}
-          onLogout={handleLogout}
-          onUpdateSettings={handleUpdateSettings}
-          onUpdateAppData={handleUpdateAppData}
-          registrationRequests={registrationRequests}
-          companyId={companyId}
-          companiesList={companiesList}
-          fetchCompanies={fetchCompanies}
+
+        <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+        <Route
+          path="/admin/:view"
+          element={
+            session.role === 'admin' || session.role === 'superadmin' ? (
+              <AdminPortal
+                admin={session.info}
+                appSettings={appSettings}
+                appData={appData}
+                departments={appData.departments}
+                employees={appData.employees}
+                shiftTypes={appData.shiftTypes}
+                schedule={appData.schedule}
+                onLogout={handleLogout}
+                onUpdateSettings={handleUpdateSettings}
+                onUpdateAppData={handleUpdateAppData}
+                registrationRequests={registrationRequests}
+                companyId={companyId}
+                companiesList={companiesList}
+                fetchCompanies={fetchCompanies}
+              />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
         />
-      )}
+
+        <Route
+          path="*"
+          element={
+            <Navigate
+              to={session.role === null ? '/login' : session.role === 'employee' ? '/employee' : '/admin/dashboard'}
+              replace
+            />
+          }
+        />
+      </Routes>
 
       {/* Shared Change Password Modal across panels */}
       {changePwdOpen && (

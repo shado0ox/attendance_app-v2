@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, CalendarDays, ClipboardCheck, Bell, Users, Building2,
   Clock, Inbox, Settings, LogOut, ChevronRight, ChevronLeft, Printer, Plus,
@@ -7,6 +8,9 @@ import {
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+import AdminSidebar from './AdminSidebar';
+import DashboardView from '../pages/admin/DashboardView';
+import AttendanceView from '../pages/admin/AttendanceView';
 
 interface AdminPortalProps {
   admin: any;
@@ -41,7 +45,10 @@ export default function AdminPortal({
   companiesList,
   fetchCompanies
 }: AdminPortalProps) {
-  const [activeView, setActiveTab] = useState('dashboard');
+  const { view: routeView } = useParams<{ view: string }>();
+  const navigate = useNavigate();
+  const activeView = routeView || 'dashboard';
+  const setActiveTab = (view: string) => navigate(`/admin/${view}`);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Month navigation state
@@ -996,204 +1003,21 @@ export default function AdminPortal({
   return (
     <div className="flex flex-col md:flex-row min-h-screen bg-slate-50">
       
-      {/* Sidebar Overlay for Mobile */}
-      {sidebarOpen && (
-        <div
-          onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 z-40 bg-slate-900 bg-opacity-40 md:hidden transition-all"
-        />
-      )}
-
-      {/* Roster System Sidebar Navigation */}
-      <aside
-        className={`fixed top-0 bottom-0 right-0 z-50 flex flex-col w-64 bg-sky-800 text-white border-l transition-all md:sticky md:top-0 md:h-screen md:translate-x-0 flex-shrink-0 ${
-          sidebarOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'
-        }`}
-      >
-        <div className="flex items-center gap-3 px-6 py-5 border-b border-sky-700/60 bg-sky-900/10">
-          {appSettings?.logoDataUrl ? (
-            <img 
-              src={appSettings.logoDataUrl} 
-              alt="Logo" 
-              className="w-10 h-10 object-contain rounded-xl bg-white p-1 border shadow-sm"
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            <div className="flex items-center justify-center w-10 h-10 text-lg font-black text-white bg-sky-600 rounded-xl shadow-md border">
-              {(appSettings?.companyName || 'د').charAt(0)}
-            </div>
-          )}
-          <div>
-            <h2 className="font-extrabold text-[15px]">{appSettings?.companyName || 'نظام الدوام'}</h2>
-            <p className="text-[10px] text-sky-200">التحكم والتقارير العامة</p>
-          </div>
-        </div>
-
-        <nav className="flex-1 py-6 px-4 flex flex-col gap-6 overflow-y-auto">
-          
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-bold text-sky-200 uppercase tracking-widest px-3 mb-1">الرئيسية</span>
-            
-            <button
-              onClick={() => { setActiveTab('dashboard'); setSidebarOpen(false); }}
-              className={`flex items-center gap-3 px-3 py-2 text-xs font-bold rounded-xl transition-all ${
-                activeView === 'dashboard' ? 'bg-white text-sky-800 shadow-sm' : 'hover:bg-sky-700/40 text-sky-50'
-              }`}
-            >
-              <LayoutDashboard size={15} />
-              <span>لوحة التحكم المباشرة</span>
-            </button>
-
-            <button
-              onClick={() => { setActiveTab('schedule'); setSidebarOpen(false); }}
-              className={`flex items-center gap-3 px-3 py-2 text-xs font-bold rounded-xl transition-all ${
-                activeView === 'schedule' ? 'bg-white text-sky-800 shadow-sm' : 'hover:bg-sky-700/40 text-sky-50'
-              }`}
-            >
-              <CalendarDays size={15} />
-              <span>جدول وشيفتات الدوام</span>
-            </button>
-
-            {hasPermission('canViewReports') && (
-              <button
-                onClick={() => { setActiveTab('attendance'); setSidebarOpen(false); }}
-                className={`flex items-center gap-3 px-3 py-2 text-xs font-bold rounded-xl transition-all ${
-                  activeView === 'attendance' ? 'bg-white text-sky-800 shadow-sm' : 'hover:bg-sky-700/40 text-sky-50'
-                }`}
-              >
-                <ClipboardCheck size={15} />
-                <span>كشف الحضور والانصراف</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => { setActiveTab('alerts'); setSidebarOpen(false); }}
-              className={`flex items-center justify-between px-3 py-2 text-xs font-bold rounded-xl transition-all w-full ${
-                activeView === 'alerts' ? 'bg-white text-sky-800 shadow-sm' : 'hover:bg-sky-700/40 text-sky-50'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Bell size={15} />
-                <span>تنبيهات تغطية الشيفتات</span>
-              </div>
-              {(() => {
-                const unreadGapsCount = getShiftGaps().filter(g => !(appSettings.readAlerts || []).includes(g.id)).length;
-                return unreadGapsCount > 0 ? (
-                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] text-white font-extrabold font-mono shadow-sm animate-pulse">
-                    {unreadGapsCount}
-                  </span>
-                ) : null;
-              })()}
-            </button>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[10px] font-bold text-sky-200 uppercase tracking-widest px-3 mb-1">التنظيم والتنسيق</span>
-
-            {hasPermission('canManageEmployees') && (
-              <button
-                onClick={() => { setActiveTab('employees'); setSidebarOpen(false); }}
-                className={`flex items-center gap-3 px-3 py-2 text-xs font-bold rounded-xl transition-all ${
-                  activeView === 'employees' ? 'bg-white text-sky-800 shadow-sm' : 'hover:bg-sky-700/40 text-sky-50'
-                }`}
-              >
-                <Users size={15} />
-                <span>شؤون الموظفين</span>
-              </button>
-            )}
-
-            {hasPermission('canManageDepts') && (
-              <button
-                onClick={() => { setActiveTab('departments'); setSidebarOpen(false); }}
-                className={`flex items-center gap-3 px-3 py-2 text-xs font-bold rounded-xl transition-all ${
-                  activeView === 'departments' ? 'bg-white text-sky-800 shadow-sm' : 'hover:bg-sky-700/40 text-sky-50'
-                }`}
-              >
-                <Building2 size={15} />
-                <span>إدارة الأقسام</span>
-              </button>
-            )}
-
-            {hasPermission('canManageDepts') && (
-              <button
-                onClick={() => { setActiveTab('shifttypes'); setSidebarOpen(false); }}
-                className={`flex items-center gap-3 px-3 py-2 text-xs font-bold rounded-xl transition-all ${
-                  activeView === 'shifttypes' ? 'bg-white text-sky-800 shadow-sm' : 'hover:bg-sky-700/40 text-sky-50'
-                }`}
-              >
-                <Clock size={15} />
-                <span>نوع ومدة الشيفت</span>
-              </button>
-            )}
-
-            {hasPermission('canApproveRequests') && (
-              <button
-                onClick={() => { setActiveTab('requests'); setSidebarOpen(false); }}
-                className={`flex items-center justify-between px-3 py-2 text-xs font-bold rounded-xl transition-all w-full ${
-                  activeView === 'requests' ? 'bg-white text-sky-800 shadow-sm' : 'hover:bg-sky-700/40 text-sky-50'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <Inbox size={15} />
-                  <span>الطلبات الواردة</span>
-                </div>
-                {(() => {
-                  const pendingRegCount = registrationRequests.filter((r) => r.status === 'pending').length;
-                  const pendingEmpRequestsCount = adminRequests.filter((r) => r.status === 'pending').length;
-                  const totalPendingRequests = pendingRegCount + pendingEmpRequestsCount;
-                  return totalPendingRequests > 0 ? (
-                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] text-white font-extrabold font-mono shadow-sm">
-                      {totalPendingRequests}
-                    </span>
-                  ) : null;
-                })()}
-              </button>
-            )}
-
-            {hasPermission('canManageSettings') && (
-              <button
-                onClick={() => { setActiveTab('settings'); setSidebarOpen(false); }}
-                className={`flex items-center gap-3 px-3 py-2 text-xs font-bold rounded-xl transition-all ${
-                  activeView === 'settings' ? 'bg-white text-sky-800 shadow-sm' : 'hover:bg-sky-700/40 text-sky-50'
-                }`}
-              >
-                <Settings size={15} />
-                <span>بيانات وإعدادات النظام</span>
-              </button>
-            )}
-
-            {admin.role === 'superadmin' && companyId === 'default' && (
-              <button
-                onClick={() => { setActiveTab('companies'); setSidebarOpen(false); }}
-                className={`flex items-center gap-3 px-3 py-2 text-xs font-bold rounded-xl transition-all ${
-                  activeView === 'companies' ? 'bg-white text-sky-800 shadow-sm' : 'hover:bg-sky-700/40 text-sky-50'
-                }`}
-              >
-                <Building2 size={15} />
-                <span>الشركات والاشتراكات الشهري</span>
-              </button>
-            )}
-          </div>
-        </nav>
-
-        <div className="px-5 py-2.5 border-t border-sky-700/40 text-center text-[10px] text-sky-200 font-sans tracking-wide bg-sky-900/10">
-          التصميم والتطوير عن طريق <span className="font-extrabold text-white">SHADY NASSEF</span>
-        </div>
-
-        <div className="p-4 border-t border-sky-700/60 bg-sky-900/10 flex items-center justify-between text-xs">
-          <div className="truncate">
-            <span className="block text-[10px] text-sky-300">المستخدم النشط:</span>
-            <span className="font-extrabold">{admin.name || 'مدير الدوام'}</span>
-          </div>
-          <button
-            onClick={onLogout}
-            title="تسجيل الخروج"
-            className="p-1.5 hover:bg-rose-600 rounded-lg text-rose-200 hover:text-white transition-all"
-          >
-            <LogOut size={16} />
-          </button>
-        </div>
-      </aside>
+      <AdminSidebar
+        appSettings={appSettings}
+        admin={admin}
+        activeView={activeView}
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+        hasPermission={hasPermission}
+        unreadAlertsCount={getShiftGaps().filter(g => !(appSettings.readAlerts || []).includes(g.id)).length}
+        pendingRequestsCount={
+          registrationRequests.filter((r) => r.status === 'pending').length +
+          adminRequests.filter((r) => r.status === 'pending').length
+        }
+        companyId={companyId}
+        onLogout={onLogout}
+      />
 
       {/* Main View Area */}
       <div className="flex-1 flex flex-col min-w-0">
@@ -1246,218 +1070,27 @@ export default function AdminPortal({
           
           {/* View: Dashboard */}
           {activeView === 'dashboard' && (
-            <div className="flex flex-col gap-6">
-              {/* KPIs Grid */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="p-5 bg-white border border-sky-100 rounded-2xl shadow-sm">
-                  <span className="text-[10px] font-bold text-slate-400 block mb-1">إجمالي الموظفين</span>
-                  <div className="text-xl font-extrabold text-sky-600">{employees.length} موظف</div>
-                </div>
-                
-                <div className="p-5 bg-white border border-sky-100 rounded-2xl shadow-sm">
-                  <span className="text-[10px] font-bold text-slate-400 block mb-1">عدد الأقسام</span>
-                  <div className="text-xl font-extrabold text-slate-700">{departments.length} فرع</div>
-                </div>
-
-                <div className="p-5 bg-white border border-sky-100 rounded-2xl shadow-sm">
-                  <span className="text-[10px] font-bold text-slate-400 block mb-1">تنبيهات الشهر</span>
-                  <div className="text-xl font-extrabold text-rose-600">{getShiftGaps().length} تغطية ناقصة</div>
-                </div>
-
-                <div className="p-5 bg-white border border-sky-100 rounded-2xl shadow-sm">
-                  <span className="text-[10px] font-bold text-slate-400 block mb-1">نوبات العمل</span>
-                  <div className="text-xl font-extrabold text-slate-700">{shiftTypes.length || 2} نوبة</div>
-                </div>
-              </div>
-
-              {/* Side-by-side Layout of Active Schedule & Coverage Alerts */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start mt-2" dir="rtl">
-                
-                {/* Right Area: Interactive Weekly Schedule Section (lg:col-span-8) */}
-                <div className="lg:col-span-8 p-6 bg-white border border-sky-100 rounded-2xl shadow-sm text-right flex flex-col gap-5 animate-fade-in">
-                  <div className="flex justify-between items-center flex-wrap gap-4 border-b border-sky-50 pb-4">
-                    <div>
-                      <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
-                        <Clock size={16} className="text-sky-500" />
-                        <span>جدول دوام الأسبوع الحالي للأقسام</span>
-                      </h3>
-                      <p className="text-[10px] text-slate-400 mt-1">عرض تفاعلي رائع لتوزيع النوبات والنواتج للأقسام المختلفة للأسبوع الجاري.</p>
-                    </div>
-
-                    <div className="flex p-0.5 bg-slate-100 rounded-xl flex-wrap">
-                      {departments.map((d) => (
-                        <button
-                          key={d.id}
-                          onClick={() => setSelectedDept(d.id)}
-                          className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                            selectedDept === d.id ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                          }`}
-                        >
-                          {d.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="overflow-x-auto rounded-xl border border-sky-50">
-                    <table className="w-full border-collapse text-right text-xs">
-                      <thead>
-                        <tr className="bg-sky-50/60 text-sky-900 border-b border-sky-100">
-                          <th className="p-3 font-extrabold text-slate-700">الموظف</th>
-                          {(() => {
-                            const current = new Date();
-                            const dayOfWeek = current.getDay(); // 0 is Sun, 6 is Sat
-                            const dist = dayOfWeek === 6 ? 0 : -(dayOfWeek + 1);
-                            const startOfWeek = new Date(current);
-                            startOfWeek.setDate(current.getDate() + dist);
-
-                            const weekDays = [];
-                            for (let i = 0; i < 7; i++) {
-                              const next = new Date(startOfWeek);
-                              next.setDate(startOfWeek.getDate() + i);
-                              const name = DAYS_AR[next.getDay()];
-                              const isToday = next.toDateString() === current.toDateString();
-                              weekDays.push({ date: next, name, isToday });
-                            }
-
-                            return weekDays.map((wd, index) => (
-                              <th key={index} className={`p-3 font-extrabold text-center border-r border-sky-50 leading-tight ${wd.isToday ? 'bg-amber-100/60 text-amber-950 font-black' : ''}`}>
-                                <div>{wd.name}</div>
-                                <div className="text-[9px] text-slate-400 mt-0.5">{String(wd.date.getDate()).padStart(2, '0')}/{String(wd.date.getMonth() + 1).padStart(2, '0')}</div>
-                              </th>
-                            ));
-                          })()}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {employees.filter((e) => e.dept === selectedDept).map((emp) => {
-                          const current = new Date();
-                          const dayOfWeek = current.getDay();
-                          const dist = dayOfWeek === 6 ? 0 : -(dayOfWeek + 1);
-                          const startOfWeek = new Date(current);
-                          startOfWeek.setDate(current.getDate() + dist);
-
-                          const weekDays = [];
-                          for (let i = 0; i < 7; i++) {
-                            const next = new Date(startOfWeek);
-                            next.setDate(startOfWeek.getDate() + i);
-                            const dateStr = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
-                            weekDays.push({ dateStr, isToday: next.toDateString() === current.toDateString() });
-                          }
-
-                          return (
-                            <tr key={emp.id} className="border-b last:border-0 hover:bg-slate-50/50 transition-colors">
-                              <td className="p-3 font-extrabold text-slate-700 bg-slate-50/20">{emp.name}</td>
-                              {weekDays.map((wd, idx) => {
-                                const entry = schedule[wd.dateStr]?.[emp.id];
-                                const stType = entry?.shiftType || 'A';
-                                const _st = (shiftTypes || []).find((t: any) => t.id === stType);
-                                
-                                let badgeStyle = 'text-slate-400 bg-slate-100 font-medium border border-transparent';
-                                let badgeLabel = '🏝️ إجازة';
-
-                                if (_st) {
-                                  if (_st.id === 'S') {
-                                    badgeStyle = 'text-emerald-700 bg-emerald-50 border border-emerald-200/50 font-bold';
-                                    badgeLabel = `🌅 ${_st.name.replace('شيفت', '').trim()}`;
-                                  } else if (_st.id === 'E') {
-                                    badgeStyle = 'text-indigo-700 bg-indigo-50 border border-indigo-200/50 font-bold';
-                                    badgeLabel = `🌙 ${_st.name.replace('شيفت', '').trim()}`;
-                                  } else if (_st.type === 'double') {
-                                    badgeStyle = 'text-amber-700 bg-amber-50 border border-amber-200/50 font-bold';
-                                    badgeLabel = `🔄 ${_st.name.replace('شيفت', '').trim()}`;
-                                  } else {
-                                    badgeStyle = 'text-sky-700 bg-sky-50 border border-sky-200/50 font-bold';
-                                    badgeLabel = `⏱️ ${_st.name.replace('شيفت', '').trim()}`;
-                                  }
-                                }
-
-                                return (
-                                  <td
-                                    key={idx}
-                                    onClick={() => {
-                                      if (!hasPermission('canEditSchedule')) return;
-                                      setSmEmployee(emp.id);
-                                      setSmDate(wd.dateStr);
-                                      setSmShiftType(stType);
-                                      setSmNote(entry?.note || '');
-                                      setSmMode('single');
-                                      setShiftModalOpen(true);
-                                    }}
-                                    className={`p-2 border-r border-sky-50 text-center cursor-pointer transition-all hover:bg-sky-100/30 ${wd.isToday ? 'bg-amber-100/10' : ''}`}
-                                    title="انقر لتعديل هذه النوبة فورياً"
-                                  >
-                                    <span className={`inline-block px-2 py-1 rounded-lg text-[9px] font-bold ${badgeStyle}`}>
-                                      {badgeLabel}
-                                    </span>
-                                    {entry?.note && (
-                                      <div className="text-[8px] text-slate-400 mt-0.5 truncate max-w-[80px]" title={entry.note}>
-                                        📝 {entry.note}
-                                      </div>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          );
-                        })}
-                        {employees.filter((e) => e.dept === selectedDept).length === 0 && (
-                          <tr>
-                            <td colSpan={8} className="p-8 text-center text-xs text-slate-400 font-medium">
-                              لا يوجد موظفون مضافون في هذا القسم حالياً لعرض جدولهم الأسبوعي.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Left Area: Alerts & Gaps Notifications Section (lg:col-span-4) */}
-                <div className="lg:col-span-4 p-5 bg-white border border-sky-100 rounded-2xl shadow-sm text-right flex flex-col gap-4 animate-fade-in">
-                  <div className="flex justify-between items-center border-b border-sky-50 pb-3">
-                    <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
-                      <AlertTriangle size={15} className="text-rose-500 animate-pulse" />
-                      <span>تنبيهات نقص التغطية الجارية</span>
-                    </h3>
-                    <span className="text-[10px] bg-rose-50 text-rose-600 px-2 py-0.5 rounded-full font-extrabold font-mono">
-                      {getShiftGaps().filter(g => !(appSettings.readAlerts || []).includes(g.id)).length} نشط
-                    </span>
-                  </div>
-
-                  <div className="flex flex-col gap-2.5 max-h-[460px] overflow-y-auto pr-1">
-                    {(() => {
-                      const unreadGaps = getShiftGaps().filter(g => !(appSettings.readAlerts || []).includes(g.id));
-                      if (unreadGaps.length === 0) {
-                        return (
-                          <div className="p-10 text-center text-xs text-slate-400 font-medium border border-dashed border-slate-200 rounded-xl bg-slate-50/50 flex flex-col items-center gap-2">
-                            <span className="text-2xl animate-bounce">🎉</span>
-                            <span>ممتاز! جميع الأقسام مغطاة بالكامل ولا توجد تنبيهات غير مقروءة حالياً.</span>
-                          </div>
-                        );
-                      }
-                      return unreadGaps.slice(0, 5).map((g) => (
-                        <div key={g.id} className="p-3 bg-rose-50/40 border-r-4 border-rose-500 rounded-l-xl border border-sky-100 flex justify-between items-start gap-2.5 hover:bg-rose-50/80 transition-all">
-                          <div className="text-xs text-slate-700 leading-relaxed">
-                            <div className="font-extrabold text-rose-950 text-[11px] mb-0.5">{g.dept}</div>
-                            <div className="text-[10px] text-slate-500 font-mono mb-1">{g.date}</div>
-                            <span className="text-[10px] text-rose-800 font-bold">{g.msg}</span>
-                          </div>
-                          <button
-                            onClick={() => toggleAlertRead(g.id)}
-                            className="p-1 hover:bg-rose-100 rounded-lg text-rose-600 transition-all flex-shrink-0"
-                            title="تحديد كمقروء وحذف من القائمة الفعّالة"
-                          >
-                            <Check size={14} className="stroke-[3]" />
-                          </button>
-                        </div>
-                      ));
-                    })()}
-                  </div>
-                </div>
-
-              </div>
-            </div>
+            <DashboardView
+              employees={employees}
+              departments={departments}
+              shiftTypes={shiftTypes}
+              schedule={schedule}
+              appSettings={appSettings}
+              selectedDept={selectedDept}
+              setSelectedDept={setSelectedDept}
+              hasPermission={hasPermission}
+              getShiftGaps={getShiftGaps}
+              toggleAlertRead={toggleAlertRead}
+              DAYS_AR={DAYS_AR}
+              onEditCell={(empId, dateStr, shiftType, note) => {
+                setSmEmployee(empId);
+                setSmDate(dateStr);
+                setSmShiftType(shiftType);
+                setSmNote(note);
+                setSmMode('single');
+                setShiftModalOpen(true);
+              }}
+            />
           )}
 
           {/* View: Schedule */}
@@ -1603,256 +1236,33 @@ export default function AdminPortal({
 
           {/* View: Attendance Records list */}
           {activeView === 'attendance' && (
-            <div className="flex flex-col gap-6">
-              {/* Widgets Summary Cards */}
-              {(() => {
-                const stats = getTodayAttendanceStats();
-                return (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" dir="rtl">
-                    <div className="p-5 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center justify-between shadow-sm text-right">
-                      <div>
-                        <span className="text-xs font-bold text-emerald-600">الموظفون الحاضرون (اليوم)</span>
-                        <h4 className="text-2xl font-black text-emerald-800 mt-1">{stats.presentCount}</h4>
-                        <p className="text-[10px] text-emerald-700 mt-1">سجلوا حضورهم لليوم</p>
-                      </div>
-                      <div className="w-12 h-12 rounded-xl bg-emerald-600/10 flex items-center justify-center text-emerald-600 text-lg">
-                        <UserCheck size={24} />
-                      </div>
-                    </div>
-
-                    <div className="p-5 bg-rose-50 border border-rose-100 rounded-2xl flex items-center justify-between shadow-sm text-right">
-                      <div>
-                        <span className="text-xs font-bold text-rose-600">الموظفون الغائبون (اليوم)</span>
-                        <h4 className="text-2xl font-black text-rose-800 mt-1">{stats.absentCount}</h4>
-                        <p className="text-[10px] text-rose-700 mt-1">لم يسجلوا حضورهم حتى الآن</p>
-                      </div>
-                      <div className="w-12 h-12 rounded-xl bg-rose-600/10 flex items-center justify-center text-rose-600 text-lg">
-                        <UserX size={24} />
-                      </div>
-                    </div>
-
-                    <div className="p-5 bg-sky-50 border border-sky-100 rounded-2xl flex items-center justify-between shadow-sm sm:col-span-2 lg:col-span-1 text-right">
-                      <div>
-                        <span className="text-xs font-bold text-sky-600">إجمالي قوة العمل</span>
-                        <h4 className="text-2xl font-black text-sky-800 mt-1">{stats.totalActive} موظف</h4>
-                        <p className="text-[10px] text-sky-700 mt-1">الموظفون المسجلون في قواعد البيانات</p>
-                      </div>
-                      <div className="w-12 h-12 rounded-xl bg-sky-600/10 flex items-center justify-center text-sky-600 text-lg">
-                        <Users size={24} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Reports Query Filter */}
-              <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
-                <h3 className="font-extrabold text-slate-800 text-sm">تصفية وبحث كشف الحضور</h3>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5 items-end">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-slate-500">من تاريخ</label>
-                    <input
-                      type="date"
-                      value={attFilterFrom}
-                      onChange={(e) => setAttFilterFrom(e.target.value)}
-                      className="px-3 py-2 text-xs border rounded-lg focus:outline-none"
-                    />
-                  </div>
-                  
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-slate-500">إلى تاريخ</label>
-                    <input
-                      type="date"
-                      value={attFilterTo}
-                      onChange={(e) => setAttFilterTo(e.target.value)}
-                      className="px-3 py-2 text-xs border rounded-lg focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-slate-500">الموظف</label>
-                    <select
-                      value={attFilterEmp}
-                      onChange={(e) => setAttFilterEmp(e.target.value)}
-                      className="px-3 py-2 text-xs border rounded-lg focus:outline-none bg-white font-medium"
-                    >
-                      <option value="">الكل</option>
-                      {employees.map((e) => (
-                        <option key={e.id} value={e.id}>
-                          {e.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-slate-500">القسم</label>
-                    <select
-                      value={attFilterDept}
-                      onChange={(e) => setAttFilterDept(e.target.value)}
-                      className="px-3 py-2 text-xs border rounded-lg focus:outline-none bg-white font-medium"
-                    >
-                      <option value="">الكل</option>
-                      {departments.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={loadAttendance}
-                      className="flex items-center justify-center gap-1.5 flex-1 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold text-xs shadow-sm transition-all"
-                    >
-                      <Search size={14} />
-                      <span>تحديث</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        const d = new Date();
-                        const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                        setAttFilterFrom(todayStr);
-                        setAttFilterTo(todayStr);
-                        setAttFilterEmp('');
-                        setAttFilterDept('');
-                        setAttFilterStatus('');
-                        // Trigger load
-                        setTimeout(() => {
-                          loadAttendance();
-                        }, 50);
-                      }}
-                      className="px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg font-extrabold text-xs border border-slate-200/60 transition-all text-center whitespace-nowrap"
-                      title="إعادة تعيين حقول الفلترة والبحث"
-                    >
-                      إعادة تعيين
-                    </button>
-                    
-                    <button
-                      onClick={() => {
-                        // EXPORT CSV
-                        let csv = '\uFEFF';
-                        csv += 'التاريخ,الموظف,القسم,الحضور,الانصراف,المدة,مصدر البصمة\n';
-                        attendanceRecords.forEach((r) => {
-                          const deptObj = departments.find((d) => d.id === r.dept);
-                          const fSource = r.source || (r.note?.includes('الإدارة') || r.note?.includes('الادارة') ? 'الإدارة' : 'المقر');
-                          csv += `${r.date},${r.empName},${deptObj ? deptObj.name : r.dept},${r.checkIn},${r.checkOut || 'لم يسجل'},${
-                            r.checkOutTs && r.checkInTs ? Math.round((r.checkOutTs - r.checkInTs) / 60000) + ' د' : ''
-                          },${fSource}\n`;
-                        });
-                        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-                        const link = document.createElement('a');
-                        link.href = URL.createObjectURL(blob);
-                        link.download = `كشف_حضور_${attFilterFrom}.csv`;
-                        link.click();
-                      }}
-                      className="p-2.5 hover:bg-sky-50 border rounded-lg text-sky-600 transition-all"
-                      title="تصدير CSV"
-                    >
-                      <Download size={15} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Records List Log */}
-              <div className="bg-white border border-sky-100 rounded-2xl shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse text-right text-xs">
-                    <thead>
-                      <tr className="bg-sky-50 text-slate-700 font-bold border-b border-sky-100">
-                        <th className="p-3 font-extrabold">التاريخ</th>
-                        <th className="p-3 font-extrabold">الموظف</th>
-                        <th className="p-3 font-extrabold">القسم</th>
-                        <th className="p-3 font-extrabold">الحضور</th>
-                        <th className="p-3 font-extrabold">الانصراف</th>
-                        <th className="p-3 font-extrabold">مدة العمل</th>
-                        <th className="p-3 font-extrabold">مكان البصمة</th>
-                        <th className="p-3 font-extrabold text-center">الإجراءات</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {attendanceRecords
-                        .filter((r) => {
-                          if (attFilterFrom && r.date < attFilterFrom) return false;
-                          if (attFilterTo && r.date > attFilterTo) return false;
-                          if (attFilterEmp && r.empId !== attFilterEmp) return false;
-                          if (attFilterDept && r.dept !== attFilterDept) return false;
-                          if (attFilterStatus === 'present' && r.checkOut) return false;
-                          if (attFilterStatus === 'checkedout' && !r.checkOut) return false;
-                          return true;
-                        })
-                        .map((rec) => {
-                          const deptObj = departments.find((d) => d.id === rec.dept);
-                          
-                          let duration = '-';
-                          if (rec.checkInTs && rec.checkOutTs) {
-                            const diffMins = Math.round((rec.checkOutTs - rec.checkInTs) / 60000);
-                            duration = `${Math.floor(diffMins / 60)}ساعة ${diffMins % 60}د`;
-                          }
-
-                          const fSource = rec.source || (rec.note?.includes('الإدارة') || rec.note?.includes('الادارة') ? 'الإدارة' : 'المقر');
-
-                          return (
-                            <tr key={rec.id} className="border-b last:border-0 hover:bg-sky-50/20 text-slate-700 text-xs">
-                              <td className="p-3 font-bold">{rec.date}</td>
-                              <td className="p-3 font-black text-slate-800">{rec.empName}</td>
-                              <td className="p-3 text-slate-500 font-medium">{deptObj ? deptObj.name : rec.dept}</td>
-                              <td className="p-3 font-bold text-emerald-600">{rec.checkIn}</td>
-                              <td className="p-3 text-slate-600 font-bold">{rec.checkOut || '—'}</td>
-                              <td className="p-3 font-extrabold text-sky-600">{duration}</td>
-                              <td className="p-3">
-                                {fSource === 'الإدارة' ? (
-                                  <span className="inline-block bg-purple-50 text-purple-700 border border-purple-100 rounded-lg px-2.5 py-0.5 font-extrabold text-[10px]">
-                                    💼 الإدارة
-                                  </span>
-                                ) : (
-                                  <span className="inline-block bg-sky-50 text-sky-700 border border-sky-100 rounded-lg px-2.5 py-0.5 font-extrabold text-[10px]">
-                                    📍 المقر
-                                  </span>
-                                )}
-                              </td>
-                              <td className="p-3 text-center">
-                                <button
-                                  onClick={() => {
-                                    requestConfirm('هل تريد تأكيد حذف هذا السجل وحجبه من البيانات؟', async () => {
-                                      try {
-                                        const response = await fetch(`/api/attendance/${rec.id}`, {
-                                          method: 'DELETE'
-                                        });
-                                        if (!response.ok) {
-                                          throw new Error();
-                                        }
-                                        loadAttendance();
-                                      } catch (err) {
-                                        alert('تعذر الحذف');
-                                      }
-                                    });
-                                  }}
-                                  className="p-1 hover:bg-rose-50 text-rose-500 rounded transition-all"
-                                  title="حذف السجل"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-
-                      {attendanceRecords.length === 0 && (
-                        <tr>
-                          <td colSpan={8} className="p-10 text-center text-slate-400 font-medium">
-                            لا توجد سجلات حضور صالحة للمواصفات المحددة حالياً.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+            <AttendanceView
+              attendanceRecords={attendanceRecords}
+              employees={employees}
+              departments={departments}
+              attFilterFrom={attFilterFrom}
+              attFilterTo={attFilterTo}
+              attFilterEmp={attFilterEmp}
+              attFilterDept={attFilterDept}
+              attFilterStatus={attFilterStatus}
+              setAttFilterFrom={setAttFilterFrom}
+              setAttFilterTo={setAttFilterTo}
+              setAttFilterEmp={setAttFilterEmp}
+              setAttFilterDept={setAttFilterDept}
+              setAttFilterStatus={setAttFilterStatus}
+              loadAttendance={loadAttendance}
+              getTodayAttendanceStats={getTodayAttendanceStats}
+              requestConfirm={requestConfirm}
+              onDeleteRecord={async (id) => {
+                try {
+                  const response = await fetch(`/api/attendance/${id}`, { method: 'DELETE' });
+                  if (!response.ok) throw new Error();
+                  loadAttendance();
+                } catch (err) {
+                  alert('تعذر الحذف');
+                }
+              }}
+            />
           )}
 
           {/* View: Department Coverage Alerts */}
