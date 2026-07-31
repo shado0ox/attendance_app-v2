@@ -26,12 +26,37 @@ const isProd = process.env.NODE_ENV === 'production';
 
 // --- AUTH / PASSWORD HELPERS -------------------------------------------------
 // JWT_SECRET should be set in .env for production so sessions survive restarts.
-// A random fallback is used in dev so the app still works out of the box.
-const JWT_SECRET = process.env.JWT_SECRET || (() => {
+// If it isn't, we now persist a generated secret in the database (see ensureJwtSecret()
+// below, called during startup) so a server restart doesn't silently invalidate every
+// stored session token — that used to happen because a brand new random secret was
+// generated on every single process start, and any token signed with the old one would
+// fail verification afterwards (looking like a random, unexplained logout to the user).
+let JWT_SECRET = process.env.JWT_SECRET || '';
+
+async function ensureJwtSecret() {
+  if (JWT_SECRET) return; // explicit env value always wins
+  const SECRET_KEY = '__jwt_secret__';
+  try {
+    const existing = await db.select().from(schema.systemData).where(eq(schema.systemData.key, SECRET_KEY)).limit(1);
+    const storedValue = existing[0]?.value as unknown;
+    if (typeof storedValue === 'string' && storedValue.length > 0) {
+      JWT_SECRET = storedValue;
+      console.warn('[security] JWT_SECRET is not set in .env — reusing the secret persisted in the database from a previous run so existing sessions keep working. Set JWT_SECRET in .env for full control over this in production.');
+      return;
+    }
+  } catch (err) {
+    console.error('[security] Could not read a persisted JWT secret from the database — a new one will be generated for this run only:', err);
+  }
+
   const generated = crypto.randomBytes(32).toString('hex');
-  console.warn('[security] JWT_SECRET is not set in .env — using a random session secret for this run only. Set JWT_SECRET in .env for production so logins survive server restarts.');
-  return generated;
-})();
+  JWT_SECRET = generated;
+  try {
+    await db.insert(schema.systemData).values({ key: SECRET_KEY, value: generated }).onConflictDoNothing();
+    console.warn('[security] JWT_SECRET is not set in .env — generated a new secret and saved it to the database so future restarts reuse it. Set JWT_SECRET in .env if you prefer to manage it yourself.');
+  } catch (err) {
+    console.error('[security] Could not persist the generated JWT secret — sessions will NOT survive a restart until JWT_SECRET is set in .env:', err);
+  }
+}
 
 const isBcryptHash = (value: unknown): value is string =>
   typeof value === 'string' && /^\$2[aby]\$/.test(value);
@@ -63,7 +88,7 @@ interface AuthTokenPayload {
   name?: string;
 }
 
-const signToken = (payload: AuthTokenPayload) => jwt.sign(payload, JWT_SECRET, { expiresIn: '12h' });
+const signToken = (payload: AuthTokenPayload) => jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' });
 
 // Requires a valid bearer token with one of `roles`. When `matchCompany` is true (default),
 // the token's companyId must match the request's companyId (superadmin is always exempt).
@@ -1312,6 +1337,7 @@ app.delete('/api/companies/:id', requireAuth(['superadmin'], false), async (req,
 
 async function startServer() {
   await initializeSchemaAndTables();
+  await ensureJwtSecret();
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

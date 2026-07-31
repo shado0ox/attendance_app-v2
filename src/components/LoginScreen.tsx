@@ -9,6 +9,8 @@ interface LoginScreenProps {
   companyId: string;
   setCompanyId: (id: string) => void;
   companiesList: any[];
+  sessionExpiredMessage?: string;
+  onDismissSessionExpiredMessage?: () => void;
 }
 
 // ─── WebAuthn helpers ───────────────────────────────────────────────────────
@@ -37,7 +39,9 @@ export default function LoginScreen({
   employees,
   companyId,
   setCompanyId,
-  companiesList
+  companiesList,
+  sessionExpiredMessage,
+  onDismissSessionExpiredMessage
 }: LoginScreenProps) {
   const [activeTab, setActiveTab] = useState<'emp' | 'admin' | 'reg'>('emp');
 
@@ -297,6 +301,25 @@ export default function LoginScreen({
   return (
     <div id="login-screen" className="flex flex-col items-center justify-center min-h-screen px-4 bg-sky-50 bg-opacity-70">
       <div className="w-full max-w-md p-8 bg-white border border-sky-100 rounded-2xl shadow-xl transition-all">
+
+        {sessionExpiredMessage && (
+          <div
+            className="mb-6 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2 text-right"
+            dir="rtl"
+          >
+            <AlertCircle size={15} className="text-amber-600 flex-shrink-0 mt-0.5" />
+            <p className="text-[11px] font-bold text-amber-800 leading-relaxed flex-1">{sessionExpiredMessage}</p>
+            {onDismissSessionExpiredMessage && (
+              <button
+                onClick={onDismissSessionExpiredMessage}
+                className="text-amber-400 hover:text-amber-700 text-xs font-black leading-none px-1"
+                aria-label="إغلاق"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Workspace selector */}
         {companiesList.length > 0 && (

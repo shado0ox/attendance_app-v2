@@ -5,6 +5,7 @@ import { Loader, Key, X, AlertCircle, Smartphone } from 'lucide-react';
 import LoginScreen from './components/LoginScreen';
 import AdminPortal from './components/AdminPortal';
 import EmployeePortal from './components/EmployeePortal';
+import { SESSION_EXPIRED_EVENT } from './lib/authFetch';
 
 // Default initial datasets to seed if Firestore is blank
 const defaultDepartments = [
@@ -78,6 +79,7 @@ export default function App() {
     role: null,
     info: null
   });
+  const [sessionExpiredMessage, setSessionExpiredMessage] = useState('');
 
   // Change Password state
   const [changePwdOpen, setChangePwdOpen] = useState(false);
@@ -350,6 +352,23 @@ export default function App() {
     });
   };
 
+  // A 401 on any authenticated request (e.g. the check-in/out button after the phone
+  // was left idle for a while, or a token that's no longer valid) used to just look like
+  // a generic "connection failed" error from wherever that fetch call happened to be.
+  // This clears the stale session and sends the person back to login with an honest,
+  // specific reason instead.
+  useEffect(() => {
+    const onSessionExpired = () => {
+      if (session.role === null) return; // already logged out, nothing to do
+      persistSession(null, null);
+      setSessionExpiredMessage('انتهت صلاحية جلستك، يرجى تسجيل الدخول مرة أخرى.');
+      navigate('/login', { replace: true });
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.role]);
+
   const handleOpenChangePassword = () => {
     setNewPassword('');
     setConfirmPassword('');
@@ -450,6 +469,8 @@ export default function App() {
                 companyId={companyId}
                 setCompanyId={setCompanyId}
                 companiesList={companiesList}
+                sessionExpiredMessage={sessionExpiredMessage}
+                onDismissSessionExpiredMessage={() => setSessionExpiredMessage('')}
               />
             ) : (
               <Navigate to={session.role === 'employee' ? '/employee' : '/admin/dashboard'} replace />
