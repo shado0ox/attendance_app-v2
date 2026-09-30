@@ -74,6 +74,20 @@ export default function App() {
     officeLocation: { lat: 24.7136, lng: 46.6753, radius: 150 }
   });
 
+  const dataRef = useRef(appData);
+  const settingsRef = useRef(appSettings);
+  const companyRef = useRef(localStorage.getItem('app_company_id') || 'default');
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const pendingSaves = useRef(0);
+  const revision = useRef(0);
+  const unsaved = useRef(false);
+  const [saveError, setSaveError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const cacheData = (id: string, data: any) => {
+    try { localStorage.setItem(`schedule_mainData_${id}`, JSON.stringify(data)); }
+    catch (error) { console.warn('Could not cache application data', error); }
+  };
+
   const [registrationRequests, setRegistrationRequests] = useState<any[]>([]);
   const [session, setSession] = useState<{ role: 'superadmin' | 'admin' | 'employee' | null; info: any }>({
     role: null,
@@ -164,6 +178,12 @@ export default function App() {
     return localStorage.getItem('app_company_id') || 'default';
   });
 
+  if (companyRef.current !== companyId) {
+    companyRef.current = companyId;
+    revision.current++;
+    unsaved.current = false;
+  }
+
   // Keep companyId in sync with localStorage
   useEffect(() => {
     localStorage.setItem('app_company_id', companyId);
@@ -177,6 +197,7 @@ export default function App() {
   }, [session]);
 
   const fetchCompanies = async () => {
+    if (document.hidden) return;
     try {
       const response = await fetch('/api/companies');
       if (response.ok) {
@@ -190,13 +211,19 @@ export default function App() {
 
   useEffect(() => {
     fetchCompanies();
-    const interval = setInterval(fetchCompanies, 10000);
+    const interval = setInterval(fetchCompanies, 300000);
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    let fetching = false;
+    let receivedData = false;
     // 1. Fetch mainData from PostgreSQL API
     const fetchMainData = async () => {
+      if (document.hidden || fetching || pendingSaves.current || unsaved.current) return;
+      fetching = true;
+      const fetchRevision = revision.current;
       try {
         const response = await fetch(`/api/main-data?companyId=${companyId}`);
         if (!response.ok) {
@@ -210,6 +237,13 @@ export default function App() {
         }
 
         const data = await response.json();
+        if (cancelled || fetchRevision !== revision.current || pendingSaves.current || unsaved.current) return;
+        receivedData = true;
+        dataRef.current = {
+          departments: data.departments || [], employees: data.employees || [],
+          shiftTypes: data.shiftTypes || defaultShiftTypes, schedule: data.schedule || {}
+        };
+        if (data.settings) settingsRef.current = data.settings;
         setAppData({
           departments: data.departments || [],
           employees: data.employees || [],
@@ -219,14 +253,18 @@ export default function App() {
         if (data.settings) {
           setAppSettings(data.settings);
         }
-        localStorage.setItem(`schedule_mainData_${companyId}`, JSON.stringify(data));
+        cacheData(companyId, data);
       } catch (err: any) {
         console.error('[API Error] Failed to fetch main-data from backend:', err.message || err);
+        if (cancelled || fetchRevision !== revision.current || unsaved.current) return;
+        if (receivedData) return;
         const cached = localStorage.getItem(`schedule_mainData_${companyId}`);
         if (cached) {
           try {
             console.log('[Cache Fallback] Loading application data from local storage cache.');
             const data = JSON.parse(cached);
+            dataRef.current = { departments: data.departments || [], employees: data.employees || [], shiftTypes: data.shiftTypes || defaultShiftTypes, schedule: data.schedule || {} };
+            if (data.settings) settingsRef.current = data.settings;
             setAppData({
               departments: data.departments || [],
               employees: data.employees || [],
@@ -241,12 +279,14 @@ export default function App() {
           }
         }
       } finally {
-        setLoading(false);
+        fetching = false;
+        if (!cancelled) setLoading(false);
       }
     };
 
     // 2. Fetch registration requests from PostgreSQL API
     const fetchRegRequests = async () => {
+      if (document.hidden || cancelled) return;
       try {
         const response = await fetch(`/api/registration-requests?companyId=${companyId}`);
         if (!response.ok) {
@@ -260,7 +300,7 @@ export default function App() {
         }
 
         const data = await response.json();
-        setRegistrationRequests(data);
+        if (!cancelled) setRegistrationRequests(data);
       } catch (err: any) {
         console.error('[API Error] Failed to fetch registration requests:', err.message || err);
       }
@@ -270,13 +310,20 @@ export default function App() {
     fetchMainData();
 
     // Set up polling intervals to maintain real-time sync
-    const mainDataInterval = setInterval(fetchMainData, 5000);
+    const mainDataInterval = setInterval(fetchMainData, 60000);
 
     let regRequestsInterval: ReturnType<typeof setInterval> | undefined;
     if (session.role === 'admin' || session.role === 'superadmin') {
       fetchRegRequests();
-      regRequestsInterval = setInterval(fetchRegRequests, 5000);
+      regRequestsInterval = setInterval(fetchRegRequests, 60000);
     }
+
+    const onVisible = () => {
+      if (document.hidden) return;
+      void fetchMainData();
+      if (session.role === 'admin' || session.role === 'superadmin') void fetchRegRequests();
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     // 3. Keep local sessions on reload
     const storedSession = localStorage.getItem('app_session');
@@ -291,35 +338,65 @@ export default function App() {
     }
 
     return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
       clearInterval(mainDataInterval);
       if (regRequestsInterval) clearInterval(regRequestsInterval);
     };
   }, [companyId, session.role]);
 
-  const handleUpdateSettings = async (nextSettings: any) => {
-    setAppSettings(nextSettings);
-    try {
-      await fetch(`/api/main-data?companyId=${companyId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...appData, settings: nextSettings, updatedAt: Date.now() })
-      });
-    } catch (e) {
-      console.error('Failed to update settings in PostgreSQL:', e);
-    }
+  // Serialize full snapshots; polling must never replace an in-flight or failed edit.
+  const saveMainData = (): Promise<boolean> => {
+    const targetCompany = companyId;
+    const payload = { ...dataRef.current, settings: settingsRef.current, updatedAt: Date.now() };
+    const saveRevision = ++revision.current;
+    unsaved.current = true;
+    pendingSaves.current++;
+    setSaving(true);
+    const task = saveQueue.current.then(async () => {
+      try {
+        const response = await fetch(`/api/main-data?companyId=${encodeURIComponent(targetCompany)}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(result?.error || `فشل الحفظ (${response.status})`);
+        if (!result || typeof result !== 'object') throw new Error('استجابة الحفظ غير صحيحة');
+        cacheData(targetCompany, result);
+        if (companyRef.current === targetCompany && revision.current === saveRevision) {
+          unsaved.current = false;
+          setSaveError('');
+        }
+        return true;
+      } catch (error: any) {
+        if (companyRef.current === targetCompany) setSaveError(error.message || 'تعذر الاتصال بالخادم');
+        return false;
+      } finally {
+        pendingSaves.current--;
+        if (!pendingSaves.current) setSaving(false);
+      }
+    });
+    saveQueue.current = task.then(() => undefined);
+    return task;
   };
 
-  const handleUpdateAppData = async (nextData: any) => {
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (unsaved.current || pendingSaves.current) { event.preventDefault(); event.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, []);
+
+  const handleUpdateSettings = (nextSettings: any) => {
+    settingsRef.current = nextSettings;
+    setAppSettings(nextSettings);
+    return saveMainData();
+  };
+
+  const handleUpdateAppData = (nextData: any) => {
+    dataRef.current = nextData;
     setAppData(nextData);
-    try {
-      await fetch(`/api/main-data?companyId=${companyId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...nextData, settings: appSettings, updatedAt: Date.now() })
-      });
-    } catch (e) {
-      console.error('Failed to update app data in PostgreSQL:', e);
-    }
+    return saveMainData();
   };
 
   const navigate = useNavigate();
@@ -397,7 +474,7 @@ export default function App() {
           }
           return emp;
         });
-        await handleUpdateAppData({ ...appData, employees: nextEmployees });
+        if (!await handleUpdateAppData({ ...appData, employees: nextEmployees })) return;
 
         setChangePwdMsg('✅ تم تحديث كلمة المرور لحسابك بنجاح!');
         setTimeout(() => setChangePwdOpen(false), 2000);
@@ -420,7 +497,7 @@ export default function App() {
         setChangePwdMsg('✅ تم تحديث كلمة المرور لحسابك الإداري الفرعي بنجاح!');
         setTimeout(() => setChangePwdOpen(false), 2000);
       } else if (session.role === 'superadmin') {
-        await handleUpdateSettings({ ...appSettings, password: newPassword });
+        if (!await handleUpdateSettings({ ...appSettings, password: newPassword })) return;
 
         setChangePwdMsg('✅ تم تحديث كلمة المرور الرئيسية للمدير العام بنجاح!');
         setTimeout(() => setChangePwdOpen(false), 2000);
@@ -446,6 +523,12 @@ export default function App() {
   return (
     <div dir="rtl" className="font-tajawal text-slate-800 transition-all select-none">
       
+      {(saving || saveError) && (
+        <div role="status" className="sticky top-0 z-[120] p-3 bg-amber-50 border-b border-amber-200 text-sm text-center">
+          {saving ? 'جاري حفظ البيانات...' : `لم يتم حفظ التعديلات: ${saveError}. التعديلات محفوظة مؤقتًا في هذه الصفحة.`}
+          {saveError && !saving && <button className="mr-3 underline font-bold" onClick={() => { void saveMainData(); }}>إعادة محاولة الحفظ</button>}
+        </div>
+      )}
       {/*
         Real, bookmarkable routes instead of one page that silently swaps
         content based on local state:

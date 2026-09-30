@@ -1,4 +1,4 @@
-import type { ChangeEvent } from 'react';
+import { useState, useEffect, type ChangeEvent } from 'react';
 import {
   Building2, UploadCloud, X, Crosshair, Key, Save, Shield, Plus, Edit, Trash2, UserCheck,
 } from 'lucide-react';
@@ -6,7 +6,7 @@ import {
 interface SettingsViewProps {
   admin: any;
   appSettings: any;
-  onUpdateSettings: (settings: any) => void;
+  onUpdateSettings: (settings: any) => Promise<boolean>;
   employees: any[];
   departments: any[];
   appData: any;
@@ -73,6 +73,13 @@ export default function SettingsView({
   onApproveRegistration,
   onRejectRegistration,
 }: SettingsViewProps) {
+  const [geoDraft, setGeoDraft] = useState(appSettings?.officeLocation || {});
+  const [geoDirty, setGeoDirty] = useState(false);
+  const [geoSaving, setGeoSaving] = useState(false);
+  useEffect(() => {
+    if (!geoDirty) setGeoDraft(appSettings?.officeLocation || {});
+  }, [appSettings?.officeLocation, geoDirty]);
+  const updateGeoDraft = (next: any) => { setGeoDirty(true); setGeoDraft(next); };
   const pendingRegs = registrationRequests.filter((r) => r.status === 'pending');
 
   return (
@@ -95,8 +102,8 @@ export default function SettingsView({
               className="px-3.5 py-2.5 text-xs border rounded-lg focus:outline-none flex-1 font-bold"
             />
             <button
-              onClick={() => {
-                onUpdateSettings({ ...appSettings, companyName: companySettingsName });
+              onClick={async () => {
+                if (!await onUpdateSettings({ ...appSettings, companyName: companySettingsName })) return;
                 alert('✅ تم تحديث اسم الشركة العام بنجاح.');
               }}
               className="flex items-center gap-1.5 px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg text-xs shadow transition-all"
@@ -159,12 +166,9 @@ export default function SettingsView({
             <input
               type="number"
               step="any"
-              value={appSettings?.officeLocation?.lat || ''}
+              value={geoDraft.lat ?? ''}
               onChange={(e) =>
-                onUpdateSettings({
-                  ...appSettings,
-                  officeLocation: { ...appSettings.officeLocation, lat: e.target.value === '' ? '' : parseFloat(e.target.value) },
-                })
+                updateGeoDraft({ ...geoDraft, lat: e.target.value === '' ? '' : parseFloat(e.target.value) })
               }
               placeholder="مثال: 24.71360"
               className="px-3 py-2 text-xs border rounded-lg focus:outline-none"
@@ -176,12 +180,9 @@ export default function SettingsView({
             <input
               type="number"
               step="any"
-              value={appSettings?.officeLocation?.lng || ''}
+              value={geoDraft.lng ?? ''}
               onChange={(e) =>
-                onUpdateSettings({
-                  ...appSettings,
-                  officeLocation: { ...appSettings.officeLocation, lng: e.target.value === '' ? '' : parseFloat(e.target.value) },
-                })
+                updateGeoDraft({ ...geoDraft, lng: e.target.value === '' ? '' : parseFloat(e.target.value) })
               }
               placeholder="مثال: 46.67530"
               className="px-3 py-2 text-xs border rounded-lg focus:outline-none"
@@ -192,12 +193,9 @@ export default function SettingsView({
             <label className="text-[11px] font-bold text-slate-600">نطاق البصمة المسموح (بالمتر)</label>
             <input
               type="number"
-              value={appSettings?.officeLocation?.radius || 150}
+              value={geoDraft.radius ?? ''}
               onChange={(e) =>
-                onUpdateSettings({
-                  ...appSettings,
-                  officeLocation: { ...appSettings.officeLocation, radius: parseInt(e.target.value) || 150 },
-                })
+                updateGeoDraft({ ...geoDraft, radius: e.target.value === '' ? '' : parseInt(e.target.value) })
               }
               className="px-3 py-2 text-xs border rounded-lg focus:outline-none focus:border-sky-500 font-extrabold"
             />
@@ -208,12 +206,9 @@ export default function SettingsView({
           <input
             type="checkbox"
             id="preventOutCheckout"
-            checked={!!appSettings?.officeLocation?.preventOutCheckout}
+            checked={!!geoDraft.preventOutCheckout}
             onChange={(e) =>
-              onUpdateSettings({
-                ...appSettings,
-                officeLocation: { ...appSettings.officeLocation, preventOutCheckout: e.target.checked },
-              })
+              updateGeoDraft({ ...geoDraft, preventOutCheckout: e.target.checked })
             }
             className="w-4 h-4 text-sky-600 border-gray-300 rounded focus:ring-sky-500 cursor-pointer"
           />
@@ -224,14 +219,32 @@ export default function SettingsView({
 
         <div className="flex gap-2 flex-wrap items-center mt-1">
           <button
-            onClick={handleDetectGPS}
+            onClick={() => {
+              if (!navigator.geolocation) { alert('جهازك لا يدعم تحديد الموقع'); return; }
+              navigator.geolocation.getCurrentPosition((pos) => {
+                updateGeoDraft({ ...geoDraft, lat: pos.coords.latitude, lng: pos.coords.longitude });
+              }, () => alert('تعذر تحديد الموقع. راجع إذن المتصفح.'), { enableHighAccuracy: true });
+            }}
             className="flex items-center gap-1.5 px-4 py-2 border border-sky-100 bg-sky-50 text-sky-700 hover:bg-sky-100 rounded-xl font-bold text-xs transition-all shadow-sm"
           >
             <Crosshair size={13} />
             <span>تحديد موقعي المباشر الحالي</span>
           </button>
           <button
-            onClick={() => alert('✅ تم حفظ كافة إعدادات سياج البصمة بنجاح.')}
+            disabled={geoSaving}
+            onClick={async () => {
+              const { lat, lng, radius } = geoDraft;
+              if (lat === '' || lng === '' || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng)) || Math.abs(Number(lat)) > 90 || Math.abs(Number(lng)) > 180 || !(Number(radius) > 0)) {
+                alert('أدخل إحداثيات صحيحة ونطاقًا أكبر من صفر.'); return;
+              }
+              setGeoSaving(true);
+              try {
+                if (await onUpdateSettings({ ...appSettings, officeLocation: geoDraft })) {
+                  setGeoDirty(false);
+                  alert('✅ تم حفظ كافة إعدادات سياج البصمة بنجاح.');
+                }
+              } finally { setGeoSaving(false); }
+            }}
             className="flex items-center gap-1.5 px-5 py-2 hover:bg-sky-700 bg-sky-600 text-white rounded-xl font-bold text-xs font-medium transition-all shadow-sm"
           >
             <span>حفظ التعديلات الجغرافية</span>

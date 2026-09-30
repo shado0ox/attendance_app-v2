@@ -53,9 +53,6 @@ export const createPool = () => {
 
   console.log('--- POSTGRESQL DATABASE POOL INITIALIZATION ---');
   console.log('Environment DATABASE_URL exists:', !!connectionString);
-  if (connectionString) {
-    console.log('DATABASE_URL prefix:', connectionString.substring(0, 45) + '...');
-  }
   console.log('Target SQL Host:', process.env.SQL_HOST || (connectionString ? 'via connection string' : 'localhost'));
   console.log('Target SQL Database:', process.env.SQL_DB_NAME || 'default');
   console.log('Target DB Schema Isolation:', dbSchema);
