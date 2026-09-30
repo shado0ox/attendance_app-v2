@@ -1,3 +1,4 @@
+import { punchFields, validatePunchTransition, checkPunchLocation } from './src/lib/punchPolicy';
 import { matchAttendanceLocation } from './src/lib/attendanceLocations';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -7,7 +8,7 @@ import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
 import { db, schema, pool, initializeSchemaAndTables, getDbSchemaName } from './src/db/index.ts';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and, sql } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -126,6 +127,23 @@ function requireAuth(roles: AuthTokenPayload['role'][], matchCompany: boolean = 
     next();
   };
 }
+
+// Scope id-based admin operations by the stored row, never the supplied company id.
+function requireOwnedRow(table: any) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = Number(req.params.id || req.body?.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'رقم السجل غير صحيح' });
+      const rows = await db.select().from(table).where(eq(table.id, id)).limit(1);
+      const auth = (req as any).auth as AuthTokenPayload;
+      if (!rows[0] || (auth.role !== 'superadmin' && rows[0].companyId !== auth.companyId)) return res.status(404).json({ error: 'السجل غير موجود أو غير مسموح' });
+      (req as any).ownedRow = rows[0]; next();
+    } catch { return res.status(500).json({ error: 'تعذر التحقق من صلاحية السجل' }); }
+  };
+}
+const audit = async (executor: any, auth: AuthTokenPayload, companyId: string, action: string, entityId: any, details: any) => {
+  await executor.insert(schema.auditLog).values({ companyId, actorId: String(auth.id || auth.username || 'superadmin'), actorRole: auth.role, action, entityId: String(entityId), details });
+};
 
 // Reads the bearer token if present without blocking the request — used so a public,
 // unauthenticated endpoint can still return richer data to a logged-in admin.
@@ -796,7 +814,7 @@ app.post('/api/auth/webauthn-verify', async (req, res) => {
 // --- API ENDPOINTS ---
 
 // Database Connection Status & Health Check
-app.get('/api/db-status', async (req, res) => {
+app.get('/api/db-status', requireAuth(['superadmin'], false), async (req, res) => {
   const connectionString = process.env.DATABASE_URL;
   const dbSchema = getDbSchemaName();
   const host = process.env.SQL_HOST || (connectionString ? 'via connection string' : 'localhost');
@@ -837,12 +855,21 @@ app.get('/api/main-data', async (req, res) => {
   const auth = tryReadAuth(req);
   // Employee PIN codes / the superadmin password are only included for a caller who is
   // logged in as that same company's admin/superadmin (or as superadmin generally).
+  if (auth && auth.role !== 'superadmin' && auth.companyId !== companyId) return res.status(403).json({ error: 'بيانات شركة أخرى غير متاحة' });
+  const visibleMainData = (value: any) => {
+    if (!auth) return { departments: [], employees: [], shiftTypes: [], schedule: {}, settings: { companyName: value?.settings?.companyName, logoDataUrl: value?.settings?.logoDataUrl } };
+    if (auth.role !== 'employee') return sanitizeMainData(value, true);
+    return { ...sanitizeMainData(value, false), employees: (value?.employees || []).map((e: any) =>
+      String(e.id) === String(auth.id) ? { ...e, password: undefined, webauthnCredentials: undefined } : { id: e.id, name: e.name, dept: e.dept }),
+      schedule: value?.schedule || {} };
+  };
   const canSeeSecrets = !!auth && (auth.role === 'superadmin' || (auth.role === 'admin' && auth.companyId === companyId));
 
   try {
     const result = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
     
     if (result.length === 0) {
+      if (!auth) return res.json(visibleMainData(defaultMainData));
       // Seed initial data directly into PostgreSQL database
       let initialVal = defaultMainData;
       if (companyId !== 'default') {
@@ -856,10 +883,10 @@ app.get('/api/main-data', async (req, res) => {
         value: initialVal,
       }).returning();
       
-      return res.json(sanitizeMainData(inserted[0].value, canSeeSecrets));
+      return res.json(visibleMainData(inserted[0].value));
     }
     
-    return res.json(sanitizeMainData(result[0].value, canSeeSecrets));
+    return res.json(visibleMainData(result[0].value));
   } catch (error: any) {
     console.error('Error fetching main-data from PostgreSQL:', error);
     return res.status(500).json({
@@ -965,7 +992,7 @@ app.post('/api/registration-requests', async (req, res) => {
   }
 });
 
-app.put('/api/registration-requests/:id', requireAuth(['admin', 'superadmin'], false), async (req, res) => {
+app.put('/api/registration-requests/:id', requireAuth(['admin', 'superadmin'], false), requireOwnedRow(schema.registrationRequests), async (req, res) => {
   const id = parseInt(req.params.id);
   const { status } = req.body;
 
@@ -984,7 +1011,7 @@ app.put('/api/registration-requests/:id', requireAuth(['admin', 'superadmin'], f
   }
 });
 
-app.delete('/api/registration-requests/:id', requireAuth(['admin', 'superadmin'], false), async (req, res) => {
+app.delete('/api/registration-requests/:id', requireAuth(['admin', 'superadmin'], false), requireOwnedRow(schema.registrationRequests), async (req, res) => {
   const id = parseInt(req.params.id);
 
   try {
@@ -1005,7 +1032,7 @@ app.get('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), asy
   try {
     const result = await db.select()
       .from(schema.attendance)
-      .where(eq(schema.attendance.companyId, companyId))
+      .where(and(eq(schema.attendance.companyId, companyId), (req as any).auth.role === 'employee' ? eq(schema.attendance.empId, String((req as any).auth.id)) : undefined))
       .orderBy(desc(schema.attendance.createdAt));
     return res.json(result);
   } catch (error: any) {
@@ -1015,6 +1042,53 @@ app.get('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), asy
       details: error?.message || String(error)
     });
   }
+});
+
+app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), async (req, res, next) => {
+  const auth = (req as any).auth as AuthTokenPayload;
+  if (auth.role !== 'employee') return next();
+  const fields = punchFields.filter(field => req.body[field] != null);
+  if (fields.length !== 1) return res.status(400).json({ error: 'أرسل بصمة واحدة فقط في الطلب' });
+  const field = fields[0];
+  const companyId = auth.companyId;
+  try {
+    const result = await db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${companyId + ':' + auth.id}))`);
+      const mainData = await getMainDataByCompanyId(companyId);
+      const employee = mainData?.employees?.find((e: any) => String(e.id) === String(auth.id));
+      if (!employee) return { status: 403, body: { error: 'الموظف غير مسجل في الشركة' } };
+      const now = Date.now();
+      const date = new Date(now).toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
+      let record: any;
+      if (req.body.id) {
+        const rows = await tx.select().from(schema.attendance).where(and(eq(schema.attendance.id, Number(req.body.id)), eq(schema.attendance.companyId, companyId), eq(schema.attendance.empId, String(auth.id)))).limit(1);
+        record = rows[0];
+        if (!record) return { status: 404, body: { error: 'السجل غير متاح' } };
+        const start = Number(record.checkInTs);
+        if (!Number.isFinite(start) || now - start > 86400000 || start > now) return { status: 409, body: { error: 'السجل خارج فترة البصمة؛ اطلب تصحيحًا من الإدارة' } };
+      } else {
+        const rows = await tx.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, companyId), eq(schema.attendance.empId, String(auth.id)), eq(schema.attendance.date, date))).orderBy(desc(schema.attendance.id)).limit(1);
+        record = rows[0];
+      }
+      const transition = validatePunchTransition(record, field);
+      if (transition === 'duplicate') return { status: 200, body: record };
+      if (transition) return { status: 409, body: { error: transition } };
+      const suffix = field.endsWith('2') ? '2' : '';
+      const out = field.startsWith('checkOut');
+      const base = out ? 'checkOut' : 'checkIn';
+      const lat = req.body[base + 'Lat' + suffix], lng = req.body[base + 'Lng' + suffix];
+      const location = checkPunchLocation(mainData?.settings, lat, lng, !out || !!mainData?.settings?.officeLocation?.preventOutCheckout);
+      if (location.error) return { status: 403, body: { error: location.error } };
+      const values: any = { [field]: new Date(now).toLocaleTimeString('en-GB', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit' }),
+        [base + 'Ts' + suffix]: String(now), [base + 'Location' + suffix]: location.name };
+      if (!out && lat != null && lng != null) { values[base + 'Lat' + suffix] = Number(lat); values[base + 'Lng' + suffix] = Number(lng); }
+      const saved = record ? await tx.update(schema.attendance).set(values).where(eq(schema.attendance.id, record.id)).returning()
+        : await tx.insert(schema.attendance).values({ ...values, empId: String(auth.id), empName: employee.name, dept: employee.dept || '', date, companyId, source: 'GPS', status: 'present' }).returning();
+      await audit(tx, auth, companyId, 'punch.' + field, saved[0].id, { time: now, location: location.name, lat: lat ?? null, lng: lng ?? null });
+      return { status: 200, body: saved[0] };
+    });
+    return res.status(result.status).json(result.body);
+  } catch (error) { console.error('Punch transaction failed', error); return res.status(500).json({ error: 'تعذر حفظ البصمة؛ لم يتم تأكيد التسجيل' }); }
 });
 
 app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), async (req, res) => {
@@ -1029,6 +1103,10 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
   const auth = (req as any).auth as AuthTokenPayload;
 
   try {
+    if (id) {
+      const rows = await db.select().from(schema.attendance).where(eq(schema.attendance.id, Number(id))).limit(1);
+      if (!rows[0] || (auth.role !== 'superadmin' && rows[0].companyId !== auth.companyId)) return res.status(404).json({ error: 'سجل الحضور غير متاح' });
+    }
     const mainData = await getMainDataByCompanyId(activeCompanyId);
     const locationLabel = (lat: any, lng: any) => {
       if (lat == null || lng == null || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return 'غير مسجل';
@@ -1083,23 +1161,29 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       if (source !== undefined) updateData.source = source;
       if (note !== undefined) updateData.note = note;
 
-      const updated = await db.update(schema.attendance)
-        .set(updateData)
-        .where(eq(schema.attendance.id, parseInt(id)))
-        .returning();
+      const updated = await db.transaction(async tx => {
+        const before = await tx.select().from(schema.attendance).where(eq(schema.attendance.id, Number(id))).limit(1);
+        const saved = await tx.update(schema.attendance).set(updateData).where(eq(schema.attendance.id, Number(id))).returning();
+        await audit(tx, auth, before[0].companyId || 'default', 'attendance.correct', id, { before: before[0], after: saved[0], reason: note || 'تعديل إداري' });
+        return saved;
+      });
       return res.json(updated[0]);
     } else {
       if (auth.role === 'employee' && String(empId) !== String(auth.id)) {
         return res.status(403).json({ error: 'لا يمكنك تسجيل حضور موظف آخر' });
       }
       // Insert new record in PostgreSQL
-      const inserted = await db.insert(schema.attendance).values({
+      const inserted = await db.transaction(async tx => {
+        const saved = await tx.insert(schema.attendance).values({
         empId, empName, dept: dept || '', date, ...locations,
         checkIn, checkInTs: checkInTs ? String(checkInTs) : null, checkOut, checkOutTs: checkOutTs ? String(checkOutTs) : null, checkInLat, checkInLng,
         checkIn2, checkInTs2: checkInTs2 ? String(checkInTs2) : null, checkOut2, checkOutTs2: checkOutTs2 ? String(checkOutTs2) : null, checkInLat2, checkInLng2,
         status: status || 'present', source: source || 'المقر', note: note || '',
         companyId: activeCompanyId
       }).returning();
+        await audit(tx, auth, activeCompanyId, 'attendance.create', saved[0].id, { after: saved[0], reason: note || 'تسجيل إداري' });
+        return saved;
+      });
       return res.json(inserted[0]);
     }
   } catch (error: any) {
@@ -1110,11 +1194,15 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
   }
 });
 
-app.delete('/api/attendance/:id', requireAuth(['admin', 'superadmin'], false), async (req, res) => {
+app.delete('/api/attendance/:id', requireAuth(['admin', 'superadmin'], false), requireOwnedRow(schema.attendance), async (req, res) => {
   const id = parseInt(req.params.id);
 
   try {
-    await db.delete(schema.attendance).where(eq(schema.attendance.id, id));
+    await db.transaction(async tx => {
+      const record = (req as any).ownedRow;
+      await audit(tx, (req as any).auth, record.companyId || 'default', 'attendance.delete', id, { before: record });
+      await tx.delete(schema.attendance).where(eq(schema.attendance.id, id));
+    });
     return res.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting attendance record from PostgreSQL:', error);
@@ -1131,7 +1219,7 @@ app.get('/api/requests', requireAuth(['employee', 'admin', 'superadmin']), async
   try {
     const result = await db.select()
       .from(schema.requests)
-      .where(eq(schema.requests.companyId, companyId))
+      .where(and(eq(schema.requests.companyId, companyId), (req as any).auth.role === 'employee' ? eq(schema.requests.empId, String((req as any).auth.id)) : undefined))
       .orderBy(desc(schema.requests.createdAt));
     return res.json(result);
   } catch (error: any) {
@@ -1156,7 +1244,7 @@ app.post('/api/requests', requireAuth(['employee', 'admin', 'superadmin']), asyn
 
   try {
     const inserted = await db.insert(schema.requests).values({
-      empId, empName, dept: dept || '', date, type, notes: notes || '', status: status || 'pending',
+      empId, empName: auth.role === 'employee' ? (auth.name || empName) : empName, dept: dept || '', date, type, notes: notes || req.body.note || '', status: auth.role === 'employee' ? 'pending' : (status || 'pending'),
       swapWithEmpId, swapWithEmpName, targetShift, checkInTime, checkOutTime,
       companyId: companyId || 'default'
     }).returning();
@@ -1170,7 +1258,7 @@ app.post('/api/requests', requireAuth(['employee', 'admin', 'superadmin']), asyn
   }
 });
 
-app.put('/api/requests/:id', requireAuth(['admin', 'superadmin'], false), async (req, res) => {
+app.put('/api/requests/:id', requireAuth(['admin', 'superadmin'], false), requireOwnedRow(schema.requests), async (req, res) => {
   const id = parseInt(req.params.id);
   const { status } = req.body;
 
@@ -1216,6 +1304,9 @@ app.post('/api/admins', requireAuth(['admin', 'superadmin']), async (req, res) =
 
   try {
     if (id) {
+      const existing = await db.select().from(schema.admins).where(eq(schema.admins.id, Number(id))).limit(1);
+      const auth = (req as any).auth as AuthTokenPayload;
+      if (!existing[0] || (auth.role !== 'superadmin' && existing[0].companyId !== auth.companyId)) return res.status(404).json({ error: 'حساب المسؤول غير متاح' });
       const updateSet: Record<string, any> = { name, username };
       // Leaving the password field blank on an edit keeps the existing credential —
       // the form no longer prefills the old password, so "unchanged" means "not sent".
@@ -1250,7 +1341,7 @@ app.post('/api/admins', requireAuth(['admin', 'superadmin']), async (req, res) =
   }
 });
 
-app.delete('/api/admins/:id', requireAuth(['admin', 'superadmin'], false), async (req, res) => {
+app.delete('/api/admins/:id', requireAuth(['admin', 'superadmin'], false), requireOwnedRow(schema.admins), async (req, res) => {
   const id = parseInt(req.params.id);
 
   try {
@@ -1263,6 +1354,14 @@ app.delete('/api/admins/:id', requireAuth(['admin', 'superadmin'], false), async
       details: error?.message || String(error)
     });
   }
+});
+
+app.get('/api/audit-log', requireAuth(['admin', 'superadmin']), async (req, res) => {
+  try {
+    const companyId = String(req.query.companyId || 'default');
+    const rows = await db.select().from(schema.auditLog).where(eq(schema.auditLog.companyId, companyId)).orderBy(desc(schema.auditLog.createdAt)).limit(200);
+    res.json(rows);
+  } catch { res.status(500).json({ error: 'تعذر تحميل سجل التعديلات' }); }
 });
 
 // 7. Companies / Subscription Management Endpoints
