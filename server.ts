@@ -1,3 +1,5 @@
+import { autoFix } from './src/lib/autoPunch';
+import { analyzeAttendance } from './src/lib/attendanceAnalysis';
 import { parseAttendanceQuery, attendanceReportPage } from './src/lib/attendanceQuery';
 import { buildAttendanceDays } from './src/lib/attendanceReport';
 import { validMonth, validAttendanceDate, riyadhMonth } from './src/lib/attendanceMonths';
@@ -1101,10 +1103,15 @@ app.get('/api/attendance-report', requireAuth(['admin', 'superadmin']), async (r
       eq(schema.attendance.companyId, companyId),
       sql`${schema.attendance.date} >= ${query.from}`, sql`${schema.attendance.date} <= ${query.to}`,
       query.empId ? eq(schema.attendance.empId, query.empId) : undefined,
-      query.dept ? eq(schema.attendance.dept, query.dept) : undefined,
+      query.dept && !query.analysis ? eq(schema.attendance.dept, query.dept) : undefined,
     )).orderBy(desc(schema.attendance.id));
     const mainData = await getMainDataByCompanyId(companyId);
-    const days = buildAttendanceDays(records, mainData?.settings).map(day => ({ ...day, departmentName: mainData?.departments?.find((dept: any) => dept.id === day.dept)?.name || day.dept }));
+    let reportDays = buildAttendanceDays(records, mainData?.settings);
+    if (query.analysis) {
+      const leaves = await db.select().from(schema.requests).where(and(eq(schema.requests.companyId, companyId), eq(schema.requests.type, 'leave'), eq(schema.requests.status, 'approved'), sql`${schema.requests.date} >= ${query.from}`, sql`${schema.requests.date} <= ${query.to}`));
+      reportDays = analyzeAttendance(reportDays, mainData, query, leaves);
+    }
+    const days = reportDays.map(day => ({ ...day, departmentName: mainData?.departments?.find((dept: any) => dept.id === day.dept)?.name || day.dept }));
     return res.json({ ...attendanceReportPage(days, query), companyName: mainData?.settings?.companyName || companyId, from: query.from, to: query.to });
   } catch (error) { console.error('Attendance report query failed', error); return res.status(500).json({ error: 'تعذر تحميل كشف الحضور' }); }
 });
@@ -1134,6 +1141,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
   const fields = punchFields.filter(field => req.body[field] != null);
   if (fields.length !== 1) return res.status(400).json({ error: 'أرسل بصمة واحدة فقط في الطلب' });
   const field = fields[0];
+  if (req.body.automatic === true && !field.startsWith('checkIn')) return res.status(400).json({ error: 'الانصراف يحتاج تأكيد الموظف' });
   const companyId = auth.companyId;
   try {
     const result = await db.transaction(async tx => {
@@ -1163,14 +1171,19 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       const out = field.startsWith('checkOut');
       const base = out ? 'checkOut' : 'checkIn';
       const lat = req.body[base + 'Lat' + suffix], lng = req.body[base + 'Lng' + suffix];
+      if (req.body.automatic === true) {
+        const fix = autoFix({ ...mainData?.settings, _attendanceEmployee: employee }, { coords: { latitude: Number(lat), longitude: Number(lng), accuracy: req.body.gpsAccuracy }, timestamp: req.body.gpsTimestamp }, now);
+        if (fix.kind !== 'inside') return { status: 400, body: { error: 'الموقع التلقائي غير دقيق أو قديم أو خارج المواقع المسموحة؛ أعد الفحص' } };
+      }
       const location = checkPunchLocation(mainData?.settings, lat, lng, !out || !!mainData?.settings?.officeLocation?.preventOutCheckout, employee);
       if (location.error) return { status: 403, body: { error: location.error } };
       const values: any = { [field]: new Date(now).toLocaleTimeString('en-GB', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit' }),
         [base + 'Ts' + suffix]: String(now), [base + 'Location' + suffix]: location.name };
+      if (req.body.automatic === true) { values.source = 'GPS تلقائي'; values.note = ((record?.note || '') + ' [حضور تلقائي مؤكد بالموقع]').trim(); }
       if (!out && lat != null && lng != null) { values[base + 'Lat' + suffix] = Number(lat); values[base + 'Lng' + suffix] = Number(lng); }
       const saved = record ? await tx.update(schema.attendance).set(values).where(eq(schema.attendance.id, record.id)).returning()
         : await tx.insert(schema.attendance).values({ ...values, empId: String(auth.id), empName: employee.name, dept: employee.dept || '', date, companyId, source: 'GPS', status: 'present' }).returning();
-      await audit(tx, auth, companyId, 'punch.' + field, saved[0].id, { time: now, location: location.name, lat: lat ?? null, lng: lng ?? null });
+      await audit(tx, auth, companyId, 'punch.' + field, saved[0].id, { time: now, location: location.name, lat: lat ?? null, lng: lng ?? null, automatic: req.body.automatic === true, gpsAccuracy: req.body.automatic === true ? req.body.gpsAccuracy : undefined });
       return { status: 200, body: saved[0] };
     });
     return res.status(result.status).json(result.body);

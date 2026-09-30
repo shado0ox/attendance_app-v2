@@ -1,3 +1,4 @@
+import AttendanceAnalysisSettings from '../../components/AttendanceAnalysisSettings';
 import AuditLogView from '../../components/AuditLogView';
 import AttendanceLocationsEditor from '../../components/AttendanceLocationsEditor';
 import { useState, useEffect, type ChangeEvent } from 'react';
@@ -87,6 +88,7 @@ export default function SettingsView({
 
   return (
     <div className="flex flex-col gap-6">
+      <AttendanceAnalysisSettings settings={appSettings} save={onUpdateSettings} />
       {/* Company Info section */}
       <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
         <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">

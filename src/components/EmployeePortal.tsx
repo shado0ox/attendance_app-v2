@@ -1,3 +1,6 @@
+import { useAutoPunch } from '../hooks/useAutoPunch';
+import { autoPeriodWindow } from '../lib/autoPunch';
+import { showPwaNotification } from '../lib/pwaNotification';
 import { getEmployeeLocations as getApprovedLocations, matchAttendanceLocation } from '../lib/attendanceLocations';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle, Fingerprint, ScanFace, ShieldCheck } from 'lucide-react';
@@ -72,14 +75,19 @@ export default function EmployeePortal({
   });
   const [autoStatusText, setAutoStatusText] = useState<string>('غير مفعلة');
   const [currentDistance, setCurrentDistance] = useState<number | null>(null);
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const [departureHint, setDepartureHint] = useState<{ id: number; text: string } | null>(null);
+  const [lastAutoSaved, setLastAutoSaved] = useState('');
+  const autoPunchBusy = useRef(false);
   const [autoLogs, setAutoLogs] = useState<string[]>([]);
 
   // New Smart Background / Scheduled GPS Settings
   const [autoCheckMode, setAutoCheckMode] = useState<'always' | 'shift' | 'scheduled'>(() => {
-    return (localStorage.getItem(`autoCheckMode_${employee.id}`) as any) || 'shift';
+    return localStorage.getItem(`autoCheckMode_${employee.id}`) === 'scheduled' ? 'scheduled' : 'shift';
   });
   const [autoCheckInterval, setAutoCheckInterval] = useState<number>(() => {
-    return Number(localStorage.getItem(`autoCheckInterval_${employee.id}`)) || 15;
+    const interval = Number(localStorage.getItem(`autoCheckInterval_${employee.id}`));
+    return [1, 2, 5].includes(interval) ? interval : 5;
   });
   const [scheduledCheckTime, setScheduledCheckTime] = useState<string>(() => {
     return localStorage.getItem(`scheduledCheckTime_${employee.id}`) || '08:00';
@@ -123,6 +131,7 @@ export default function EmployeePortal({
   }, []);
 
   const stateRef = useRef({
+    actionLoading,
     attendanceStatus,
     todayRecord,
     autoCheckIn,
@@ -138,6 +147,7 @@ export default function EmployeePortal({
 
   useEffect(() => {
     stateRef.current = {
+      actionLoading,
       attendanceStatus,
       todayRecord,
       autoCheckIn,
@@ -151,6 +161,7 @@ export default function EmployeePortal({
       missedShiftAlert
     };
   }, [
+    actionLoading,
     attendanceStatus,
     todayRecord,
     autoCheckIn,
@@ -181,106 +192,32 @@ export default function EmployeePortal({
     localStorage.setItem(`enableMissedShiftAlert_${employee.id}`, String(enableMissedShiftAlert));
   }, [enableMissedShiftAlert, employee.id]);
 
-  const executePunchInBackground = async (lat: number, lng: number, period: 'first' | 'second') => {
+  const executePunchInBackground = async (position: GeolocationPosition): Promise<boolean> => {
+    if (autoPunchBusy.current || stateRef.current.actionLoading) return false;
+    autoPunchBusy.current = true; setCheckActionLoading(true); stateRef.current.actionLoading = true;
     try {
-      const todayStr = getTodayStr();
-      const formattedTime = new Date().toLocaleTimeString('ar-SA', {
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-
-      if (period === 'second') {
-        const tr = stateRef.current.todayRecord;
-        if (!tr) return;
-        const updateData = {
-          id: tr.id, companyId,
-          checkIn2: formattedTime,
-          checkInTs2: Date.now(),
-          checkInLat2: lat,
-          checkInLng2: lng,
-          note: (tr.note ? tr.note + ' ' : '') + '[حضور تلقائي عبر GPS]',
-          source: 'المقر (تلقائي)'
-        };
-        const response = await fetch('/api/attendance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updateData)
-        });
-        if (!response.ok) throw new Error('فشل الحفظ على الخادم');
-        setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ✅ تم الحضور التلقائي للفترة الثانية.`, ...prev.slice(0, 4)]);
-      } else {
-        const payload = {
-          empId: employee.id,
-          empName: employee.name,
-          dept: employee.dept || '',
-          date: todayStr,
-          checkIn: formattedTime,
-          checkInTs: Date.now(),
-          checkOut: null,
-          checkOutTs: null,
-          status: 'present',
-          source: 'المقر (تلقائي)',
-          note: 'حضور تلقائي عبر GPS',
-          checkInLat: lat,
-          checkInLng: lng,
-          companyId: companyId || 'default'
-        };
-        const response = await fetch('/api/attendance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (!response.ok) throw new Error('فشل تسجيل الحضور على الخادم');
-        setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ✅ تم تسجيل حضورك التلقائي بنجاح.`, ...prev.slice(0, 4)]);
-      }
-      await loadAttendanceStatus();
-    } catch (e: any) {
-      console.error('Error auto-punch checkin:', e);
-      setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ❌ فشل البصم التلقائي: ${e.message}`, ...prev.slice(0, 4)]);
-    }
-  };
-
-  const executePunchOutBackground = async (lat: number, lng: number) => {
-    try {
+      const second = stateRef.current.attendanceStatus === 'not-checked-in-2';
       const tr = stateRef.current.todayRecord;
-      if (!tr?.id) return;
-      const formattedTime = new Date().toLocaleTimeString('ar-SA', {
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-
-      const isDouble = isTodayRecordShiftDouble();
-      const isPeriod2 = isDouble && tr.checkOut;
-
-      const updateData = isPeriod2 ? {
-        id: tr.id,
-        checkOut2: formattedTime,
-        checkOutTs2: Date.now(), checkOutLat2: lat, checkOutLng2: lng,
-        companyId,
-        note: (tr.note ? tr.note + ' ' : '') + '[انصراف تلقائي عبر GPS]',
-        source: tr.source || 'المقر (تلقائي)'
-      } : {
-        id: tr.id,
-        checkOut: formattedTime,
-        checkOutTs: Date.now(), checkOutLat: lat, checkOutLng: lng,
-        companyId,
-        note: (tr.note ? tr.note + ' ' : '') + '[انصراف تلقائي عبر GPS]',
-        source: tr.source || 'المقر (تلقائي)'
-      };
-
-      const response = await fetch('/api/attendance', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updateData)
-      });
-      if (!response.ok) throw new Error('فشل تسجيل الانصراف على الخادم');
-
-      setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ✅ تم الانصراف التلقائي بنجاح.`, ...prev.slice(0, 4)]);
+      if (second && !tr?.id) return false;
+      const field = second ? 'checkIn2' : 'checkIn';
+      const response = await fetch('/api/attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        companyId, ...(second && { id: tr.id }), [field]: 'auto',
+        [second ? 'checkInLat2' : 'checkInLat']: position.coords.latitude,
+        [second ? 'checkInLng2' : 'checkInLng']: position.coords.longitude,
+        automatic: true, gpsAccuracy: position.coords.accuracy, gpsTimestamp: position.timestamp,
+      }) });
+      const saved = await response.json();
+      if (!response.ok) throw new Error(saved.error || 'لم يتم تأكيد حفظ البصمة');
+      setLastAutoSaved(new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Riyadh' }));
+      setAutoLogs(prev => [`✅ حفظ الخادم حضورك في ${saved[second ? 'checkInLocation2' : 'checkInLocation'] || 'الموقع المعتمد'}`, ...prev.slice(0, 4)]);
       await loadAttendanceStatus();
-    } catch (e: any) {
-      console.error('Error auto-punch checkout:', e);
-      setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ❌ فشل الانصراف التلقائي: ${e.message}`, ...prev.slice(0, 4)]);
-    }
+      return true;
+    } catch (error: any) {
+      setAutoLogs(prev => [`لم يتأكد الحفظ: ${error.message}`, ...prev.slice(0, 4)]);
+      setAutoStatusText('لم يتأكد حفظ البصمة؛ جارٍ التحقق من الخادم قبل أي إعادة محاولة');
+      await loadAttendanceStatus();
+      return false;
+    } finally { autoPunchBusy.current = false; setCheckActionLoading(false); stateRef.current.actionLoading = false; }
   };
 
   // Persist autoPunch toggles
@@ -333,10 +270,7 @@ export default function EmployeePortal({
 
     // Mobile Notification if permission granted
     if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('⚠️ تنبيه: فاتك موعد الدوام!', {
-        body: `لقد بدأ شيفت "${shiftName}" في الساعة ${startTime} ولم تقم بتسجيل حضورك حتى الآن!`,
-        dir: 'rtl'
-      });
+      void showPwaNotification('تنبيه: فاتك موعد الدوام', `بدأ ${shiftName} في ${startTime}؛ لم يتأكد تسجيل الحضور`);
     }
     
     setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ⚠️ تم إرسال تنبيه: لقد فاتك موعد الدوام الجاري!`, ...prev.slice(0, 4)]);
@@ -347,10 +281,7 @@ export default function EmployeePortal({
       const permission = await Notification.requestPermission();
       setNotificationPermissionState(permission);
       if (permission === 'granted') {
-        new Notification('✅ تم تفعيل التنبيهات على الجوال', {
-          body: 'سوف نرسل لك تنبيهات مباشرة إذا فاتك موعد الدوام أو عند تسجيل البصمة تلقائياً.',
-          dir: 'rtl'
-        });
+        await showPwaNotification('تم تفعيل التنبيهات', 'ستظهر تذكيرات الدوام عند تشغيل التطبيق');
         speakVoiceAlert('تم تفعيل إشعارات وتنبيهات الدوام بنجاح');
       }
     } else {
@@ -363,7 +294,7 @@ export default function EmployeePortal({
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           speakVoiceAlert('تم تأكيد الاتصال بالموقع الجغرافي');
-          alert('✅ تم الوصول للموقع الجغرافي بنجاح. لتفعيل التتبع الدائم بالخلفية، يرجى التأكد من اختيار "السماح دائماً" (Always Allow) في إعدادات موقع متصفحك أو جهازك.');
+          alert('تم تفعيل الموقع أثناء استخدام التطبيق. عند قفل الشاشة أو إخفاء الـPWA يتوقف الفحص ويستأنف عند فتحه.');
         },
         (err) => {
           alert(`❌ تعذر الوصول للموقع: ${err.message}. يرجى التحقق من تفعيل الـ GPS وإذن المتصفح.`);
@@ -483,270 +414,31 @@ export default function EmployeePortal({
   };
   
   
-  // Background interval check worker (runs every 1 minute)
-  useEffect(() => {
-    const intervalId = setInterval(async () => {
-      const mode = stateRef.current.autoCheckMode;
-      const interval = stateRef.current.autoCheckInterval;
-      const schedTime = stateRef.current.scheduledCheckTime;
-      const autoIn = stateRef.current.autoCheckIn;
-      const settings = stateRef.current.appSettings;
-      
-      const todayShift = getTodayShift();
-      if (!todayShift || todayShift.id === 'OFF' || todayShift.id === 'A') {
-        return; // No work today
-      }
-
-      const now = new Date();
-      const currentHour = String(now.getHours()).padStart(2, '0');
-      const currentMinute = String(now.getMinutes()).padStart(2, '0');
-      const minutesToday = now.getHours() * 60 + now.getMinutes();
-
-      // Helper to parse HH:MM to minutes today
-      const parseTimeToMins = (timeStr: string) => {
-        const [h, m] = timeStr.split(':').map(Number);
-        return h * 60 + m;
-      };
-
-      let shouldPerformGPSCheck = false;
-
-      // 1. Determine if we should perform check based on mode
-      if (mode === 'always') {
-        // Always mode: Check based on interval (e.g. every 15 mins)
-        if (now.getMinutes() % interval === 0) {
-          shouldPerformGPSCheck = true;
-        }
-      } else if (mode === 'shift') {
-        // Shift hours mode: check from 30 minutes before shift start, until shift end, in interval
-        const shiftStartMins = parseTimeToMins(todayShift.start);
-        const shiftEndMins = parseTimeToMins(todayShift.end);
-        
-        // Handle overnight shifts or normal day shifts
-        let isInsideShiftWindow = false;
-        if (shiftEndMins >= shiftStartMins) {
-          isInsideShiftWindow = (minutesToday >= shiftStartMins - 30) && (minutesToday <= shiftEndMins);
-        } else {
-          // Overnight shift (e.g. 22:00 to 06:00)
-          isInsideShiftWindow = (minutesToday >= shiftStartMins - 30) || (minutesToday <= shiftEndMins);
-        }
-
-        // Also check second period if double shift
-        if (todayShift.type === 'double' && todayShift.start2 && todayShift.end2) {
-          const shiftStartMins2 = parseTimeToMins(todayShift.start2);
-          const shiftEndMins2 = parseTimeToMins(todayShift.end2);
-          let isInsideShiftWindow2 = false;
-          if (shiftEndMins2 >= shiftStartMins2) {
-            isInsideShiftWindow2 = (minutesToday >= shiftStartMins2 - 30) && (minutesToday <= shiftEndMins2);
-          } else {
-            isInsideShiftWindow2 = (minutesToday >= shiftStartMins2 - 30) || (minutesToday <= shiftEndMins2);
-          }
-          if (isInsideShiftWindow2) isInsideShiftWindow = true;
-        }
-
-        if (isInsideShiftWindow && (now.getMinutes() % interval === 0)) {
-          shouldPerformGPSCheck = true;
-        }
-      } else if (mode === 'scheduled') {
-        // Scheduled check mode: checks exactly at user-defined scheduled time
-        const schedMins = parseTimeToMins(schedTime);
-        const diffFromSched = minutesToday - schedMins;
-        // Check if we are within the interval window of the scheduled time to avoid skipping
-        if (diffFromSched >= 0 && diffFromSched < interval && (now.getMinutes() % interval === 0)) {
-          shouldPerformGPSCheck = true;
-        }
-      }
-
-      // 2. Perform GPS check if needed
-      if (shouldPerformGPSCheck && autoIn) {
-        if (getApprovedLocations(settings).length > 0) {
-          
-          {
-            navigator.geolocation.getCurrentPosition(
-              async (position) => {
-                const userLat = position.coords.latitude;
-                const userLng = position.coords.longitude;
-                const locationMatch = matchAttendanceLocation(stateRef.current.appSettings, userLat, userLng);
-                const diff = locationMatch.distance;
-                setCurrentDistance(Math.round(diff));
-                const isInside = locationMatch.inside;
-
-                const activeStatus = stateRef.current.attendanceStatus;
-
-                if (isInside) {
-                  setAutoStatusText(`📍 أنت داخل ${locationMatch.location?.name || 'مقر العمل'} (${Math.round(diff)} م) • نطاق البصم متاح ✅`);
-                  if (activeStatus === 'not-checked-in') {
-                    setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] 🚀 فحص ذكي مجدول: تم رصدك بالموقع، جاري تسجيل حضورك...`, ...prev.slice(0, 4)]);
-                    await executePunchInBackground(userLat, userLng, 'first');
-                  } else if (activeStatus === 'not-checked-in-2') {
-                    setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] 🚀 فحص ذكي مجدول: تم رصدك بالموقع للفترة الثانية، جاري تسجيل حضورك...`, ...prev.slice(0, 4)]);
-                    await executePunchInBackground(userLat, userLng, 'second');
-                  }
-                } else {
-                  setAutoStatusText(`📍 أنت خارج مقر العمل بمسافة (${Math.round(diff)} م) 🚫`);
-                }
-              },
-              (err) => {
-                console.error('Scheduled GPS error:', err);
-              },
-              { enableHighAccuracy: true, timeout: 10000 }
-            );
-          }
-        }
-      }
-
-      // 3. Missed Shift Alert evaluation
-      if (stateRef.current.enableMissedShiftAlert) {
-        const shiftStartMins = parseTimeToMins(todayShift.start);
-        const activeStatus = stateRef.current.attendanceStatus;
-
-        // If shift has started and they are not checked in
-        if (activeStatus === 'not-checked-in') {
-          // If 15 minutes or more has passed since shift start
-          if (minutesToday >= shiftStartMins + 15 && minutesToday < shiftStartMins + 240) { // check for 4 hours window
-            // Query position first to check if they are outside
-            navigator.geolocation.getCurrentPosition(
-              (pos) => {
-                const userLat = pos.coords.latitude;
-                const userLng = pos.coords.longitude;
-                        if (getApprovedLocations(settings).length > 0) {
-                  const locationMatch = matchAttendanceLocation(stateRef.current.appSettings, userLat, userLng);
-                const diff = locationMatch.distance;
-                  if (!locationMatch.inside) {
-                    // Outside location and missed start! Trigger alert!
-                    triggerMissedShiftAlert(todayShift.name, todayShift.start);
-                  }
-                }
-              },
-              () => {
-                // If GPS failed but we are late, we still alert to be safe
-                triggerMissedShiftAlert(todayShift.name, todayShift.start);
-              },
-              { enableHighAccuracy: false, timeout: 8000 }
-            );
-          }
-        }
-
-        // Also check period 2 if double shift
-        if (todayShift.type === 'double' && todayShift.start2 && activeStatus === 'not-checked-in-2') {
-          const shiftStartMins2 = parseTimeToMins(todayShift.start2);
-          if (minutesToday >= shiftStartMins2 + 15 && minutesToday < shiftStartMins2 + 240) {
-            navigator.geolocation.getCurrentPosition(
-              (pos) => {
-                const userLat = pos.coords.latitude;
-                const userLng = pos.coords.longitude;
-                        if (getApprovedLocations(settings).length > 0) {
-                  const locationMatch = matchAttendanceLocation(stateRef.current.appSettings, userLat, userLng);
-                const diff = locationMatch.distance;
-                  if (!locationMatch.inside) {
-                    triggerMissedShiftAlert(`${todayShift.name} (الفترة الثانية)`, todayShift.start2 || '17:00');
-                  }
-                }
-              },
-              () => {
-                triggerMissedShiftAlert(`${todayShift.name} (الفترة الثانية)`, todayShift.start2 || '17:00');
-              },
-              { enableHighAccuracy: false, timeout: 8000 }
-            );
-          }
-        }
-      }
-
-    }, 60000); // Check every 60 seconds
-
-    return () => clearInterval(intervalId);
-  }, [autoCheckMode, autoCheckInterval, scheduledCheckTime, enableMissedShiftAlert, autoCheckIn, schedule, shiftTypes]);
-
-  // Original Geofencing Background Watcher Worker (Runs continuously in response to GPS/watchPosition changes)
-  useEffect(() => {
-    const currentAutoCheckIn = stateRef.current.autoCheckIn;
-    const currentAutoCheckOut = stateRef.current.autoCheckOut;
-
-    if (!currentAutoCheckIn && !currentAutoCheckOut) {
-      setAutoStatusText('البصمة التلقائي عبر الـ GPS غير مفعلة');
-      setCurrentDistance(null);
-      return;
-    }
-
-    if (getApprovedLocations(stateRef.current.appSettings).length === 0) {
-      setAutoStatusText('⚠️ إحداثيات مقر العمل غير حددتها الإدارة');
-      return;
-    }
-
-
-    setAutoStatusText('📡 جاري تتبع الموقع التلقائي بالخلفية...');
-
-    let watchId: number | null = null;
-    let outsideCounter = 0;
-
-    if (navigator.geolocation) {
-      watchId = navigator.geolocation.watchPosition(
-        async (position) => {
-          const userLat = position.coords.latitude;
-          const userLng = position.coords.longitude;
-          const locationMatch = matchAttendanceLocation(stateRef.current.appSettings, userLat, userLng);
-                const diff = locationMatch.distance;
-          setCurrentDistance(Math.round(diff));
-
-          const isInside = locationMatch.inside;
-          const activeStatus = stateRef.current.attendanceStatus;
-          const activeAutoCheckIn = stateRef.current.autoCheckIn;
-          const activeAutoCheckOut = stateRef.current.autoCheckOut;
-
-          if (isInside) {
-            outsideCounter = 0;
-            setAutoStatusText(`📍 أنت داخل ${locationMatch.location?.name || 'مقر العمل'} (${Math.round(diff)} م) • نطاق البصم متاح ✅`);
-
-            if (activeAutoCheckIn) {
-              if (activeStatus === 'not-checked-in') {
-                setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] 🚀 تم رصد دخولك للموقع، جاري تسجيل الحضور...`, ...prev.slice(0, 4)]);
-                await executePunchInBackground(userLat, userLng, 'first');
-              } else if (activeStatus === 'not-checked-in-2') {
-                setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] 🚀 تم رصد دخولك للموقع للفترة الثانية، جاري تسجيل الحضور...`, ...prev.slice(0, 4)]);
-                await executePunchInBackground(userLat, userLng, 'second');
-              }
-            }
-          } else {
-            setAutoStatusText(`📍 أنت خارج مقر العمل بمسافة (${Math.round(diff)} م) 🚫`);
-
-            if (activeAutoCheckOut) {
-              if (activeStatus === 'checked-in' || activeStatus === 'checked-in-2') {
-                outsideCounter++;
-                if (outsideCounter >= 2) { // confirm departure to avoid GPS spikes
-                  setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] 🚶 تم رصد خروجك من الموقع، جاري تسجيل الانصراف...`, ...prev.slice(0, 4)]);
-                  await executePunchOutBackground(userLat, userLng);
-                  outsideCounter = 0;
-                }
-              }
-            }
-          }
-        },
-        (error) => {
-          console.error('Error auto punch GPS:', error);
-          setAutoStatusText(`⚠️ عذرًا، تعذر رصد الإشارة التلقائية: ${error.message}`);
-        },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
-      );
-    } else {
-      setAutoStatusText('⚠️ جهازك لا يدعم تتبع الموقع بالخلفية');
-    }
-
-    return () => {
-      if (watchId !== null) {
-        navigator.geolocation.clearWatch(watchId);
-      }
-    };
-  }, [autoCheckIn, autoCheckOut, attendanceStatus, employee.id, appSettings]);
+  useAutoPunch({
+    scope: companyId + ':' + employee.id, autoIn: autoCheckIn, autoOut: autoCheckOut,
+    mode: autoCheckMode, interval: autoCheckInterval, scheduled: scheduledCheckTime, settings: appSettings,
+    status: attendanceStatus, record: todayRecord, blocked: actionLoading || autoPunchBusy.current,
+    window: () => {
+      const tr = stateRef.current.todayRecord;
+      const active = ['checked-in', 'checked-in-2', 'not-checked-in-2'].includes(stateRef.current.attendanceStatus);
+      const date = active && tr?.date ? tr.date : getTodayStr();
+      const assigned = schedule?.[date]?.[employee.id];
+      const shift = shiftTypes.find(st => st.id === assigned?.shiftType);
+      return autoPeriodWindow(date, shift, ['checked-in-2', 'not-checked-in-2'].includes(stateRef.current.attendanceStatus));
+    },
+    refresh: loadAttendanceStatus, punch: executePunchInBackground, message: setAutoStatusText,
+    fix: (accuracy, distance) => { setGpsAccuracy(Number.isFinite(accuracy) ? Math.round(accuracy) : null); setCurrentDistance(distance === null ? null : Math.round(distance)); },
+    departure: (id, text) => { setDepartureHint({ id, text }); void showPwaNotification('تذكير بالانصراف', text); },
+    missedAlert: enableMissedShiftAlert,
+    late: (start) => triggerMissedShiftAlert(getTodayShift()?.name || 'الدوام', new Date(start).toLocaleTimeString('en-GB', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit' })),
+  });
 
   const DAYS_AR = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
-  const MONTHS_AR = [
-    'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-    'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
-  ];
+  const MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
 
   // Helper date conversions
-  const getTodayStr = () => {
-    const t = new Date();
-    return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+  function getTodayStr() {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
   };
 
   const getLocalScheduleData = () => {
@@ -760,7 +452,7 @@ export default function EmployeePortal({
   };
 
   const isTodayRecordShiftDouble = (): boolean => {
-    const todayStr = getTodayStr();
+    const todayStr = stateRef.current.todayRecord?.date || getTodayStr();
     const sched = schedule && Object.keys(schedule).length > 0 ? schedule : getLocalScheduleData();
     const assigned = sched?.[todayStr]?.[employee.id];
     const stType = assigned?.shiftType || 'A';
@@ -797,48 +489,29 @@ export default function EmployeePortal({
     }
   };
 
-  const loadAttendanceStatus = async () => {
-    setAttendanceStatus('checking');
+  async function loadAttendanceStatus(): Promise<boolean> {
+    setAttendanceStatus('checking'); stateRef.current.attendanceStatus = 'checking';
     try {
       const todayStr = getTodayStr();
-      const response = await fetch(`/api/attendance?companyId=${encodeURIComponent(companyId)}&from=${todayStr}&to=${todayStr}`);
-      if (!response.ok) {
-        throw new Error('فشل تحميل البيانات من الخادم المساعد');
-      }
+      const yesterday = new Date(Date.parse(todayStr + 'T12:00:00Z') - 86400000).toISOString().slice(0, 10);
+      const response = await fetch(`/api/attendance?${new URLSearchParams({ companyId, from: yesterday, to: todayStr })}`);
+      if (!response.ok) throw new Error('تعذر تأكيد الحالة من الخادم');
       const list = await response.json();
-      const record = list.find((r: any) => r.empId === employee.id && r.date === todayStr);
-
-      if (!record) {
-        setAttendanceStatus('not-checked-in');
-        setTodayRecord(null);
-      } else {
-        setTodayRecord(record);
-        
-        const isDouble = isTodayRecordShiftDouble();
-
-        if (isDouble) {
-          if (!record.checkOut) {
-            setAttendanceStatus('checked-in'); // First period check-in
-          } else if (!record.checkIn2) {
-            setAttendanceStatus('not-checked-in-2'); // Ready for Second period check-in
-          } else if (!record.checkOut2) {
-            setAttendanceStatus('checked-in-2'); // Second period check-in
-          } else {
-            setAttendanceStatus('checked-out'); // Both periods checked-out!
-          }
-        } else {
-          if (!record.checkOut) {
-            setAttendanceStatus('checked-in');
-          } else {
-            setAttendanceStatus('checked-out');
-          }
-        }
-      }
-    } catch (e: any) {
-      setAttendanceStatus('error');
-      setGeoStatus('فشل في تحميل الحالة: ' + e.message);
+      const own = list.filter((row: any) => String(row.empId) === String(employee.id));
+      const doubleFor = (row: any) => shiftTypes.find(st => st.id === schedule?.[row.date]?.[employee.id]?.shiftType)?.type === 'double';
+      const record = own.find((row: any) => row.date === yesterday && Number(row.checkInTs) > Date.now() - 86400000 && (!row.checkOut || (doubleFor(row) && row.checkIn2 && !row.checkOut2) || (doubleFor(row) && !row.checkIn2 && (autoPeriodWindow(row.date, shiftTypes.find(st => st.id === schedule?.[row.date]?.[employee.id]?.shiftType), true)?.end || 0) > Date.now())))
+        || own.find((row: any) => row.date === todayStr);
+      let status = 'not-checked-in';
+      if (record) status = !record.checkOut ? 'checked-in' : doubleFor(record) ? !record.checkIn2 ? 'not-checked-in-2' : !record.checkOut2 ? 'checked-in-2' : 'checked-out' : 'checked-out';
+      stateRef.current.attendanceStatus = status; stateRef.current.todayRecord = record || null;
+      setAttendanceStatus(status); setTodayRecord(record || null);
+      setDepartureHint(previous => previous?.id === record?.id && ['checked-in', 'checked-in-2'].includes(status) ? previous : null);
+      return true;
+    } catch (error: any) {
+      stateRef.current.attendanceStatus = 'error'; setAttendanceStatus('error'); setGeoStatus('فشل في تحميل الحالة: ' + error.message);
+      return false;
     }
-  };
+  }
 
   // Geolocation & Distance Helpers
   const getPosition = (): Promise<GeolocationPosition> => {
@@ -863,11 +536,12 @@ export default function EmployeePortal({
   };
 
   const handleCheckIn = async () => {
-    setCheckActionLoading(true);
+    if (autoPunchBusy.current || stateRef.current.actionLoading) return;
+    setCheckActionLoading(true); stateRef.current.actionLoading = true;
     setGeoStatus('📡 جاري تحديد موقعك الجغرافي...');
 
     if (currentProfile.restrictAttendanceLocations && getApprovedLocations(appSettings).length === 0) {
-      setCheckActionLoading(false);
+      setCheckActionLoading(false); stateRef.current.actionLoading = false;
       setGeoStatus('لا يوجد موقع بصمة مفعّل ومسموح لك. راجع الإدارة.');
       return;
     }
@@ -889,7 +563,7 @@ export default function EmployeePortal({
       const radiusLimit = locationMatch.location?.radius || 0;
 
       if (!locationMatch.inside) {
-        setCheckActionLoading(false);
+        setCheckActionLoading(false); stateRef.current.actionLoading = false;
         setGeoStatus(
           `🚫 لا يمكنك تسجيل الحضور. أنت خارج المواقع المعتمدة. أقرب موقع: ${locationMatch.location?.name || 'المقر'}، المسافة قدرها (${Math.round(
             diffDistance
@@ -901,7 +575,7 @@ export default function EmployeePortal({
       await executePunchIn(userLat, userLng);
     } catch (e: any) {
       setGeoStatus('❌ ' + e.message);
-      setCheckActionLoading(false);
+      setCheckActionLoading(false); stateRef.current.actionLoading = false;
     }
   };
 
@@ -966,11 +640,12 @@ export default function EmployeePortal({
     } catch (e: any) {
       setGeoStatus('خطأ أثناء الإدخال: ' + e.message);
     } finally {
-      setCheckActionLoading(false);
+      setCheckActionLoading(false); stateRef.current.actionLoading = false;
     }
   };
 
   const handleCheckOut = async () => {
+    if (autoPunchBusy.current || stateRef.current.actionLoading) return;
     if (!todayRecord?.id) {
       setGeoStatus('⚠️ لا توجد بيانات تسجيل حضور صالحة لهذا اليوم.');
       return;
@@ -981,7 +656,7 @@ export default function EmployeePortal({
 
     let checkoutCoords: { lat: number; lng: number } | null = null;
     if (requiresGPS) {
-      setCheckActionLoading(true);
+      setCheckActionLoading(true); stateRef.current.actionLoading = true;
       setGeoStatus('📡 جاري تحديد موقعك الجغرافي للتحقق من الانصراف...');
       try {
         const position = await getPosition();
@@ -993,7 +668,7 @@ export default function EmployeePortal({
         const radiusLimit = locationMatch.location?.radius || 0;
 
         if (!locationMatch.inside) {
-          setCheckActionLoading(false);
+          setCheckActionLoading(false); stateRef.current.actionLoading = false;
           setGeoStatus(
             `🚫 لا يمكنك تسجيل الانصراف. أنت خارج المواقع المعتمدة. أقرب موقع: ${locationMatch.location?.name || 'المقر'}، المسافة قدرها (${Math.round(
               diffDistance
@@ -1003,7 +678,7 @@ export default function EmployeePortal({
         }
       } catch (e: any) {
         setGeoStatus('❌ فشل التحقق من الموقع لتسجيل الانصراف: ' + e.message);
-        setCheckActionLoading(false);
+        setCheckActionLoading(false); stateRef.current.actionLoading = false;
         return;
       }
     }
@@ -1013,7 +688,7 @@ export default function EmployeePortal({
       catch { /* Checkout remains permitted when location restriction is disabled. */ }
     }
     requestConfirm('هل تريد تأكيد تسجيل انصرافك الآن؟', async () => {
-      setCheckActionLoading(true);
+      setCheckActionLoading(true); stateRef.current.actionLoading = true;
       setGeoStatus('⏳ جاري تسجيل الانصراف...');
 
       try {
@@ -1051,7 +726,7 @@ export default function EmployeePortal({
       } catch (e: any) {
         setGeoStatus('خطأ أثناء الانصراف: ' + e.message);
       } finally {
-        setCheckActionLoading(false);
+        setCheckActionLoading(false); stateRef.current.actionLoading = false;
       }
     });
   };
@@ -1618,13 +1293,13 @@ export default function EmployeePortal({
               </span>
               <div>
                 <h3 className="font-extrabold text-sm text-indigo-100">نظام البصمة التلقائي والتنبيه الذكي (Geofencing)</h3>
-                <p className="text-[10px] text-indigo-300">يستخدم تحديد الموقع والذكاء المجدول للتحقق التلقائي والإنذار بالخلفية</p>
+                <p className="text-[10px] text-indigo-300">حضور بعد ثبات الموقع، وتذكير بالانصراف للتأكيد أثناء فتح التطبيق</p>
               </div>
             </div>
             {(autoCheckIn || autoCheckOut) && (
               <span className="flex items-center gap-1 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-2 py-0.5 rounded-full text-[10px] font-bold">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-                مراقب فعال
+                الفحص مفعّل أثناء الاستخدام
               </span>
             )}
           </div>
@@ -1632,14 +1307,14 @@ export default function EmployeePortal({
           {/* Quick Permission Grants section */}
           <div className="p-3.5 bg-sky-950/45 border border-sky-900/40 rounded-xl flex flex-col gap-2.5 z-10">
             <span className="text-[11px] font-extrabold text-sky-300 flex items-center gap-1">
-              📱 خطوة هامة: تفعيل إذن الوصول الدائم والتنبيهات على الهاتف:
+              📱 خطوة هامة: تفعيل إذن الموقع والتنبيهات على الهاتف:
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
               <button
                 onClick={requestAlwaysLocationPermission}
                 className="px-3 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 rounded-lg text-[11px] font-bold transition-all text-right flex items-center justify-between"
               >
-                <span>1. طلب إذن الموقع الجغرافي النشط / الدائم</span>
+                <span>1. طلب إذن الموقع أثناء الاستخدام</span>
                 <span className="font-mono text-[9px] bg-sky-900/40 px-1.5 py-0.5 rounded">اضغط هنا 📍</span>
               </button>
               <button
@@ -1653,7 +1328,7 @@ export default function EmployeePortal({
               </button>
             </div>
             <p className="text-[9px] text-slate-300 leading-normal">
-              * للتأكد من عمل البصمة بالخلفية تلقائياً، يرجى تفعيل <strong className="font-extrabold">"السماح دائماً" (Always Allow)</strong> للموقع في إعدادات جهازك، وإبقاء صفحة البرنامج مفتوحة بالخلفية على جوالك.
+              لتشغيل البصمة افتح التطبيق واسمح بالموقع. تثبيت الـPWA لا يضمن استمرار GPS والشاشة مقفلة؛ يستأنف الفحص عند الرجوع.
             </p>
           </div>
 
@@ -1675,7 +1350,7 @@ export default function EmployeePortal({
             {/* Toggle 2: Auto Check out */}
             <label className="flex items-center justify-between p-3.5 bg-indigo-950/40 border border-indigo-800/40 rounded-xl cursor-pointer hover:bg-indigo-900/40 transition-all">
               <div className="flex flex-col gap-0.5">
-                <span className="text-xs font-bold text-slate-100">بصمة الانصراف تلقائياً عند الخروج</span>
+                <span className="text-xs font-bold text-slate-100">تذكير بالانصراف عند الخروج أو نهاية الدوام</span>
                 <span className="text-[9.5px] text-indigo-300">يسجل انصراف بمجرد مغادرتك للموقع</span>
               </div>
               <input
@@ -1700,7 +1375,6 @@ export default function EmployeePortal({
                   className="px-2.5 py-1.5 bg-indigo-900/60 border border-indigo-800 rounded-lg text-xs font-bold text-white focus:outline-none"
                 >
                   <option value="shift" className="bg-indigo-950">تلقائياً خلال أوقات الدوام فقط 💼</option>
-                  <option value="always" className="bg-indigo-950">تلقائياً طوال اليوم بشكل مستمر 🕒</option>
                   <option value="scheduled" className="bg-indigo-950">في توقيت مخصص يتم تحديده 🔔</option>
                 </select>
               </div>
@@ -1719,22 +1393,22 @@ export default function EmployeePortal({
             </div>
 
             <div className="flex flex-col gap-2.5">
-              <span className="text-[11px] font-extrabold text-indigo-200">⚙️ إعدادات الحضور والإنذار بالخلفية:</span>
+              <span className="text-[11px] font-extrabold text-indigo-200">⚙️ إعدادات الحضور والتذكير:</span>
               <div className="flex flex-col gap-1.5 text-xs">
-                <label className="text-[10px] text-slate-300 font-bold">معدل تكرار فحص الموقع بالخلفية</label>
+                <label className="text-[10px] text-slate-300 font-bold">الفاصل بين الفحوص المستقرة (يقصر عند تأكيد الموقع)</label>
                 <select
                   value={autoCheckInterval}
                   onChange={(e) => setAutoCheckInterval(Number(e.target.value))}
                   className="px-2.5 py-1.5 bg-indigo-900/60 border border-indigo-800 rounded-lg text-xs font-bold text-white focus:outline-none"
                 >
-                  <option value="15" className="bg-indigo-950">كل 15 دقيقة (ربع ساعة) - افتراضي</option>
-                  <option value="30" className="bg-indigo-950">كل 30 دقيقة (نصف ساعة)</option>
-                  <option value="60" className="bg-indigo-950">كل ساعة (60 دقيقة)</option>
+                  <option value="1" className="bg-indigo-950">كل دقيقة</option>
+                  <option value="2" className="bg-indigo-950">كل دقيقتين</option>
+                  <option value="5" className="bg-indigo-950">كل 5 دقائق — موصى به</option>
                 </select>
               </div>
 
               <div className="flex items-center justify-between pt-1 text-xs">
-                <span className="text-[10px] text-slate-300 font-bold">تنبيه بالخلفية إذا فات موعد الدوام</span>
+                <span className="text-[10px] text-slate-300 font-bold">تذكير عند فتح التطبيق إذا فات موعد الدوام</span>
                 <input
                   type="checkbox"
                   checked={enableMissedShiftAlert}
@@ -1750,7 +1424,7 @@ export default function EmployeePortal({
               <span className="font-bold text-[11px]">حالة التتبع الجغرافي للشبكة:</span>
               {currentDistance !== null ? (
                 <span className="font-mono text-[11px] bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-sky-400 font-extrabold">
-                  المسافة للمقر: {currentDistance} م
+                  المسافة للموقع: {currentDistance} م
                 </span>
               ) : (
                 <span className="text-[10px] text-slate-400">جاري مسح الإشارة...</span>
@@ -1762,10 +1436,13 @@ export default function EmployeePortal({
               <span>{autoStatusText}</span>
             </div>
 
+            <p className="text-[11px] text-slate-300">دقة GPS: {gpsAccuracy === null ? 'غير متاحة' : `${gpsAccuracy} م`} — آخر حضور تلقائي أكد الخادم حفظه: {lastAutoSaved || 'لا يوجد في هذه الجلسة'}</p>
+            <p className="text-[10px] text-indigo-300">الفحص أثناء فتح الـPWA فقط. لا تُحفظ بصمة دون اتصال أو عند إخفاء التطبيق؛ افتحه قرب وقت الحضور والانصراف.</p>
+            {departureHint && departureHint.id === todayRecord?.id && <div className="p-3 border border-amber-400 rounded-lg"><p>{departureHint.text}</p><button disabled={actionLoading} onClick={() => { void handleCheckOut(); }} className="mt-2 px-3 py-2 bg-amber-500 text-slate-900 rounded-lg font-bold">تأكيد الانصراف الآن</button><button onClick={() => setDepartureHint(null)} className="mr-3 underline">ما زلت أعمل</button></div>}
             {/* Auto logs */}
             {autoLogs.length > 0 && (
               <div className="mt-2 pt-2 border-t border-indigo-900">
-                <div className="text-[10px] text-indigo-300 block mb-1.5 font-bold">آخر عمليات البصمة والتحقق بالخلفية:</div>
+                <div className="text-[10px] text-indigo-300 block mb-1.5 font-bold">آخر عمليات البصمة والتحقق:</div>
                 <div className="flex flex-col gap-1">
                   {autoLogs.map((log, index) => (
                     <div key={index} className="text-[10.5px] text-slate-300 bg-slate-900/35 px-2 py-1 rounded border border-indigo-900/30">
