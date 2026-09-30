@@ -45,10 +45,14 @@ try {
   const punch = (body: any) => fetch(origin + '/api/attendance', { method:'POST',headers:employeeHeaders,body:JSON.stringify({companyId:'default',...body}) });
   assert.equal((await punch({empId:'employee-ci',checkIn:'08:00',checkInLat:24,checkInLng:46})).status,403);
   assert.equal((await punch({empId:'employee-ci',checkIn:'08:00'})).status,403);
-  const repeats = await Promise.all([punch({empId:'employee-ci',checkIn:'08:00',checkInLat:26,checkInLng:50}),punch({empId:'employee-ci',checkIn:'08:00',checkInLat:26,checkInLng:50})]);
+  assert.equal((await punch({ checkIn: 'auto', checkInLat: 26, checkInLng: 50, automatic: true, gpsAccuracy: 200, gpsTimestamp: Date.now() })).status, 400);
+  assert.equal((await punch({ checkIn: 'auto', checkInLat: 26, checkInLng: 50, automatic: true, gpsAccuracy: 10, gpsTimestamp: Date.now() - 60000 })).status, 400);
+  const repeats = await Promise.all([punch({empId:'employee-ci',checkIn:'08:00',checkInLat:26,checkInLng:50,automatic:true,gpsAccuracy:10,gpsTimestamp:Date.now()}),punch({empId:'employee-ci',checkIn:'08:00',checkInLat:26,checkInLng:50,automatic:true,gpsAccuracy:10,gpsTimestamp:Date.now()})]);
   assert.deepEqual(repeats.map(r=>r.status),[200,200]);
   const attendance = await repeats[0].json() as any;
   assert.equal(attendance.checkInLocation,'الشرقية');
+  assert.equal(attendance.source, 'GPS تلقائي');
+  assert.equal((await punch({ id: attendance.id, checkOut: 'auto', automatic: true })).status, 400);
   const savedRows = await pool.query('SELECT count(*)::int AS count FROM shift_app.attendance WHERE emp_id=$1',['employee-ci']);
   assert.equal(savedRows.rows[0].count,1);
   assert.equal((await punch({id:attendance.id,checkOut:'17:00',checkOutLat:24,checkOutLng:46})).status,403);
@@ -120,6 +124,22 @@ try {
   assert.equal(historicalLookup.length, 2);
   const employeeScope = await (await fetch(origin + '/api/attendance?companyId=default&empId=report-0', { headers: employeeHeaders })).json() as any;
   assert.ok(employeeScope.every((row: any) => row.empId === 'employee-ci'));
+  const analysisData = { ...stored.rows[0].value,
+    employees: [...stored.rows[0].value.employees, { id: 'analysis-ci', name: 'Analysis employee', dept: 'analysis-dept' }],
+    shiftTypes: [{ id: 'S', start: '08:00', end: '17:00' }, { id: 'N', start: '22:00', end: '06:00' }],
+    schedule: { '2024-10-10': { 'analysis-ci': { shiftType: 'S' } }, '2024-10-11': { 'analysis-ci': { shiftType: 'A' } }, '2024-10-12': { 'analysis-ci': { shiftType: 'N' } }, '2024-10-13': { 'analysis-ci': { shiftType: 'S' } } },
+    settings: { ...stored.rows[0].value.settings, attendanceAnalysis: { graceMinutes: 5 } },
+  };
+  await pool.query('UPDATE shift_app.system_data SET value=$1 WHERE key=$2', [JSON.stringify(analysisData), 'mainData']);
+  await pool.query("INSERT INTO shift_app.requests (emp_id,emp_name,date,type,status,company_id) VALUES ('analysis-ci','Analysis employee','2024-10-10','leave','approved','default')");
+  assert.equal((await adminRecord({ empId: 'analysis-ci', empName: 'Analysis employee', dept: 'analysis-dept', date: '2024-10-13', checkIn: '08:15', checkOut: '17:30' })).status, 200);
+  const analysisQuery = '/api/attendance-report?companyId=default&from=2024-10-10&to=2024-10-13&empId=analysis-ci&analysis=1&mode=all';
+  const analyzed = await (await fetch(origin + analysisQuery, { headers })).json() as any;
+  assert.equal(analyzed.total, 4); assert.equal(analyzed.absentDays, 1); assert.equal(analyzed.lateMinutes, 10); assert.equal(analyzed.overtimeMinutes, 30); assert.equal(analyzed.reviewCount, 0);
+  assert.equal(analyzed.items.find((day: any) => day.date === '2024-10-10').analysis.status, 'إجازة معتمدة');
+  const absences = await (await fetch(origin + analysisQuery + '&status=absent', { headers })).json() as any;
+  assert.equal(absences.total, 1); assert.equal(absences.items[0].date, '2024-10-12'); assert.deepEqual(absences.items[0].ids, []);
+  console.log('PASS: schedule analysis, approved leave, rest, overnight absence, grace and potential overtime through HTTP.');
   console.log('PASS: scoped report period/employee/department, whole-day paging, complete export, totals and employee permissions.');
   console.log('PASS: monthly snapshot, closed-month create/update/delete/date-move guards, reopening reason and audit.');
   console.log('PASS: per-employee server geofence, GPS required, duplicate punch serialization, scoped checkout and audit events.');

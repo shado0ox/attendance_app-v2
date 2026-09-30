@@ -17,6 +17,7 @@ export default defineConfig(() => {
           skipWaiting: true,
           clientsClaim: true,
           cleanupOutdatedCaches: true,
+          navigateFallbackDenylist: [/^\/api\//],
         },
         manifest: {
           name: 'نظام إدارة الدوام والحضور',
