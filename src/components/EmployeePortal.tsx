@@ -191,7 +191,7 @@ export default function EmployeePortal({
         const tr = stateRef.current.todayRecord;
         if (!tr) return;
         const updateData = {
-          id: tr.id,
+          id: tr.id, companyId,
           checkIn2: formattedTime,
           checkInTs2: Date.now(),
           checkInLat2: lat,
@@ -238,7 +238,7 @@ export default function EmployeePortal({
     }
   };
 
-  const executePunchOutBackground = async () => {
+  const executePunchOutBackground = async (lat: number, lng: number) => {
     try {
       const tr = stateRef.current.todayRecord;
       if (!tr?.id) return;
@@ -253,13 +253,15 @@ export default function EmployeePortal({
       const updateData = isPeriod2 ? {
         id: tr.id,
         checkOut2: formattedTime,
-        checkOutTs2: Date.now(),
+        checkOutTs2: Date.now(), checkOutLat2: lat, checkOutLng2: lng,
+        companyId,
         note: (tr.note ? tr.note + ' ' : '') + '[انصراف تلقائي عبر GPS]',
         source: tr.source || 'المقر (تلقائي)'
       } : {
         id: tr.id,
         checkOut: formattedTime,
-        checkOutTs: Date.now(),
+        checkOutTs: Date.now(), checkOutLat: lat, checkOutLng: lng,
+        companyId,
         note: (tr.note ? tr.note + ' ' : '') + '[انصراف تلقائي عبر GPS]',
         source: tr.source || 'المقر (تلقائي)'
       };
@@ -709,7 +711,7 @@ export default function EmployeePortal({
                 outsideCounter++;
                 if (outsideCounter >= 2) { // confirm departure to avoid GPS spikes
                   setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] 🚶 تم رصد خروجك من الموقع، جاري تسجيل الانصراف...`, ...prev.slice(0, 4)]);
-                  await executePunchOutBackground();
+                  await executePunchOutBackground(userLat, userLng);
                   outsideCounter = 0;
                 }
               }
@@ -910,7 +912,7 @@ export default function EmployeePortal({
       if (isPeriod2) {
         // Update existing daily record with period 2 check-in
         const updateData: any = {
-          id: todayRecord.id,
+          id: todayRecord.id, companyId,
           checkIn2: formattedTime,
           checkInTs2: Date.now(),
           ...(lat !== null && { checkInLat2: lat, checkInLng2: lng })
@@ -970,6 +972,7 @@ export default function EmployeePortal({
     const loc = appSettings?.officeLocation;
     const requiresGPS = getApprovedLocations(appSettings).length > 0 && loc?.preventOutCheckout;
 
+    let checkoutCoords: { lat: number; lng: number } | null = null;
     if (requiresGPS) {
       setCheckActionLoading(true);
       setGeoStatus('📡 جاري تحديد موقعك الجغرافي للتحقق من الانصراف...');
@@ -977,6 +980,7 @@ export default function EmployeePortal({
         const position = await getPosition();
         const userLat = position.coords.latitude;
         const userLng = position.coords.longitude;
+        checkoutCoords = { lat: userLat, lng: userLng };
         const locationMatch = matchAttendanceLocation(appSettings, userLat, userLng);
         const diffDistance = locationMatch.distance;
         const radiusLimit = locationMatch.location?.radius || 0;
@@ -997,6 +1001,10 @@ export default function EmployeePortal({
       }
     }
 
+    if (!requiresGPS) {
+      try { const position = await getPosition(); checkoutCoords = { lat: position.coords.latitude, lng: position.coords.longitude }; }
+      catch { /* Checkout remains permitted when location restriction is disabled. */ }
+    }
     requestConfirm('هل تريد تأكيد تسجيل انصرافك الآن؟', async () => {
       setCheckActionLoading(true);
       setGeoStatus('⏳ جاري تسجيل الانصراف...');
@@ -1013,11 +1021,13 @@ export default function EmployeePortal({
         const updateData: any = isPeriod2 ? {
           id: todayRecord.id,
           checkOut2: formattedTime,
-          checkOutTs2: Date.now()
+          checkOutTs2: Date.now(), companyId,
+          ...(checkoutCoords && { checkOutLat2: checkoutCoords.lat, checkOutLng2: checkoutCoords.lng })
         } : {
           id: todayRecord.id,
           checkOut: formattedTime,
-          checkOutTs: Date.now()
+          checkOutTs: Date.now(), companyId,
+          ...(checkoutCoords && { checkOutLat: checkoutCoords.lat, checkOutLng: checkoutCoords.lng })
         };
 
         const response = await fetch('/api/attendance', {

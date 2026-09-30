@@ -195,6 +195,13 @@ export const initializeSchemaAndTables = async () => {
         );
       `);
 
+      // Additive migration for existing installations; old punches stay untouched.
+      await client.query(`ALTER TABLE "${dbSchema}"."attendance"
+        ADD COLUMN IF NOT EXISTS check_in_location text,
+        ADD COLUMN IF NOT EXISTS check_in_location_2 text,
+        ADD COLUMN IF NOT EXISTS check_out_location text,
+        ADD COLUMN IF NOT EXISTS check_out_location_2 text;`);
+
       console.log(`[DB INIT] Schema "${dbSchema}" and tables initialized successfully.`);
     } finally {
       client.release();

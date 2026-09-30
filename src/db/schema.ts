@@ -57,6 +57,10 @@ export const attendance = pgTable('attendance', {
   checkInLat2: doublePrecision('check_in_lat_2'),
   checkInLng2: doublePrecision('check_in_lng_2'),
   
+  checkInLocation: text('check_in_location'),
+  checkInLocation2: text('check_in_location_2'),
+  checkOutLocation: text('check_out_location'),
+  checkOutLocation2: text('check_out_location_2'),
   status: text('status').default('present'),
   source: text('source').default('المقر'),
   note: text('note').default(''),

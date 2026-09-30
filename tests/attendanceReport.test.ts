@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { buildAttendanceDays, csvCell } from '../src/lib/attendanceReport';
+const row = { id: 1, empId: 'e1', empName: 'Test', date: '2026-09-30', checkIn: '08:00', checkOut: '12:00', checkIn2: '16:00', checkOut2: '20:00' };
+let days = buildAttendanceDays([row], {});
+assert.equal(days[0].minutes, 720);
+assert.equal(days[0].ignored, 2);
+assert.equal(buildAttendanceDays([row, {...row,id:2}], {}).length, 1);
+assert.equal(buildAttendanceDays([{...row,checkOut2:null}], {})[0].minutes, null);
+assert.equal(buildAttendanceDays([{...row,checkIn2:null,checkOut2:null,checkIn:'22:00',checkOut:'06:00'}], {})[0].minutes,480);
+assert.equal(buildAttendanceDays([{...row, checkInTs:200000,checkOutTs:100000}], {})[0].minutes,null);
+assert.equal(buildAttendanceDays([{...row,checkIn:'invalid',checkIn2:null,checkOut2:null}], {})[0].minutes,null);
+assert.equal(buildAttendanceDays([{...row,checkIn:'٠٨:٠٠ ص',checkOut:'٠٨:٠٠ م',checkIn2:null,checkOut2:null}], {})[0].minutes,720);
+assert.equal(buildAttendanceDays([{...row,checkInLocation:'الدمام'}], {})[0].first.location,'الدمام');
+assert.equal(buildAttendanceDays([row], {})[0].last.location,'غير مسجل');
+assert.equal(csvCell('a,"b"'), '"a,""b"""');
+assert.equal(csvCell('=1+1'), '"\'=1+1"');
+console.log('PASS: first-in/last-out, duplicate rows, intermediate punches, missing checkout, overnight shifts, invalid timestamps, Arabic times, stored locations, unknown checkout, and CSV escaping.');
