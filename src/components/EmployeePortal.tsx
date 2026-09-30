@@ -1,3 +1,4 @@
+import { getApprovedLocations, matchAttendanceLocation } from '../lib/attendanceLocations';
 import { useState, useEffect, useRef } from 'react';
 import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle, Fingerprint, ScanFace, ShieldCheck } from 'lucide-react';
 interface EmployeePortalProps {
@@ -553,25 +554,22 @@ export default function EmployeePortal({
 
       // 2. Perform GPS check if needed
       if (shouldPerformGPSCheck && autoIn) {
-        const loc = settings?.officeLocation;
-        if (loc && loc.lat && loc.lng) {
-          const officeLat = parseFloat(loc.lat);
-          const officeLng = parseFloat(loc.lng);
-          const radiusLimit = parseInt(loc.radius) || 150;
+        if (getApprovedLocations(settings).length > 0) {
           
-          if (!isNaN(officeLat) && !isNaN(officeLng)) {
+          {
             navigator.geolocation.getCurrentPosition(
               async (position) => {
                 const userLat = position.coords.latitude;
                 const userLng = position.coords.longitude;
-                const diff = getDistance(userLat, userLng, officeLat, officeLng);
+                const locationMatch = matchAttendanceLocation(stateRef.current.appSettings, userLat, userLng);
+                const diff = locationMatch.distance;
                 setCurrentDistance(Math.round(diff));
-                const isInside = diff <= radiusLimit;
+                const isInside = locationMatch.inside;
 
                 const activeStatus = stateRef.current.attendanceStatus;
 
                 if (isInside) {
-                  setAutoStatusText(`📍 أنت داخل مقر العمل (${Math.round(diff)} م) • نطاق البصم متاح ✅`);
+                  setAutoStatusText(`📍 أنت داخل ${locationMatch.location?.name || 'مقر العمل'} (${Math.round(diff)} م) • نطاق البصم متاح ✅`);
                   if (activeStatus === 'not-checked-in') {
                     setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] 🚀 فحص ذكي مجدول: تم رصدك بالموقع، جاري تسجيل حضورك...`, ...prev.slice(0, 4)]);
                     await executePunchInBackground(userLat, userLng, 'first');
@@ -606,13 +604,10 @@ export default function EmployeePortal({
               (pos) => {
                 const userLat = pos.coords.latitude;
                 const userLng = pos.coords.longitude;
-                const loc = settings?.officeLocation;
-                if (loc && loc.lat && loc.lng) {
-                  const officeLat = parseFloat(loc.lat);
-                  const officeLng = parseFloat(loc.lng);
-                  const radiusLimit = parseInt(loc.radius) || 150;
-                  const diff = getDistance(userLat, userLng, officeLat, officeLng);
-                  if (diff > radiusLimit) {
+                        if (getApprovedLocations(settings).length > 0) {
+                  const locationMatch = matchAttendanceLocation(stateRef.current.appSettings, userLat, userLng);
+                const diff = locationMatch.distance;
+                  if (!locationMatch.inside) {
                     // Outside location and missed start! Trigger alert!
                     triggerMissedShiftAlert(todayShift.name, todayShift.start);
                   }
@@ -635,13 +630,10 @@ export default function EmployeePortal({
               (pos) => {
                 const userLat = pos.coords.latitude;
                 const userLng = pos.coords.longitude;
-                const loc = settings?.officeLocation;
-                if (loc && loc.lat && loc.lng) {
-                  const officeLat = parseFloat(loc.lat);
-                  const officeLng = parseFloat(loc.lng);
-                  const radiusLimit = parseInt(loc.radius) || 150;
-                  const diff = getDistance(userLat, userLng, officeLat, officeLng);
-                  if (diff > radiusLimit) {
+                        if (getApprovedLocations(settings).length > 0) {
+                  const locationMatch = matchAttendanceLocation(stateRef.current.appSettings, userLat, userLng);
+                const diff = locationMatch.distance;
+                  if (!locationMatch.inside) {
                     triggerMissedShiftAlert(`${todayShift.name} (الفترة الثانية)`, todayShift.start2 || '17:00');
                   }
                 }
@@ -671,20 +663,11 @@ export default function EmployeePortal({
       return;
     }
 
-    const loc = stateRef.current.appSettings?.officeLocation;
-    if (!loc || !loc.lat || !loc.lng) {
+    if (getApprovedLocations(stateRef.current.appSettings).length === 0) {
       setAutoStatusText('⚠️ إحداثيات مقر العمل غير حددتها الإدارة');
       return;
     }
 
-    const officeLat = parseFloat(loc.lat);
-    const officeLng = parseFloat(loc.lng);
-    const radiusLimit = parseInt(loc.radius) || 150;
-
-    if (isNaN(officeLat) || isNaN(officeLng)) {
-      setAutoStatusText('⚠️ إحداثيات مقر العمل غير صالحة');
-      return;
-    }
 
     setAutoStatusText('📡 جاري تتبع الموقع التلقائي بالخلفية...');
 
@@ -696,17 +679,18 @@ export default function EmployeePortal({
         async (position) => {
           const userLat = position.coords.latitude;
           const userLng = position.coords.longitude;
-          const diff = getDistance(userLat, userLng, officeLat, officeLng);
+          const locationMatch = matchAttendanceLocation(stateRef.current.appSettings, userLat, userLng);
+                const diff = locationMatch.distance;
           setCurrentDistance(Math.round(diff));
 
-          const isInside = diff <= radiusLimit;
+          const isInside = locationMatch.inside;
           const activeStatus = stateRef.current.attendanceStatus;
           const activeAutoCheckIn = stateRef.current.autoCheckIn;
           const activeAutoCheckOut = stateRef.current.autoCheckOut;
 
           if (isInside) {
             outsideCounter = 0;
-            setAutoStatusText(`📍 أنت داخل مقر العمل (${Math.round(diff)} م) • نطاق البصم متاح ✅`);
+            setAutoStatusText(`📍 أنت داخل ${locationMatch.location?.name || 'مقر العمل'} (${Math.round(diff)} م) • نطاق البصم متاح ✅`);
 
             if (activeAutoCheckIn) {
               if (activeStatus === 'not-checked-in') {
@@ -853,19 +837,6 @@ export default function EmployeePortal({
   };
 
   // Geolocation & Distance Helpers
-  const getDistance = (lat1: number, lng1: number, lat2: number, lng2: number) => {
-    const R = 6371000; // Earth's radius in meters
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLng = ((lng2 - lng1) * Math.PI) / 180;
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos((lat1 * Math.PI) / 180) *
-        Math.cos((lat2 * Math.PI) / 180) *
-        Math.sin(dLng / 2) *
-        Math.sin(dLng / 2);
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  };
-
   const getPosition = (): Promise<GeolocationPosition> => {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
@@ -891,10 +862,8 @@ export default function EmployeePortal({
     setCheckActionLoading(true);
     setGeoStatus('📡 جاري تحديد موقعك الجغرافي...');
 
-    const loc = appSettings?.officeLocation;
-
     // Check if geo fence is setup
-    if (!loc || !loc.lat || !loc.lng) {
+    if (getApprovedLocations(appSettings).length === 0) {
       // Direct sign in if no coordinates setup
       await executePunchIn(null, null);
       return;
@@ -904,21 +873,16 @@ export default function EmployeePortal({
       const position = await getPosition();
       const userLat = position.coords.latitude;
       const userLng = position.coords.longitude;
-      const officeLat = parseFloat(loc.lat);
-      const officeLng = parseFloat(loc.lng);
-      const accuracy = position.coords.accuracy;
 
-      if (isNaN(officeLat) || isNaN(officeLng)) {
-        throw new Error('إعدادات الموقع الجغرافي للشركة غير مكتملة.');
-      }
 
-      const diffDistance = getDistance(userLat, userLng, officeLat, officeLng);
-      const radiusLimit = parseInt(loc.radius) || 150;
+      const locationMatch = matchAttendanceLocation(appSettings, userLat, userLng);
+      const diffDistance = locationMatch.distance;
+      const radiusLimit = locationMatch.location?.radius || 0;
 
-      if (diffDistance > radiusLimit) {
+      if (!locationMatch.inside) {
         setCheckActionLoading(false);
         setGeoStatus(
-          `🚫 لا يمكنك تسجيل الحضور. أنت خارج نطاق مقر الشركة بمسافة قدرها (${Math.round(
+          `🚫 لا يمكنك تسجيل الحضور. أنت خارج المواقع المعتمدة. أقرب موقع: ${locationMatch.location?.name || 'المقر'}، المسافة قدرها (${Math.round(
             diffDistance
           )}متر). النطاق المسموح به هو: ${radiusLimit}متر.`
         );
@@ -1004,7 +968,7 @@ export default function EmployeePortal({
     }
 
     const loc = appSettings?.officeLocation;
-    const requiresGPS = loc && loc.lat && loc.lng && loc.preventOutCheckout;
+    const requiresGPS = getApprovedLocations(appSettings).length > 0 && loc?.preventOutCheckout;
 
     if (requiresGPS) {
       setCheckActionLoading(true);
@@ -1013,15 +977,14 @@ export default function EmployeePortal({
         const position = await getPosition();
         const userLat = position.coords.latitude;
         const userLng = position.coords.longitude;
-        const officeLat = parseFloat(loc.lat);
-        const officeLng = parseFloat(loc.lng);
-        const diffDistance = getDistance(userLat, userLng, officeLat, officeLng);
-        const radiusLimit = parseInt(loc.radius) || 150;
+        const locationMatch = matchAttendanceLocation(appSettings, userLat, userLng);
+        const diffDistance = locationMatch.distance;
+        const radiusLimit = locationMatch.location?.radius || 0;
 
-        if (diffDistance > radiusLimit) {
+        if (!locationMatch.inside) {
           setCheckActionLoading(false);
           setGeoStatus(
-            `🚫 لا يمكنك تسجيل الانصراف. أنت خارج نطاق مقر الشركة بمسافة قدرها (${Math.round(
+            `🚫 لا يمكنك تسجيل الانصراف. أنت خارج المواقع المعتمدة. أقرب موقع: ${locationMatch.location?.name || 'المقر'}، المسافة قدرها (${Math.round(
               diffDistance
             )}متر). النطاق المسموح به للانصراف هو: ${radiusLimit}متر.`
           );

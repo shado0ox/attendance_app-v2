@@ -19,7 +19,17 @@ import {
 } from '@simplewebauthn/server';
 
 const app = express();
-app.use(express.json());
+// Main data includes the schedule and an optional base64 company logo.
+app.use(express.json({ limit: '10mb' }));
+app.use((error: any, _req: Request, res: Response, next: NextFunction) => {
+  if (error?.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'حجم البيانات يتجاوز 10 ميجابايت. قلّل حجم شعار الشركة ثم أعد الحفظ.' });
+  }
+  if (error?.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'صيغة بيانات الحفظ غير صحيحة.' });
+  }
+  next(error);
+});
 
 const PORT = 3011;
 const isProd = process.env.NODE_ENV === 'production';
@@ -869,17 +879,21 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
   const companyId = (req.query.companyId as string) || 'default';
   const key = companyId === 'default' ? 'mainData' : 'mainData_' + companyId;
   const auth = (req as any).auth as AuthTokenPayload;
+  if (!payload || !Array.isArray(payload.employees) || !Array.isArray(payload.departments) || !Array.isArray(payload.shiftTypes) || !payload.schedule || typeof payload.schedule !== 'object' || Array.isArray(payload.schedule)) {
+    return res.status(400).json({ error: 'بيانات الحفظ ناقصة أو غير صحيحة. لم يتم تعديل البيانات المسجلة.' });
+  }
 
   try {
     const result = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
 
     if (result.length === 0) {
-      const initialValue = auth.role === 'employee' ? (payload && payload.employees ? payload : defaultMainData) : payload;
+      if (auth.role === 'employee') return res.status(404).json({ error: 'بيانات الشركة غير موجودة' });
+      const initialValue = payload;
       const inserted = await db.insert(schema.systemData).values({
         key,
         value: initialValue,
       }).returning();
-      return res.json(sanitizeMainData(inserted[0].value, auth.role !== 'employee'));
+      return res.json(sanitizeMainData(inserted[0].value, true));
     }
 
     let valueToSave = payload;

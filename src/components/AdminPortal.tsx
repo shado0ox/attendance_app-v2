@@ -29,8 +29,8 @@ interface AdminPortalProps {
   shiftTypes: any[];
   schedule: any;
   onLogout: () => void;
-  onUpdateSettings: (settings: any) => void;
-  onUpdateAppData: (data: any) => void;
+  onUpdateSettings: (settings: any) => Promise<boolean>;
+  onUpdateAppData: (data: any) => Promise<boolean>;
   registrationRequests: any[];
   companyId: string;
   companiesList: any[];
@@ -508,13 +508,13 @@ export default function AdminPortal({
     };
   };
 
-  const handleSaveShift = () => {
+  const handleSaveShift = async () => {
     if (!smEmployee) {
       alert('الرجاء اختيار الموظف');
       return;
     }
 
-    const updatedSchedule = { ...schedule };
+    const updatedSchedule = structuredClone(schedule);
 
     if (smMode === 'single') {
       if (!smDate) {
@@ -548,11 +548,11 @@ export default function AdminPortal({
       }
     }
 
-    onUpdateAppData({ ...appData, schedule: updatedSchedule });
+    if (!await onUpdateAppData({ ...appData, schedule: updatedSchedule })) return;
     setShiftModalOpen(false);
   };
 
-  const handleAddEmployee = () => {
+  const handleAddEmployee = async () => {
     if (!emName.trim()) return;
     const newEmp = {
       id: editingEmpId || 'e' + Date.now(),
@@ -566,12 +566,12 @@ export default function AdminPortal({
 
     let updatedEmployees = [...employees];
     if (editingEmpId) {
-      updatedEmployees = updatedEmployees.map((e) => (e.id === editingEmpId ? newEmp : e));
+      updatedEmployees = updatedEmployees.map((e) => (e.id === editingEmpId ? { ...e, ...newEmp } : e));
     } else {
       updatedEmployees.push(newEmp);
     }
 
-    onUpdateAppData({ ...appData, employees: updatedEmployees });
+    if (!await onUpdateAppData({ ...appData, employees: updatedEmployees })) return;
     setEmpModalOpen(false);
     setEditingEmpId(null);
   };
@@ -583,7 +583,7 @@ export default function AdminPortal({
     });
   };
 
-  const handleAddDept = () => {
+  const handleAddDept = async () => {
     if (!dmName.trim()) return;
     const newDept = {
       id: editingDeptId || 'dept' + Date.now(),
@@ -600,12 +600,12 @@ export default function AdminPortal({
       updatedDepts.push(newDept);
     }
 
-    onUpdateAppData({ ...appData, departments: updatedDepts });
+    if (!await onUpdateAppData({ ...appData, departments: updatedDepts })) return;
     setDeptModalOpen(false);
     setEditingDeptId(null);
   };
 
-  const handleAddShiftType = () => {
+  const handleAddShiftType = async () => {
     if (!stCode.trim() || !stName.trim()) {
       alert('الرجاء إدخال الرمز التعريفي للشيفت والاسم العربي للشيفت');
       return;
@@ -632,7 +632,7 @@ export default function AdminPortal({
       updatedShiftTypes.push(newST);
     }
 
-    onUpdateAppData({ ...appData, shiftTypes: updatedShiftTypes });
+    if (!await onUpdateAppData({ ...appData, shiftTypes: updatedShiftTypes })) return;
     setShiftTypeModalOpen(false);
     setEditingStId(null);
   };
@@ -807,7 +807,7 @@ export default function AdminPortal({
     reader.readAsDataURL(file);
   };
 
-  const handleUpdatePassword = () => {
+  const handleUpdatePassword = async () => {
     if (!settingsNewPwd) {
       setSettingsPwdMsg('الرجاء إدخال كلمة المرور الجديدة');
       return;
@@ -816,7 +816,7 @@ export default function AdminPortal({
       setSettingsPwdMsg('كلمتا المرور غير متطابقتين');
       return;
     }
-    onUpdateSettings({ ...appSettings, password: settingsNewPwd });
+    if (!await onUpdateSettings({ ...appSettings, password: settingsNewPwd })) return;
     setSettingsPwdMsg('🔑 تم تحديث كلمة المرور العامة للمدير بنجاح!');
     setSettingsNewPwd('');
     setSettingsConfirmPwd('');
