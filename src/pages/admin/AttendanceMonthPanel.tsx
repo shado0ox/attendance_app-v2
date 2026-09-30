@@ -1,3 +1,4 @@
+import { printAttendance } from '../../lib/attendancePrint';
 import { useEffect, useState } from 'react';
 import { previousMonth } from '../../lib/attendanceMonths';
 import { csvCell, formatMinutes, formatPunch } from '../../lib/attendanceReport';
@@ -48,6 +49,10 @@ export default function AttendanceMonthPanel({ companyId, employeeId, requestCon
       <strong className="text-xs">{state ? state.status === 'approved' ? 'معتمد ومغلق' : 'مفتوح' : 'جارٍ قراءة الحالة'}</strong>
       {state?.status === 'open' && <button disabled={busy} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs disabled:opacity-50" onClick={() => requestConfirm(`اعتماد شهر ${month} وإغلاق تعديل البصمات؟`, () => { void change('approve'); })}>اعتماد وإغلاق الشهر</button>}
       {state?.status === 'approved' && <button disabled={busy || !state.snapshot.days.some((day: any) => !employeeId || day.empId === employeeId)} onClick={exportSnapshot} className="px-4 py-2 bg-sky-50 border border-sky-200 rounded-lg text-xs disabled:opacity-50">تصدير النسخة المعتمدة {employeeId ? 'للموظف المختار' : 'للشهر'}</button>}
+      {state?.status === 'approved' && <button disabled={busy || !state.snapshot.days.some((day: any) => !employeeId || day.empId === employeeId)} onClick={() => {
+        if (!printAttendance({ companyName: state.snapshot.companyName, period: month, approvedAt: state.approvedAt, approvedBy: state.approvedBy,
+          days: state.snapshot.days.filter((day: any) => !employeeId || day.empId === employeeId) })) setError('اسمح بفتح النوافذ المنبثقة للطباعة');
+      }} className="px-4 py-2 border border-sky-200 rounded-lg text-xs disabled:opacity-50">طباعة / PDF النسخة المعتمدة</button>}
     </div>
     {state?.status === 'approved' && <>
       <p className="text-xs text-slate-500">اعتمد بواسطة {state.approvedBy} في {new Date(state.approvedAt).toLocaleString('ar-SA', { timeZone: 'Asia/Riyadh' })} — إجمالي {formatMinutes(state.snapshot.totalMinutes)}</p>

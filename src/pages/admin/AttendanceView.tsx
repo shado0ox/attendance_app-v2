@@ -1,6 +1,8 @@
+import { useEffect, useMemo, useState } from 'react';
+import { printAttendance } from '../../lib/attendancePrint';
 import AttendanceMonthPanel from './AttendanceMonthPanel';
 import { buildAttendanceDays, formatMinutes, formatPunch, csvCell } from '../../lib/attendanceReport';
-import { UserCheck, UserX, Users, Search, Download, Trash2 } from 'lucide-react';
+import { UserCheck, UserX, Users, Search, Download, Trash2, Printer } from 'lucide-react';
 
 interface AttendanceViewProps {
   companyId: string;
@@ -47,7 +49,10 @@ export default function AttendanceView({
 }: AttendanceViewProps) {
   const stats = getTodayAttendanceStats();
 
-  const dailyRecords = buildAttendanceDays(attendanceRecords, appSettings);
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
+  useEffect(() => { setPage(1); }, [attFilterFrom, attFilterTo, attFilterEmp, attFilterDept, attFilterStatus]);
+  const dailyRecords = useMemo(() => buildAttendanceDays(attendanceRecords, appSettings), [attendanceRecords, appSettings]);
   const filteredRecords = dailyRecords.filter((r) => {
     if (attFilterFrom && r.date < attFilterFrom) return false;
     if (attFilterTo && r.date > attFilterTo) return false;
@@ -57,6 +62,16 @@ export default function AttendanceView({
     if (attFilterStatus === 'checkedout' && r.minutes === null) return false;
     return true;
   });
+
+  const pageCount = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pageRecords = filteredRecords.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const printReport = () => {
+    const opened = printAttendance({ companyName: appSettings?.companyName || 'الشركة',
+      days: filteredRecords.map(day => ({ ...day, departmentName: departments.find(dept => dept.id === day.dept)?.name || day.dept })),
+      period: `${attFilterFrom || 'البداية'} إلى ${attFilterTo || 'النهاية'}` });
+    if (!opened) alert('اسمح بفتح النوافذ المنبثقة لعرض الكشف وطباعته');
+  };
 
   const exportCsv = () => {
     const rows = [['التاريخ', 'اليوم', 'الموظف', 'القسم', 'أول حضور', 'آخر انصراف', 'مدة العمل', 'الساعات العشرية', 'مكان أول حضور', 'مكان آخر انصراف', 'الحالة', 'بصمات مستبعدة']];
@@ -210,6 +225,7 @@ export default function AttendanceView({
             >
               <Download size={15} /><span className="text-xs">تصدير {attFilterEmp ? 'الموظف المختار' : 'النتائج'}</span>
             </button>
+            <button onClick={printReport} disabled={!filteredRecords.length} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-sky-200 rounded-lg text-sky-700 disabled:opacity-50 max-w-full"><Printer size={15} /><span className="text-xs">طباعة / PDF {attFilterEmp ? 'للموظف المختار' : 'للنتائج'}</span></button>
         </div>
       </div>
 
@@ -218,6 +234,12 @@ export default function AttendanceView({
         <strong>إجمالي المدة: {formatMinutes(filteredRecords.reduce((sum, row) => sum + (row.minutes || 0), 0))}</strong>
         <strong>أيام تحتاج مراجعة: {filteredRecords.filter(row => row.minutes === null).length}</strong>
         <p className="w-full text-xs text-slate-600">المدة من أول حضور إلى آخر انصراف، وتشمل الفواصل بين الفترات. البصمات الوسيطة والمكررة مستبعدة من الحساب، والسجلات الناقصة لا تدخل في الإجمالي.</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        <button disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} className="border rounded-lg px-3 py-2 disabled:opacity-40">السابق</button>
+        <span>صفحة {currentPage} من {pageCount} — {filteredRecords.length} يوم موظف</span>
+        <button disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)} className="border rounded-lg px-3 py-2 disabled:opacity-40">التالي</button>
+        <span className="text-slate-500">الطباعة والتصدير يشملان جميع النتائج المفلترة.</span>
       </div>
       {/* Records List Log */}
       <div className="bg-white border border-sky-100 rounded-2xl shadow-sm overflow-hidden">
@@ -237,7 +259,7 @@ export default function AttendanceView({
               </tr>
             </thead>
             <tbody>
-              {filteredRecords.map((rec) => {
+              {pageRecords.map((rec) => {
                 const deptObj = departments.find((d) => d.id === rec.dept);
 
                 return (
@@ -251,8 +273,8 @@ export default function AttendanceView({
                           <span className="w-1.5 h-1.5 rounded-full bg-slate-400" /> {rec.reportStatus}
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg px-2.5 py-0.5 font-extrabold text-[10px]">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> {rec.reportStatus}
+                        <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg px-2.5 py-0.5 font-extrabold text-[10px]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> {rec.reportStatus}
                         </span>
                       )}
                     </td>
