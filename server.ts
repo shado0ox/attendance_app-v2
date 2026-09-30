@@ -1084,7 +1084,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       const out = field.startsWith('checkOut');
       const base = out ? 'checkOut' : 'checkIn';
       const lat = req.body[base + 'Lat' + suffix], lng = req.body[base + 'Lng' + suffix];
-      const location = checkPunchLocation(mainData?.settings, lat, lng, !out || !!mainData?.settings?.officeLocation?.preventOutCheckout);
+      const location = checkPunchLocation(mainData?.settings, lat, lng, !out || !!mainData?.settings?.officeLocation?.preventOutCheckout, employee);
       if (location.error) return { status: 403, body: { error: location.error } };
       const values: any = { [field]: new Date(now).toLocaleTimeString('en-GB', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit' }),
         [base + 'Ts' + suffix]: String(now), [base + 'Location' + suffix]: location.name };

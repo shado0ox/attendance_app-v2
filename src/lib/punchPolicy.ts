@@ -1,4 +1,4 @@
-import { getApprovedLocations, matchAttendanceLocation } from './attendanceLocations';
+import { getEmployeeLocations, matchAttendanceLocation } from './attendanceLocations';
 export const punchFields = ['checkIn', 'checkOut', 'checkIn2', 'checkOut2'] as const;
 export function validatePunchTransition(record: any, field: typeof punchFields[number]): string | null {
   if (record?.[field]) return 'duplicate';
@@ -9,12 +9,15 @@ export function validatePunchTransition(record: any, field: typeof punchFields[n
   if (field === 'checkOut' && record.checkIn2) return 'الفترة الأولى مغلقة';
   return null;
 }
-export function checkPunchLocation(settings: any, lat: any, lng: any, restricted: boolean) {
+export function checkPunchLocation(settings: any, lat: any, lng: any, restricted: boolean, employee?: any) {
   const valid = lat != null && lng != null && lat !== '' && lng !== '' && Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) && Math.abs(Number(lat)) <= 90 && Math.abs(Number(lng)) <= 180;
-  const sites = getApprovedLocations(settings);
+  const sites = getEmployeeLocations(settings, employee);
+  if (restricted && employee?.restrictAttendanceLocations && !sites.length) {
+    return { error: 'لا يوجد موقع بصمة مفعّل ومسموح لك. راجع الإدارة لتحديد مواقعك.', name: '' };
+  }
   if (restricted && sites.length && !valid) return { error: 'يلزم إرسال موقع GPS صحيح لتسجيل البصمة', name: '' };
   if (!valid) return { name: 'غير مسجل', error: null };
-  const match = matchAttendanceLocation(settings, Number(lat), Number(lng));
+  const match = matchAttendanceLocation(settings, Number(lat), Number(lng), employee);
   if (restricted && sites.length && !match.inside) return { error: 'أنت خارج مواقع البصمة المعتمدة للشركة', name: '' };
   return { error: null, name: match.inside ? match.location!.name : 'خارج المواقع المعتمدة' };
 }

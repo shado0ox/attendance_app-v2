@@ -25,8 +25,15 @@ export function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: n
   return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - Math.min(1, a)));
 }
 
-export function matchAttendanceLocation(settings: any, lat: number, lng: number) {
-  const candidates = getApprovedLocations(settings).map(location => ({
+export function getEmployeeLocations(settings: any, employee: any = settings?._attendanceEmployee): AttendanceLocation[] {
+  const locations = getApprovedLocations(settings);
+  if (!employee?.restrictAttendanceLocations) return locations;
+  const ids = Array.isArray(employee.allowedAttendanceLocationIds) ? employee.allowedAttendanceLocationIds : [];
+  return locations.filter(location => ids.includes(location.id));
+}
+
+export function matchAttendanceLocation(settings: any, lat: number, lng: number, employee: any = settings?._attendanceEmployee) {
+  const candidates = getEmployeeLocations(settings, employee).map(location => ({
     location, distance: distanceMeters(lat, lng, location.lat, location.lng)
   })).sort((a, b) => a.distance - b.distance);
   // A farther site's larger radius may contain the person even if the nearest site's does not.
