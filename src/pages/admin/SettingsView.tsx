@@ -1,3 +1,4 @@
+import AttendanceLocationsEditor from '../../components/AttendanceLocationsEditor';
 import { useState, useEffect, type ChangeEvent } from 'react';
 import {
   Building2, UploadCloud, X, Crosshair, Key, Save, Shield, Plus, Edit, Trash2, UserCheck,
@@ -255,6 +256,8 @@ export default function SettingsView({
           <div className="text-[11px] font-bold text-slate-600 bg-slate-50 border p-2.5 rounded-xl">{geoSettingStatus}</div>
         )}
       </div>
+
+      <AttendanceLocationsEditor settings={appSettings} onSave={onUpdateSettings} />
 
       {/* General Admin Password updates */}
       <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
