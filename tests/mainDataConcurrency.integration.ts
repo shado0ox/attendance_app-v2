@@ -58,6 +58,7 @@ try {
   const month = '2025-01';
   const adminRecord = (body: any) => fetch(origin + '/api/attendance', { method: 'POST', headers, body: JSON.stringify({ companyId: 'default', ...body }) });
   const monthly = (body: any) => fetch(origin + '/api/attendance-months', { method: 'POST', headers, body: JSON.stringify({ companyId: 'default', month, ...body }) });
+  assert.equal((await fetch(origin + '/api/attendance-months?companyId=default', { method: 'POST', headers, body: JSON.stringify({ companyId: 'other-company', month, action: 'approve' }) })).status, 400);
   const historical = { empId: 'monthly-ci', empName: 'Monthly employee', date: month + '-10', checkIn: '08:00', checkOut: '17:00', source: 'تسجيل إداري' };
   const created = await adminRecord(historical);
   assert.equal(created.status, 200);

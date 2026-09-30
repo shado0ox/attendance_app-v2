@@ -122,6 +122,7 @@ function requireAuth(roles: AuthTokenPayload['role'][], matchCompany: boolean = 
     if (!roles.includes(payload.role)) {
       return res.status(403).json({ error: 'ليس لديك صلاحية للقيام بهذا الإجراء' });
     }
+    if (req.query.companyId && req.body?.companyId && req.query.companyId !== req.body.companyId) return res.status(400).json({ error: 'معرّف الشركة في الطلب غير متطابق' });
     const requestedCompanyId = (req.query.companyId as string) || (req.body && req.body.companyId) || 'default';
     if (matchCompany && payload.role !== 'superadmin' && payload.companyId !== requestedCompanyId) {
       return res.status(403).json({ error: 'لا يمكن الوصول لبيانات شركة أخرى' });
