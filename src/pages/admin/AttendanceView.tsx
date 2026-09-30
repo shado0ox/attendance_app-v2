@@ -1,13 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { printAttendance } from '../../lib/attendancePrint';
 import AttendanceMonthPanel from './AttendanceMonthPanel';
-import { buildAttendanceDays, formatMinutes, formatPunch, csvCell } from '../../lib/attendanceReport';
+import { formatMinutes, formatPunch, csvCell } from '../../lib/attendanceReport';
 import { UserCheck, UserX, Users, Search, Download, Trash2, Printer } from 'lucide-react';
 
 interface AttendanceViewProps {
   companyId: string;
-  attendanceRecords: any[];
-  appSettings: any;
   employees: any[];
   departments: any[];
   attFilterFrom: string;
@@ -28,8 +26,6 @@ interface AttendanceViewProps {
 
 export default function AttendanceView({
   companyId,
-  attendanceRecords,
-  appSettings,
   employees,
   departments,
   attFilterFrom,
@@ -49,34 +45,60 @@ export default function AttendanceView({
 }: AttendanceViewProps) {
   const stats = getTodayAttendanceStats();
 
+  const filters = { from: attFilterFrom, to: attFilterTo, empId: attFilterEmp, dept: attFilterDept, status: attFilterStatus };
+  const [applied, setApplied] = useState(filters);
   const [page, setPage] = useState(1);
-  const pageSize = 50;
-  useEffect(() => { setPage(1); }, [attFilterFrom, attFilterTo, attFilterEmp, attFilterDept, attFilterStatus]);
-  const dailyRecords = useMemo(() => buildAttendanceDays(attendanceRecords, appSettings), [attendanceRecords, appSettings]);
-  const filteredRecords = dailyRecords.filter((r) => {
-    if (attFilterFrom && r.date < attFilterFrom) return false;
-    if (attFilterTo && r.date > attFilterTo) return false;
-    if (attFilterEmp && r.empId !== attFilterEmp) return false;
-    if (attFilterDept && r.dept !== attFilterDept) return false;
-    if (attFilterStatus === 'present' && r.minutes !== null) return false;
-    if (attFilterStatus === 'checkedout' && r.minutes === null) return false;
-    return true;
-  });
-
-  const pageCount = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
-  const currentPage = Math.min(page, pageCount);
-  const pageRecords = filteredRecords.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  const printReport = () => {
-    const opened = printAttendance({ companyName: appSettings?.companyName || 'الشركة',
-      days: filteredRecords.map(day => ({ ...day, departmentName: departments.find(dept => dept.id === day.dept)?.name || day.dept })),
-      period: `${attFilterFrom || 'البداية'} إلى ${attFilterTo || 'النهاية'}` });
-    if (!opened) alert('اسمح بفتح النوافذ المنبثقة لعرض الكشف وطباعته');
+  const [refresh, setRefresh] = useState(0);
+  const [report, setReport] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState('');
+  const pending = JSON.stringify(filters) !== JSON.stringify(applied);
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true); setError(''); setReport(null);
+    const query = new URLSearchParams({ companyId, ...applied, page: String(page), pageSize: '50' });
+    fetch(`/api/attendance-report?${query}`, { signal: controller.signal })
+      .then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.error); return data; })
+      .then(data => { if (!controller.signal.aborted) setReport(data); })
+      .catch(err => { if (!controller.signal.aborted) setError(err.message || 'تعذر تحميل الكشف'); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [companyId, applied, page, refresh]);
+  const searchReport = () => {
+    setApplied(filters); setPage(1); setRefresh(value => value + 1); loadAttendance();
+  };
+  const pageRecords = report?.items || [];
+  const currentPage = report?.page || page;
+  const pageCount = report?.pageCount || 1;
+  const allResults = async () => {
+    const response = await fetch(`/api/attendance-report?${new URLSearchParams({ companyId, ...applied, mode: 'all' })}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'تعذر تحميل بيانات التصدير');
+    return data;
+  };
+  const printReport = async () => {
+    // Open during the click, before fetching, so browser popup protection accepts it.
+    const preview = window.open('', '_blank');
+    if (!preview) { setError('اسمح بفتح النوافذ المنبثقة لعرض الكشف وطباعته'); return; }
+    preview.opener = null;
+    preview.document.body.textContent = 'جارٍ تجهيز الكشف...';
+    setExporting(true); setError('');
+    try {
+      const data = await allResults();
+      if (!preview.closed) printAttendance({ companyName: data.companyName, days: data.items, period: `${data.from} إلى ${data.to}` }, preview);
+    } catch (err: any) { preview.close(); setError(err.message); }
+    finally { setExporting(false); }
   };
 
-  const exportCsv = () => {
+  const exportCsv = async () => {
+    setExporting(true); setError('');
+    try {
+    const data = await allResults();
+    const filteredRecords = data.items;
     const rows = [['التاريخ', 'اليوم', 'الموظف', 'القسم', 'أول حضور', 'آخر انصراف', 'مدة العمل', 'الساعات العشرية', 'مكان أول حضور', 'مكان آخر انصراف', 'الحالة', 'بصمات مستبعدة']];
     filteredRecords.forEach(r => {
-      const department = departments.find(d => d.id === r.dept);
+      const department = { name: r.departmentName || r.dept };
       rows.push([r.date, new Date(r.date + 'T12:00:00').toLocaleDateString('ar-SA', { weekday: 'long' }), r.empName, department?.name || r.dept,
         formatPunch(r.first), formatPunch(r.last), formatMinutes(r.minutes), r.minutes === null ? '' : (r.minutes / 60).toFixed(2),
         r.first?.location || 'غير مسجل', r.last?.location || 'غير مسجل', r.reportStatus, String(r.ignored)]);
@@ -84,19 +106,16 @@ export default function AttendanceView({
     const csv = '\uFEFF' + rows.map(row => row.map(csvCell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a'); link.href = url;
-    link.download = `كشف_حضور_${attFilterEmp || 'الكل'}_${attFilterFrom}_${attFilterTo}.csv`;
+    link.download = `كشف_حضور_${applied.empId || 'الكل'}_${applied.from}_${applied.to}.csv`;
     link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err: any) { setError(err.message); }
+    finally { setExporting(false); }
   };
 
   const resetFilters = () => {
-    const d = new Date();
-    const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    setAttFilterFrom(todayStr);
-    setAttFilterTo(todayStr);
-    setAttFilterEmp('');
-    setAttFilterDept('');
-    setAttFilterStatus('');
-    setTimeout(() => loadAttendance(), 50);
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
+    setAttFilterFrom(todayStr); setAttFilterTo(todayStr); setAttFilterEmp(''); setAttFilterDept(''); setAttFilterStatus('');
+    setApplied({ from: todayStr, to: todayStr, empId: '', dept: '', status: '' }); setPage(1); setRefresh(value => value + 1); loadAttendance();
   };
 
   return (
@@ -203,15 +222,15 @@ export default function AttendanceView({
         </div>
         <div className="flex flex-wrap items-center gap-2 border-t border-sky-100 pt-4 min-w-0">
             <button
-              onClick={loadAttendance}
+              onClick={searchReport} disabled={loading || exporting}
               className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold text-xs shadow-sm transition-all"
             >
               <Search size={14} />
-              <span>تحديث</span>
+              <span>{loading ? 'جارٍ التحميل...' : 'بحث / تحديث'}</span>
             </button>
 
             <button
-              onClick={resetFilters}
+              onClick={resetFilters} disabled={loading || exporting}
               className="px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg font-extrabold text-xs border border-slate-200/60 transition-all text-center whitespace-nowrap"
               title="إعادة تعيين حقول الفلترة والبحث"
             >
@@ -221,24 +240,26 @@ export default function AttendanceView({
             <button
               onClick={exportCsv}
               className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg text-sky-700 font-bold transition-all disabled:opacity-50 max-w-full"
-              title="تصدير النتائج المفلترة فقط" disabled={!filteredRecords.length}
+              title="تصدير النتائج المفلترة فقط" disabled={loading || exporting || pending || !report?.total}
             >
               <Download size={15} /><span className="text-xs">تصدير {attFilterEmp ? 'الموظف المختار' : 'النتائج'}</span>
             </button>
-            <button onClick={printReport} disabled={!filteredRecords.length} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-sky-200 rounded-lg text-sky-700 disabled:opacity-50 max-w-full"><Printer size={15} /><span className="text-xs">طباعة / PDF {attFilterEmp ? 'للموظف المختار' : 'للنتائج'}</span></button>
+            <button onClick={printReport} disabled={loading || exporting || pending || !report?.total} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-sky-200 rounded-lg text-sky-700 disabled:opacity-50 max-w-full"><Printer size={15} /><span className="text-xs">طباعة / PDF {attFilterEmp ? 'للموظف المختار' : 'للنتائج'}</span></button>
         </div>
+        {pending && <p className="text-xs text-amber-700">تغيرت الفلاتر؛ اضغط بحث / تحديث لتطبيقها قبل التصدير.</p>}
+        {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
       </div>
 
       <div className="p-4 bg-sky-50 rounded-xl text-sm flex flex-wrap gap-5">
-        <strong>أيام الموظفين: {filteredRecords.length}</strong>
-        <strong>إجمالي المدة: {formatMinutes(filteredRecords.reduce((sum, row) => sum + (row.minutes || 0), 0))}</strong>
-        <strong>أيام تحتاج مراجعة: {filteredRecords.filter(row => row.minutes === null).length}</strong>
+        <strong>أيام الموظفين: {report?.total || 0}</strong>
+        <strong>إجمالي المدة: {formatMinutes(report?.totalMinutes || 0)}</strong>
+        <strong>أيام تحتاج مراجعة: {report?.reviewCount || 0}</strong>
         <p className="w-full text-xs text-slate-600">المدة من أول حضور إلى آخر انصراف، وتشمل الفواصل بين الفترات. البصمات الوسيطة والمكررة مستبعدة من الحساب، والسجلات الناقصة لا تدخل في الإجمالي.</p>
       </div>
       <div className="flex flex-wrap items-center gap-3 text-xs">
-        <button disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} className="border rounded-lg px-3 py-2 disabled:opacity-40">السابق</button>
-        <span>صفحة {currentPage} من {pageCount} — {filteredRecords.length} يوم موظف</span>
-        <button disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)} className="border rounded-lg px-3 py-2 disabled:opacity-40">التالي</button>
+        <button disabled={loading || exporting || currentPage === 1} onClick={() => setPage(currentPage - 1)} className="border rounded-lg px-3 py-2 disabled:opacity-40">السابق</button>
+        <span>صفحة {currentPage} من {pageCount} — {report?.total || 0} يوم موظف</span>
+        <button disabled={loading || exporting || currentPage === pageCount} onClick={() => setPage(currentPage + 1)} className="border rounded-lg px-3 py-2 disabled:opacity-40">التالي</button>
         <span className="text-slate-500">الطباعة والتصدير يشملان جميع النتائج المفلترة.</span>
       </div>
       {/* Records List Log */}
@@ -260,7 +281,7 @@ export default function AttendanceView({
             </thead>
             <tbody>
               {pageRecords.map((rec) => {
-                const deptObj = departments.find((d) => d.id === rec.dept);
+                const deptObj = { name: rec.departmentName || rec.dept };
 
                 return (
                   <tr key={rec.id} className="border-b last:border-0 hover:bg-sky-50/20 text-slate-700 text-xs">
@@ -289,10 +310,12 @@ export default function AttendanceView({
                       <button
                         onClick={() => {
                           requestConfirm('هل تريد تأكيد حذف جميع سجلات الموظف لهذا اليوم؟', async () => {
-                            for (const id of rec.ids) await onDeleteRecord(id);
+                            try { for (const id of rec.ids) await onDeleteRecord(id); }
+                            catch { /* The parent shows the server's rejection; stop further deletes. */ }
+                            finally { setRefresh(value => value + 1); loadAttendance(); }
                           });
                         }}
-                        className="p-1 hover:bg-rose-50 text-rose-500 rounded transition-all"
+                        disabled={loading || exporting} className="p-1 hover:bg-rose-50 text-rose-500 rounded transition-all"
                         title="حذف السجل"
                       >
                         <Trash2 size={13} />
@@ -302,10 +325,10 @@ export default function AttendanceView({
                 );
               })}
 
-              {filteredRecords.length === 0 && (
+              {!pageRecords.length && (
                 <tr>
                   <td colSpan={9} className="p-10 text-center text-slate-400 font-medium">
-                    لا توجد سجلات حضور صالحة للمواصفات المحددة حالياً.
+                    {loading ? 'جارٍ تحميل النتائج...' : error ? 'تعذر تحميل النتائج؛ أعد المحاولة.' : 'لا توجد سجلات للفترة والفلاتر المختارة.'}
                   </td>
                 </tr>
               )}

@@ -1,3 +1,4 @@
+import { parseAttendanceQuery, attendanceReportPage } from './src/lib/attendanceQuery';
 import { buildAttendanceDays } from './src/lib/attendanceReport';
 import { validMonth, validAttendanceDate, riyadhMonth } from './src/lib/attendanceMonths';
 import { mainDataVersion } from './src/lib/mainDataVersion';
@@ -1089,13 +1090,33 @@ app.post('/api/attendance-months', requireAuth(['admin', 'superadmin']), async (
   } catch (error: any) { console.error('Monthly attendance operation failed', error); return res.status(error.status || 500).json({ error: error.status ? error.message : 'تعذر تحديث اعتماد الشهر' }); }
 });
 
+// Query only the requested period. Build complete employee-days before paging so
+// duplicate rows and overnight punches cannot be split across display pages.
+app.get('/api/attendance-report', requireAuth(['admin', 'superadmin']), async (req, res) => {
+  let query: ReturnType<typeof parseAttendanceQuery>;
+  try { query = parseAttendanceQuery(req.query); } catch (error: any) { return res.status(400).json({ error: error.message }); }
+  const companyId = String(req.query.companyId || 'default');
+  try {
+    const records = await db.select().from(schema.attendance).where(and(
+      eq(schema.attendance.companyId, companyId),
+      sql`${schema.attendance.date} >= ${query.from}`, sql`${schema.attendance.date} <= ${query.to}`,
+      query.empId ? eq(schema.attendance.empId, query.empId) : undefined,
+      query.dept ? eq(schema.attendance.dept, query.dept) : undefined,
+    )).orderBy(desc(schema.attendance.id));
+    const mainData = await getMainDataByCompanyId(companyId);
+    const days = buildAttendanceDays(records, mainData?.settings).map(day => ({ ...day, departmentName: mainData?.departments?.find((dept: any) => dept.id === day.dept)?.name || day.dept }));
+    return res.json({ ...attendanceReportPage(days, query), companyName: mainData?.settings?.companyName || companyId, from: query.from, to: query.to });
+  } catch (error) { console.error('Attendance report query failed', error); return res.status(500).json({ error: 'تعذر تحميل كشف الحضور' }); }
+});
+
 // 4. Attendance Endpoints (Tenant Aware)
 app.get('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), async (req, res) => {
   const companyId = (req.query.companyId as string) || 'default';
+  if ((req.query.from !== undefined && !validAttendanceDate(req.query.from)) || (req.query.to !== undefined && !validAttendanceDate(req.query.to)) || (req.query.empId !== undefined && typeof req.query.empId !== 'string')) return res.status(400).json({ error: 'فلتر الحضور غير صالح' });
   try {
     const result = await db.select()
       .from(schema.attendance)
-      .where(and(eq(schema.attendance.companyId, companyId), (req as any).auth.role === 'employee' ? eq(schema.attendance.empId, String((req as any).auth.id)) : undefined))
+      .where(and(eq(schema.attendance.companyId, companyId), (req as any).auth.role === 'employee' ? eq(schema.attendance.empId, String((req as any).auth.id)) : (req.query.empId ? eq(schema.attendance.empId, String(req.query.empId)) : undefined), req.query.from ? sql`${schema.attendance.date} >= ${req.query.from}` : undefined, req.query.to ? sql`${schema.attendance.date} <= ${req.query.to}` : undefined))
       .orderBy(desc(schema.attendance.createdAt));
     return res.json(result);
   } catch (error: any) {

@@ -1,3 +1,4 @@
+import { attendanceToday } from '../lib/attendanceQuery';
 import { getApprovedLocations } from '../lib/attendanceLocations';
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -68,14 +69,8 @@ export default function AdminPortal({
   const [selectedDept, setSelectedDept] = useState(departments[0]?.id || 'dept1');
 
   // Attendance report state
-  const [attFilterFrom, setAttFilterFrom] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  });
-  const [attFilterTo, setAttFilterTo] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  });
+  const [attFilterFrom, setAttFilterFrom] = useState(attendanceToday);
+  const [attFilterTo, setAttFilterTo] = useState(attendanceToday);
   const [attFilterEmp, setAttFilterEmp] = useState('');
   const [attFilterDept, setAttFilterDept] = useState('');
   const [attFilterStatus, setAttFilterStatus] = useState('');
@@ -210,7 +205,7 @@ export default function AdminPortal({
     if (activeView === 'settings') {
       loadSubAdmins();
     }
-  }, [activeView]);
+  }, [activeView, companyId]);
 
   const hasPermission = (perm: string) => {
     if (admin.role === 'superadmin') return true;
@@ -251,7 +246,7 @@ export default function AdminPortal({
   const loadAttendance = async () => {
     setAttLoading(true);
     try {
-      const response = await fetch(`/api/attendance?companyId=${companyId}`);
+      const response = await fetch(`/api/attendance?companyId=${encodeURIComponent(companyId)}&from=${attendanceToday()}&to=${attendanceToday()}`);
       if (response.ok) {
         const loaded = await response.json();
         setAttendanceRecords(loaded);
@@ -486,13 +481,10 @@ export default function AdminPortal({
   };
 
   const getTodayAttendanceStats = () => {
-    const d = new Date();
-    const todayStrFull = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    
-    // Checked in today (from attendanceRecords)
-    const todayCheckedIn = attendanceRecords.filter(r => r.date === todayStrFull && r.checkIn);
-    const presentIds = todayCheckedIn.map(r => r.empId);
-    
+    const todayStrFull = attendanceToday();
+    const todayCheckedIn = attendanceRecords.filter(r => r.date === todayStrFull && (r.checkIn || r.checkIn2));
+    const presentIds = [...new Set(todayCheckedIn.map(r => r.empId))];
+
     // Who is scheduled today?
     const scheduledEmpIds = employees.filter(emp => {
       const daySchedule = schedule[todayStrFull]?.[emp.id];
@@ -739,10 +731,10 @@ export default function AdminPortal({
           updatedSch[matchedReq.date][matchedReq.empId] = { shiftType: originalShift2.shiftType, note: `بديل لـ ${matchedReq.swapWithEmpName}` };
           updatedSch[matchedReq.date][matchedReq.swapWithEmpId] = { shiftType: originalShift1.shiftType, note: `بديل لـ ${matchedReq.empName}` };
         } else if (matchedReq.type === 'attendance_adjustment') {
-          // Check in locally loaded attendance records to see if a record already exists
-          const existingRecord = attendanceRecords.find(
-            (rec) => rec.empId === matchedReq.empId && rec.date === matchedReq.date
-          );
+          // Look up this employee-day independently of the currently displayed report.
+          const existingResponse = await fetch(`/api/attendance?${new URLSearchParams({ companyId, from: matchedReq.date, to: matchedReq.date, empId: matchedReq.empId })}`);
+          if (!existingResponse.ok) throw new Error('تعذر التحقق من سجل البصمة');
+          const existingRecord = (await existingResponse.json())[0];
 
           const formattedCheckIn = matchedReq.checkInTime || '08:00';
           const formattedCheckOut = matchedReq.checkOutTime || '16:00';
@@ -1146,8 +1138,6 @@ export default function AdminPortal({
           {activeView === 'attendance' && (
             <AttendanceView
               companyId={companyId}
-              appSettings={appSettings}
-              attendanceRecords={attendanceRecords}
               employees={employees}
               departments={departments}
               attFilterFrom={attFilterFrom}
@@ -1167,9 +1157,9 @@ export default function AdminPortal({
                 try {
                   const response = await fetch(`/api/attendance/${id}`, { method: 'DELETE' });
                   if (!response.ok) throw new Error();
-                  loadAttendance();
-                } catch (err) {
-                  alert('تعذر الحذف');
+                } catch (err: any) {
+                  alert(err.message || 'تعذر الحذف');
+                  throw err;
                 }
               }}
             />

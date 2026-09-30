@@ -34,14 +34,14 @@ export function attendancePrintHtml({ companyName, days, period, approvedAt, app
   <p>مدة العمل من أول حضور إلى آخر انصراف وتشمل الفواصل بين الفترات. البصمات المكررة والوسيطة مستبعدة، والأيام الناقصة لا تدخل في إجمالي المدة. الكشف يعرض الأيام المسجلة فقط؛ لا يحسب الغياب أو التأخير من جدول الدوام.</p>
   <div class="signatures"><div>توقيع الموظف: ................................<br>التاريخ: ................................</div><div>مراجعة المسؤول: ................................<br>التاريخ: ................................</div><div>اعتماد الإدارة: ................................<br>التاريخ: ................................</div></div></body></html>`;
 }
-export function printAttendance(options: AttendancePrintOptions) {
-  const preview = window.open('', '_blank');
+export function printAttendance(options: AttendancePrintOptions, target?: Window) {
+  const preview = target || window.open('', '_blank');
   if (!preview) return false;
   preview.opener = null;
   preview.document.write(attendancePrintHtml(options));
   preview.document.close();
   preview.focus();
   // The preview remains available after closing the print dialog.
-  setTimeout(() => preview.print(), 250);
+  setTimeout(() => { if (!preview.closed) preview.print(); }, 250);
   return true;
 }
