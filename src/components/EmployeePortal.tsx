@@ -801,7 +801,7 @@ export default function EmployeePortal({
     setAttendanceStatus('checking');
     try {
       const todayStr = getTodayStr();
-      const response = await fetch(`/api/attendance?companyId=${companyId}`);
+      const response = await fetch(`/api/attendance?companyId=${encodeURIComponent(companyId)}&from=${todayStr}&to=${todayStr}`);
       if (!response.ok) {
         throw new Error('فشل تحميل البيانات من الخادم المساعد');
       }

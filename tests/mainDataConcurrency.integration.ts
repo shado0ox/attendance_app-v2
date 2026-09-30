@@ -99,6 +99,28 @@ try {
   const raceRows = await pool.query("SELECT count(*)::int AS count FROM shift_app.attendance WHERE date LIKE $1", [raceMonth + '-%']);
   assert.equal(raceRows.rows[0].count, raceSnapshot.snapshot.days.length);
   assert.equal((await monthly({ month: raceMonth, action: 'reopen', reason: 'stale browser attempt', expectedStatus: 'approved', expectedRevision: 0 })).status, 409);
+  const reportRecords = Array.from({ length: 53 }, (_, i) => ({ emp_id: 'report-' + i, emp_name: 'Report ' + i, dept: 'report-dept', date: '2024-11-10', check_in: '08:00', check_out: '17:00', company_id: 'default' }));
+  reportRecords.push({ ...reportRecords[0] });
+  reportRecords.push({ ...reportRecords[0], company_id: 'foreign-company' });
+  await pool.query(`INSERT INTO shift_app.attendance (emp_id,emp_name,dept,date,check_in,check_out,company_id)
+    SELECT emp_id,emp_name,dept,date,check_in,check_out,company_id FROM jsonb_to_recordset($1::jsonb) AS r(emp_id text,emp_name text,dept text,date text,check_in text,check_out text,company_id text)`, [JSON.stringify(reportRecords)]);
+  const reportQuery = '/api/attendance-report?companyId=default&from=2024-11-10&to=2024-11-10&dept=report-dept';
+  const firstPage = await fetch(origin + reportQuery, { headers }); assert.equal(firstPage.status, 200);
+  const firstReport = await firstPage.json() as any;
+  assert.equal(firstReport.items.length, 50); assert.equal(firstReport.total, 53); assert.equal(firstReport.totalMinutes, 53 * 540);
+  const secondReport = await (await fetch(origin + reportQuery + '&page=2', { headers })).json() as any;
+  assert.equal(secondReport.items.length, 3);
+  const fullReport = await (await fetch(origin + reportQuery + '&mode=all', { headers })).json() as any;
+  assert.equal(fullReport.items.length, 53);
+  const employeeReport = await (await fetch(origin + reportQuery + '&empId=report-0', { headers })).json() as any;
+  assert.equal(employeeReport.total, 1); assert.equal(employeeReport.items[0].ids.length, 2);
+  assert.equal((await fetch(origin + reportQuery, { headers: employeeHeaders })).status, 403);
+  assert.equal((await fetch(origin + '/api/attendance-report?companyId=default&from=2026-02-30', { headers })).status, 400);
+  const historicalLookup = await (await fetch(origin + '/api/attendance?companyId=default&from=2024-11-10&to=2024-11-10&empId=report-0', { headers })).json() as any;
+  assert.equal(historicalLookup.length, 2);
+  const employeeScope = await (await fetch(origin + '/api/attendance?companyId=default&empId=report-0', { headers: employeeHeaders })).json() as any;
+  assert.ok(employeeScope.every((row: any) => row.empId === 'employee-ci'));
+  console.log('PASS: scoped report period/employee/department, whole-day paging, complete export, totals and employee permissions.');
   console.log('PASS: monthly snapshot, closed-month create/update/delete/date-move guards, reopening reason and audit.');
   console.log('PASS: per-employee server geofence, GPS required, duplicate punch serialization, scoped checkout and audit events.');
   console.log('PASS: concurrent saves, stale client rejection, reload-and-save, metadata not persisted.');
