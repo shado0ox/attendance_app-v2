@@ -1,15 +1,17 @@
+import { getEmployeeLocations } from '../../lib/attendanceLocations';
 import { Plus, MessageCircle } from 'lucide-react';
 
 interface EmployeesViewProps {
   employees: any[];
   departments: any[];
+  appSettings?: any;
   onAddNew: () => void;
   onEdit: (emp: any) => void;
   onDelete: (empId: string) => void;
   onOpenWhatsApp: (empId: string) => void;
 }
 
-export default function EmployeesView({ employees, departments, onAddNew, onEdit, onDelete, onOpenWhatsApp }: EmployeesViewProps) {
+export default function EmployeesView({ employees, departments, appSettings, onAddNew, onEdit, onDelete, onOpenWhatsApp }: EmployeesViewProps) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex justify-between items-center mb-2">
@@ -49,6 +51,11 @@ export default function EmployeesView({ employees, departments, onAddNew, onEdit
               <div className="flex flex-col gap-1 text-[10px] text-slate-500 font-medium">
                 <div>
                   الجوال/واتساب: <strong className="font-extrabold text-slate-700">{emp.phone || 'غير مسجل'}</strong>
+                </div>
+                <div>
+                  مواقع البصمة: <strong className="font-extrabold text-sky-700">{emp.restrictAttendanceLocations
+                    ? (getEmployeeLocations(appSettings, emp).map(site => site.name).join('، ') || 'لا توجد مواقع مفعّلة مسموحة')
+                    : 'كل مواقع الشركة المفعّلة'}</strong>
                 </div>
                 <div>
                   حساب البوابة: <strong className="font-extrabold text-slate-700">{emp.username || 'غير مسجل'}</strong>

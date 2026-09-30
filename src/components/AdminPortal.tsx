@@ -1,3 +1,4 @@
+import { getApprovedLocations } from '../lib/attendanceLocations';
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -156,6 +157,9 @@ export default function AdminPortal({
   const [emPhone, setEmPhone] = useState('');
   const [emColor, setEmColor] = useState('#01696f');
   const [emPassword, setEmPassword] = useState('');
+  const [emRestrictLocations, setEmRestrictLocations] = useState(false);
+  const [emLocationIds, setEmLocationIds] = useState<string[]>([]);
+  const employeeLocationOptions = getApprovedLocations(appSettings);
 
   const [deptModalOpen, setDeptModalOpen] = useState(false);
   const [editingDeptId, setEditingDeptId] = useState<string | null>(null);
@@ -554,7 +558,12 @@ export default function AdminPortal({
 
   const handleAddEmployee = async () => {
     if (!emName.trim()) return;
+    if (emRestrictLocations && !emLocationIds.some(id => employeeLocationOptions.some(site => site.id === id))) {
+      alert('اختر موقع بصمة مفعّلًا واحدًا على الأقل للموظف.'); return;
+    }
     const newEmp = {
+      restrictAttendanceLocations: emRestrictLocations,
+      allowedAttendanceLocationIds: emRestrictLocations ? emLocationIds : [],
       id: editingEmpId || 'e' + Date.now(),
       name: emName.trim(),
       dept: emDept || departments[0]?.id || '',
@@ -1183,6 +1192,7 @@ export default function AdminPortal({
           {/* View: Employees CRUD */}
           {activeView === 'employees' && (
             <EmployeesView
+              appSettings={appSettings}
               employees={employees}
               departments={departments}
               onAddNew={() => {
@@ -1193,6 +1203,8 @@ export default function AdminPortal({
                 setEmPhone('');
                 setEmColor('#01696f');
                 setEmPassword('');
+                setEmRestrictLocations(false);
+                setEmLocationIds([]);
                 setEmpModalOpen(true);
               }}
               onEdit={(emp) => {
@@ -1203,6 +1215,8 @@ export default function AdminPortal({
                 setEmPhone(emp.phone || '');
                 setEmColor(emp.color || '#01696f');
                 setEmPassword(emp.password || '');
+                setEmRestrictLocations(!!emp.restrictAttendanceLocations);
+                setEmLocationIds(Array.isArray(emp.allowedAttendanceLocationIds) ? emp.allowedAttendanceLocationIds : []);
                 setEmpModalOpen(true);
               }}
               onDelete={handleDeleteEmployee}
@@ -1875,7 +1889,7 @@ export default function AdminPortal({
       {/* Employee Dialog CRUD Modal */}
       {empModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900 bg-opacity-40 backdrop-blur-sm">
-          <div className="w-full max-w-sm p-6 bg-white rounded-2xl shadow-xl border border-sky-100">
+          <div className="w-full max-w-sm max-h-[90dvh] overflow-y-auto p-6 bg-white rounded-2xl shadow-xl border border-sky-100">
             <h3 className="text-sm font-extrabold text-slate-800 mb-4 pb-2 border-b">
               {editingEmpId ? 'تعديل بيانات الموظف' : 'بطاقة موظف جديدة'}
             </h3>
@@ -1940,6 +1954,21 @@ export default function AdminPortal({
                 />
               </div>
 
+              <fieldset className="border rounded-xl p-3 flex flex-col gap-2">
+                <legend className="text-xs font-bold">مواقع البصمة المسموحة</legend>
+                <label className="text-xs flex gap-2 items-center">
+                  <input type="checkbox" checked={emRestrictLocations} onChange={e => setEmRestrictLocations(e.target.checked)} />
+                  تحديد مواقع لهذا الموظف
+                </label>
+                {!emRestrictLocations ? <p className="text-xs text-slate-500">كل مواقع الشركة المفعّلة مسموحة.</p> : <>
+                  {employeeLocationOptions.map(site => <label key={site.id} className="text-xs flex gap-2 items-center">
+                    <input type="checkbox" checked={emLocationIds.includes(site.id)} onChange={e => setEmLocationIds(ids => e.target.checked ? [...ids, site.id] : ids.filter(id => id !== site.id))} />
+                    {site.name}
+                  </label>)}
+                  {!employeeLocationOptions.length && <p className="text-xs text-rose-600">أضف موقعًا مفعّلًا من الإعدادات أولًا.</p>}
+                  {emLocationIds.some(id => !employeeLocationOptions.some(site => site.id === id)) && <p className="text-xs text-amber-700">بعض المواقع المختارة محذوفة أو معطّلة ولن تسمح بالبصمة.</p>}
+                </>}
+              </fieldset>
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-bold text-slate-600">رمز أو لون تمييز الهوية</label>
                 <div className="flex gap-2 flex-wrap">

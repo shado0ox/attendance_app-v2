@@ -1,5 +1,5 @@
-import { getApprovedLocations, matchAttendanceLocation } from '../lib/attendanceLocations';
-import { useState, useEffect, useRef } from 'react';
+import { getEmployeeLocations as getApprovedLocations, matchAttendanceLocation } from '../lib/attendanceLocations';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle, Fingerprint, ScanFace, ShieldCheck } from 'lucide-react';
 interface EmployeePortalProps {
   employee: any;
@@ -15,7 +15,7 @@ interface EmployeePortalProps {
 
 export default function EmployeePortal({
   employee,
-  appSettings,
+  appSettings: companySettings,
   departments,
   employees,
   shiftTypes = [],
@@ -24,6 +24,8 @@ export default function EmployeePortal({
   onOpenChangePassword,
   companyId
 }: EmployeePortalProps) {
+  const currentProfile = employees.find(e => String(e.id) === String(employee.id)) || employee;
+  const appSettings = useMemo(() => ({ ...companySettings, _attendanceEmployee: currentProfile }), [companySettings, currentProfile]);
   const [monthOffset, setMonthOffset] = useState(0);
   const [requests, setRequests] = useState<any[]>([]);
   const [reqsLoading, setReqsLoading] = useState(false);
@@ -864,6 +866,11 @@ export default function EmployeePortal({
     setCheckActionLoading(true);
     setGeoStatus('📡 جاري تحديد موقعك الجغرافي...');
 
+    if (currentProfile.restrictAttendanceLocations && getApprovedLocations(appSettings).length === 0) {
+      setCheckActionLoading(false);
+      setGeoStatus('لا يوجد موقع بصمة مفعّل ومسموح لك. راجع الإدارة.');
+      return;
+    }
     // Check if geo fence is setup
     if (getApprovedLocations(appSettings).length === 0) {
       // Direct sign in if no coordinates setup
