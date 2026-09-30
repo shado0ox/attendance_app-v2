@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { validatePunchTransition, checkPunchLocation } from '../src/lib/punchPolicy';
+const settings = { officeLocation: { lat: 24, lng: 46, radius: 150 }, attendanceLocations: [{id:'b',name:'الفرع',lat:26,lng:50,radius:100}] };
+assert.equal(validatePunchTransition(null,'checkIn'),null);
+assert.equal(validatePunchTransition({checkIn:'08:00'},'checkIn'),'duplicate');
+assert.ok(validatePunchTransition(null,'checkOut'));
+assert.ok(validatePunchTransition({checkIn:'08:00'},'checkIn2'));
+assert.equal(validatePunchTransition({checkIn:'08:00',checkOut:'12:00'},'checkIn2'),null);
+assert.ok(validatePunchTransition({checkIn:'08:00',checkOut:'12:00'},'checkOut2'));
+assert.equal(validatePunchTransition({checkIn:'08:00',checkOut:'12:00',checkIn2:'16:00'},'checkOut2'),null);
+assert.equal(checkPunchLocation(settings,26,50,true).name,'الفرع');
+assert.ok(checkPunchLocation(settings,null,null,true).error);
+assert.ok(checkPunchLocation(settings,0,0,true).error);
+assert.equal(checkPunchLocation(settings,0,0,false).error,null);
+assert.equal(checkPunchLocation({},null,null,true).error,null);
+assert.ok(checkPunchLocation(settings,'',50,true).error);
+console.log('PASS: duplicate idempotency, legal punch sequence, branch acceptance, missing/invalid GPS, restricted/unrestricted checkout.');

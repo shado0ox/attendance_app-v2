@@ -1,3 +1,4 @@
+import AuditLogView from '../../components/AuditLogView';
 import AttendanceLocationsEditor from '../../components/AttendanceLocationsEditor';
 import { useState, useEffect, type ChangeEvent } from 'react';
 import {
@@ -51,6 +52,7 @@ const PERMISSION_LABELS: Record<string, string> = {
 
 export default function SettingsView({
   admin,
+  companyId,
   appSettings,
   onUpdateSettings,
   requestConfirm,
@@ -258,6 +260,8 @@ export default function SettingsView({
       </div>
 
       <AttendanceLocationsEditor settings={appSettings} onSave={onUpdateSettings} />
+
+      <AuditLogView companyId={companyId} />
 
       {/* General Admin Password updates */}
       <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">

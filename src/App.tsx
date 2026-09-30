@@ -74,6 +74,9 @@ export default function App() {
     officeLocation: { lat: 24.7136, lng: 46.6753, radius: 150 }
   });
 
+  const serverVersions = useRef<Record<string, string>>({});
+  const conflictCompanies = useRef(new Set<string>());
+  const [saveConflict, setSaveConflict] = useState(false);
   const dataRef = useRef(appData);
   const settingsRef = useRef(appSettings);
   const companyRef = useRef(localStorage.getItem('app_company_id') || 'default');
@@ -239,6 +242,9 @@ export default function App() {
         const data = await response.json();
         if (cancelled || fetchRevision !== revision.current || pendingSaves.current || unsaved.current) return;
         receivedData = true;
+        if (data._version) serverVersions.current[companyId] = data._version;
+        conflictCompanies.current.delete(companyId);
+        setSaveConflict(false);
         dataRef.current = {
           departments: data.departments || [], employees: data.employees || [],
           shiftTypes: data.shiftTypes || defaultShiftTypes, schedule: data.schedule || {}
@@ -263,6 +269,7 @@ export default function App() {
           try {
             console.log('[Cache Fallback] Loading application data from local storage cache.');
             const data = JSON.parse(cached);
+            if (data._version) serverVersions.current[companyId] = data._version;
             dataRef.current = { departments: data.departments || [], employees: data.employees || [], shiftTypes: data.shiftTypes || defaultShiftTypes, schedule: data.schedule || {} };
             if (data.settings) settingsRef.current = data.settings;
             setAppData({
@@ -355,12 +362,18 @@ export default function App() {
     setSaving(true);
     const task = saveQueue.current.then(async () => {
       try {
+        if (conflictCompanies.current.has(targetCompany)) return false;
         const response = await fetch(`/api/main-data?companyId=${encodeURIComponent(targetCompany)}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, _baseVersion: serverVersions.current[targetCompany] })
         });
         const result = await response.json().catch(() => null);
+        if (response.status === 409 && result?.code === 'DATA_CONFLICT') {
+          conflictCompanies.current.add(targetCompany);
+          if (companyRef.current === targetCompany) setSaveConflict(true);
+        }
         if (!response.ok) throw new Error(result?.error || `فشل الحفظ (${response.status})`);
         if (!result || typeof result !== 'object') throw new Error('استجابة الحفظ غير صحيحة');
+        if (result._version) serverVersions.current[targetCompany] = result._version;
         cacheData(targetCompany, result);
         if (companyRef.current === targetCompany && revision.current === saveRevision) {
           unsaved.current = false;
@@ -526,7 +539,12 @@ export default function App() {
       {(saving || saveError) && (
         <div role="status" className="sticky top-0 z-[120] p-3 bg-amber-50 border-b border-amber-200 text-sm text-center">
           {saving ? 'جاري حفظ البيانات...' : `لم يتم حفظ التعديلات: ${saveError}. التعديلات محفوظة مؤقتًا في هذه الصفحة.`}
-          {saveError && !saving && <button className="mr-3 underline font-bold" onClick={() => { void saveMainData(); }}>إعادة محاولة الحفظ</button>}
+          {saveError && !saving && !saveConflict && <button className="mr-3 underline font-bold" onClick={() => { void saveMainData(); }}>إعادة محاولة الحفظ</button>}
+          {saveConflict && !saving && <button className="mr-3 underline font-bold" onClick={() => {
+            if (!window.confirm('سيتم تحميل نسخة الخادم والتخلي عن التعديلات غير المحفوظة في هذه الصفحة. انسخ تعديلك أولًا إذا احتجت إليه. هل تريد المتابعة؟')) return;
+            unsaved.current = false;
+            window.location.reload();
+          }}>تحميل آخر نسخة</button>}
         </div>
       )}
       {/*

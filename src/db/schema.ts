@@ -106,3 +106,11 @@ export const requests = pgTable('requests', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+
+// Append-only changes and original employee punch events.
+export const auditLog = pgTable('audit_log', {
+  id: serial('id').primaryKey(), companyId: text('company_id').notNull(),
+  actorId: text('actor_id').notNull(), actorRole: text('actor_role').notNull(),
+  action: text('action').notNull(), entityId: text('entity_id'),
+  details: jsonb('details').notNull(), createdAt: timestamp('created_at').defaultNow(),
+});
