@@ -120,6 +120,22 @@ try {
   assert.equal(historicalLookup.length, 2);
   const employeeScope = await (await fetch(origin + '/api/attendance?companyId=default&empId=report-0', { headers: employeeHeaders })).json() as any;
   assert.ok(employeeScope.every((row: any) => row.empId === 'employee-ci'));
+  const analysisData = { ...stored.rows[0].value,
+    employees: [...stored.rows[0].value.employees, { id: 'analysis-ci', name: 'Analysis employee', dept: 'analysis-dept' }],
+    shiftTypes: [{ id: 'S', start: '08:00', end: '17:00' }, { id: 'N', start: '22:00', end: '06:00' }],
+    schedule: { '2024-10-10': { 'analysis-ci': { shiftType: 'S' } }, '2024-10-11': { 'analysis-ci': { shiftType: 'A' } }, '2024-10-12': { 'analysis-ci': { shiftType: 'N' } }, '2024-10-13': { 'analysis-ci': { shiftType: 'S' } } },
+    settings: { ...stored.rows[0].value.settings, attendanceAnalysis: { graceMinutes: 5 } },
+  };
+  await pool.query('UPDATE shift_app.system_data SET value=$1 WHERE key=$2', [JSON.stringify(analysisData), 'mainData']);
+  await pool.query("INSERT INTO shift_app.requests (emp_id,emp_name,date,type,status,company_id) VALUES ('analysis-ci','Analysis employee','2024-10-10','leave','approved','default')");
+  assert.equal((await adminRecord({ empId: 'analysis-ci', empName: 'Analysis employee', dept: 'analysis-dept', date: '2024-10-13', checkIn: '08:15', checkOut: '17:30' })).status, 200);
+  const analysisQuery = '/api/attendance-report?companyId=default&from=2024-10-10&to=2024-10-13&empId=analysis-ci&analysis=1&mode=all';
+  const analyzed = await (await fetch(origin + analysisQuery, { headers })).json() as any;
+  assert.equal(analyzed.total, 4); assert.equal(analyzed.absentDays, 1); assert.equal(analyzed.lateMinutes, 10); assert.equal(analyzed.overtimeMinutes, 30); assert.equal(analyzed.reviewCount, 0);
+  assert.equal(analyzed.items.find((day: any) => day.date === '2024-10-10').analysis.status, 'إجازة معتمدة');
+  const absences = await (await fetch(origin + analysisQuery + '&status=absent', { headers })).json() as any;
+  assert.equal(absences.total, 1); assert.equal(absences.items[0].date, '2024-10-12'); assert.deepEqual(absences.items[0].ids, []);
+  console.log('PASS: schedule analysis, approved leave, rest, overnight absence, grace and potential overtime through HTTP.');
   console.log('PASS: scoped report period/employee/department, whole-day paging, complete export, totals and employee permissions.');
   console.log('PASS: monthly snapshot, closed-month create/update/delete/date-move guards, reopening reason and audit.');
   console.log('PASS: per-employee server geofence, GPS required, duplicate punch serialization, scoped checkout and audit events.');
