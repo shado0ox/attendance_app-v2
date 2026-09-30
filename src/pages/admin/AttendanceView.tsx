@@ -1,7 +1,9 @@
+import { buildAttendanceDays, formatMinutes, formatPunch, csvCell } from '../../lib/attendanceReport';
 import { UserCheck, UserX, Users, Search, Download, Trash2 } from 'lucide-react';
 
 interface AttendanceViewProps {
   attendanceRecords: any[];
+  appSettings: any;
   employees: any[];
   departments: any[];
   attFilterFrom: string;
@@ -22,6 +24,7 @@ interface AttendanceViewProps {
 
 export default function AttendanceView({
   attendanceRecords,
+  appSettings,
   employees,
   departments,
   attFilterFrom,
@@ -41,35 +44,30 @@ export default function AttendanceView({
 }: AttendanceViewProps) {
   const stats = getTodayAttendanceStats();
 
-  const filteredRecords = attendanceRecords.filter((r) => {
+  const dailyRecords = buildAttendanceDays(attendanceRecords, appSettings);
+  const filteredRecords = dailyRecords.filter((r) => {
     if (attFilterFrom && r.date < attFilterFrom) return false;
     if (attFilterTo && r.date > attFilterTo) return false;
     if (attFilterEmp && r.empId !== attFilterEmp) return false;
     if (attFilterDept && r.dept !== attFilterDept) return false;
-    if (attFilterStatus === 'present' && r.checkOut) return false;
-    if (attFilterStatus === 'checkedout' && !r.checkOut) return false;
+    if (attFilterStatus === 'present' && r.minutes !== null) return false;
+    if (attFilterStatus === 'checkedout' && r.minutes === null) return false;
     return true;
   });
 
   const exportCsv = () => {
-    let csv = '\uFEFF';
-    csv += 'التاريخ,الموظف,القسم,الحضور,الانصراف,المدة,مصدر البصمة\n';
-    attendanceRecords.forEach((r) => {
-      const deptObj = departments.find((d) => d.id === r.dept);
-      const fSource = r.source || (r.note?.includes('الإدارة') || r.note?.includes('الادارة') ? 'الإدارة' : 'المقر');
-      let durationMins = '';
-      if (r.checkInTs && r.checkOutTs) {
-        let diffMs = Number(r.checkOutTs) - Number(r.checkInTs);
-        if (r.checkInTs2 && r.checkOutTs2) diffMs += Number(r.checkOutTs2) - Number(r.checkInTs2);
-        durationMins = Math.round(diffMs / 60000) + ' د';
-      }
-      csv += `${r.date},${r.empName},${deptObj ? deptObj.name : r.dept},${r.checkIn},${r.checkOut || 'لم يسجل'},${durationMins},${fSource}\n`;
+    const rows = [['التاريخ', 'اليوم', 'الموظف', 'القسم', 'أول حضور', 'آخر انصراف', 'مدة العمل', 'الساعات العشرية', 'مكان أول حضور', 'مكان آخر انصراف', 'الحالة', 'بصمات مستبعدة']];
+    filteredRecords.forEach(r => {
+      const department = departments.find(d => d.id === r.dept);
+      rows.push([r.date, new Date(r.date + 'T12:00:00').toLocaleDateString('ar-SA', { weekday: 'long' }), r.empName, department?.name || r.dept,
+        formatPunch(r.first), formatPunch(r.last), formatMinutes(r.minutes), r.minutes === null ? '' : (r.minutes / 60).toFixed(2),
+        r.first?.location || 'غير مسجل', r.last?.location || 'غير مسجل', r.reportStatus, String(r.ignored)]);
     });
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `كشف_حضور_${attFilterFrom}.csv`;
-    link.click();
+    const csv = '\uFEFF' + rows.map(row => row.map(csvCell).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url;
+    link.download = `كشف_حضور_${attFilterEmp || 'الكل'}_${attFilterFrom}_${attFilterTo}.csv`;
+    link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const resetFilters = () => {
@@ -124,7 +122,7 @@ export default function AttendanceView({
       {/* Reports Query Filter */}
       <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
         <h3 className="font-extrabold text-slate-800 text-sm">تصفية وبحث كشف الحضور</h3>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5 items-end">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3.5 items-end">
           <div className="flex flex-col gap-1">
             <label className="text-[10px] font-bold text-slate-500">من تاريخ</label>
             <input
@@ -177,6 +175,11 @@ export default function AttendanceView({
             </select>
           </div>
 
+          <label className="flex flex-col gap-1 text-[10px] font-bold text-slate-500">حالة اليوم
+            <select className="px-3 py-2 text-xs border rounded-lg bg-white" value={attFilterStatus} onChange={e => setAttFilterStatus(e.target.value)}>
+              <option value="">كل الحالات</option><option value="checkedout">مكتمل</option><option value="present">ناقص / للمراجعة</option>
+            </select>
+          </label>
           <div className="flex gap-2">
             <button
               onClick={loadAttendance}
@@ -197,14 +200,20 @@ export default function AttendanceView({
             <button
               onClick={exportCsv}
               className="p-2.5 hover:bg-sky-50 border rounded-lg text-sky-600 transition-all"
-              title="تصدير CSV"
+              title="تصدير النتائج المفلترة فقط" disabled={!filteredRecords.length}
             >
-              <Download size={15} />
+              <Download size={15} /><span className="text-xs">تصدير {attFilterEmp ? 'الموظف المختار' : 'النتائج'}</span>
             </button>
           </div>
         </div>
       </div>
 
+      <div className="p-4 bg-sky-50 rounded-xl text-sm flex flex-wrap gap-5">
+        <strong>أيام الموظفين: {filteredRecords.length}</strong>
+        <strong>إجمالي المدة: {formatMinutes(filteredRecords.reduce((sum, row) => sum + (row.minutes || 0), 0))}</strong>
+        <strong>أيام تحتاج مراجعة: {filteredRecords.filter(row => row.minutes === null).length}</strong>
+        <p className="w-full text-xs text-slate-600">المدة من أول حضور إلى آخر انصراف، وتشمل الفواصل بين الفترات. البصمات الوسيطة والمكررة مستبعدة من الحساب، والسجلات الناقصة لا تدخل في الإجمالي.</p>
+      </div>
       {/* Records List Log */}
       <div className="bg-white border border-sky-100 rounded-2xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
@@ -226,53 +235,34 @@ export default function AttendanceView({
               {filteredRecords.map((rec) => {
                 const deptObj = departments.find((d) => d.id === rec.dept);
 
-                let duration = '-';
-                if (rec.checkInTs && rec.checkOutTs) {
-                  let diffMs = Number(rec.checkOutTs) - Number(rec.checkInTs);
-                  if (rec.checkInTs2 && rec.checkOutTs2) {
-                    diffMs += Number(rec.checkOutTs2) - Number(rec.checkInTs2);
-                  }
-                  const diffMins = Math.round(diffMs / 60000);
-                  duration = `${Math.floor(diffMins / 60)}ساعة ${diffMins % 60}د`;
-                }
-
-                const fSource = rec.source || (rec.note?.includes('الإدارة') || rec.note?.includes('الادارة') ? 'الإدارة' : 'المقر');
-
                 return (
                   <tr key={rec.id} className="border-b last:border-0 hover:bg-sky-50/20 text-slate-700 text-xs">
-                    <td className="p-3 font-bold">{rec.date}</td>
+                    <td className="p-3 font-bold">{rec.date}<div className="text-slate-400 mt-1">{new Date(rec.date + 'T12:00:00').toLocaleDateString('ar-SA', { weekday: 'long' })}</div></td>
                     <td className="p-3 font-black text-slate-800">{rec.empName}</td>
                     <td className="p-3 text-slate-500 font-medium">{deptObj ? deptObj.name : rec.dept}</td>
                     <td className="p-3">
-                      {rec.checkOut ? (
+                      {rec.minutes !== null ? (
                         <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-lg px-2.5 py-0.5 font-extrabold text-[10px]">
-                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400" /> منصرف
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400" /> {rec.reportStatus}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg px-2.5 py-0.5 font-extrabold text-[10px]">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> حاضر الآن
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> {rec.reportStatus}
                         </span>
                       )}
                     </td>
-                    <td className="p-3 font-bold text-emerald-600">{rec.checkIn}</td>
-                    <td className="p-3 text-slate-600 font-bold">{rec.checkOut || '—'}</td>
-                    <td className="p-3 font-extrabold text-sky-600">{duration}</td>
+                    <td className="p-3 font-bold text-emerald-600">{formatPunch(rec.first)}</td>
+                    <td className="p-3 text-slate-600 font-bold">{formatPunch(rec.last)}</td>
+                    <td className="p-3 font-extrabold text-sky-600">{formatMinutes(rec.minutes)}<div className="text-[10px] text-slate-400 mt-1">{rec.ignored} بصمة وسيطة / مكررة مستبعدة</div></td>
                     <td className="p-3">
-                      {fSource === 'الإدارة' ? (
-                        <span className="inline-block bg-purple-50 text-purple-700 border border-purple-100 rounded-lg px-2.5 py-0.5 font-extrabold text-[10px]">
-                          💼 الإدارة
-                        </span>
-                      ) : (
-                        <span className="inline-block bg-sky-50 text-sky-700 border border-sky-100 rounded-lg px-2.5 py-0.5 font-extrabold text-[10px]">
-                          📍 المقر
-                        </span>
-                      )}
+                      <div className="text-xs">حضور: {rec.first?.location || 'غير مسجل'}</div>
+                      <div className="text-xs text-slate-500 mt-1">انصراف: {rec.last?.location || 'غير مسجل'}</div>
                     </td>
                     <td className="p-3 text-center">
                       <button
                         onClick={() => {
-                          requestConfirm('هل تريد تأكيد حذف هذا السجل وحجبه من البيانات؟', async () => {
-                            await onDeleteRecord(rec.id);
+                          requestConfirm('هل تريد تأكيد حذف جميع سجلات الموظف لهذا اليوم؟', async () => {
+                            for (const id of rec.ids) await onDeleteRecord(id);
                           });
                         }}
                         className="p-1 hover:bg-rose-50 text-rose-500 rounded transition-all"
@@ -285,7 +275,7 @@ export default function AttendanceView({
                 );
               })}
 
-              {attendanceRecords.length === 0 && (
+              {filteredRecords.length === 0 && (
                 <tr>
                   <td colSpan={9} className="p-10 text-center text-slate-400 font-medium">
                     لا توجد سجلات حضور صالحة للمواصفات المحددة حالياً.

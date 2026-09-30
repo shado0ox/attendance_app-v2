@@ -1,3 +1,4 @@
+import { matchAttendanceLocation } from './src/lib/attendanceLocations';
 import dotenv from 'dotenv';
 import path from 'path';
 dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
@@ -1028,12 +1029,28 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
   const auth = (req as any).auth as AuthTokenPayload;
 
   try {
+    const mainData = await getMainDataByCompanyId(activeCompanyId);
+    const locationLabel = (lat: any, lng: any) => {
+      if (lat == null || lng == null || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return 'غير مسجل';
+      const match = matchAttendanceLocation(mainData?.settings, Number(lat), Number(lng));
+      return match.inside ? match.location!.name : 'خارج المواقع المعتمدة';
+    };
+    const locations: Record<string, string> = {};
+    for (const [timeField, latField, lngField, nameField] of [
+      ['checkIn', 'checkInLat', 'checkInLng', 'checkInLocation'],
+      ['checkIn2', 'checkInLat2', 'checkInLng2', 'checkInLocation2'],
+      ['checkOut', 'checkOutLat', 'checkOutLng', 'checkOutLocation'],
+      ['checkOut2', 'checkOutLat2', 'checkOutLng2', 'checkOutLocation2']
+    ]) {
+      if (req.body[timeField]) locations[nameField] = auth.role !== 'employee' && /الإدارة|الادارة/.test(source || note || '')
+        ? 'تسجيل إداري' : locationLabel(req.body[latField], req.body[lngField]);
+    }
     if (id) {
       // Check-out / second-period updates reference an existing row by id and don't
       // resend empId, so ownership is verified against the stored record instead.
       if (auth.role === 'employee') {
         const existingRows = await db.select().from(schema.attendance).where(eq(schema.attendance.id, parseInt(id))).limit(1);
-        if (!existingRows[0] || String(existingRows[0].empId) !== String(auth.id)) {
+        if (!existingRows[0] || String(existingRows[0].empId) !== String(auth.id) || existingRows[0].companyId !== activeCompanyId) {
           return res.status(403).json({ error: 'لا يمكنك تعديل سجل حضور موظف آخر' });
         }
       }
@@ -1045,7 +1062,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       // `checkInTs ? String(checkInTs) : null` ternary would turn that into an
       // explicit NULL, wiping the check-in timestamp that had been saved moments
       // earlier — which is exactly why "duration" next to the times went blank.
-      const updateData: Record<string, any> = {};
+      const updateData: Record<string, any> = { ...locations };
       if (empId !== undefined) updateData.empId = empId;
       if (empName !== undefined) updateData.empName = empName;
       if (dept !== undefined) updateData.dept = dept;
@@ -1077,7 +1094,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       }
       // Insert new record in PostgreSQL
       const inserted = await db.insert(schema.attendance).values({
-        empId, empName, dept: dept || '', date,
+        empId, empName, dept: dept || '', date, ...locations,
         checkIn, checkInTs: checkInTs ? String(checkInTs) : null, checkOut, checkOutTs: checkOutTs ? String(checkOutTs) : null, checkInLat, checkInLng,
         checkIn2, checkInTs2: checkInTs2 ? String(checkInTs2) : null, checkOut2, checkOutTs2: checkOutTs2 ? String(checkOutTs2) : null, checkInLat2, checkInLng2,
         status: status || 'present', source: source || 'المقر', note: note || '',
