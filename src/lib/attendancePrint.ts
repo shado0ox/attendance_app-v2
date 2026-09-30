@@ -10,11 +10,13 @@ export interface AttendancePrintOptions {
 }
 export function attendancePrintHtml({ companyName, days, period, approvedAt, approvedBy }: AttendancePrintOptions) {
   const total = days.reduce((sum, day) => sum + (day.minutes || 0), 0);
-  const incomplete = days.filter(day => day.minutes === null).length;
+  const incomplete = days.filter(day => day.analysis ? day.analysis.needsReview : day.minutes === null).length;
+  const analyzed = days.some(day => day.analysis);
+  const analysisTotals = analyzed ? `<span>غياب: ${days.filter(day => day.analysis?.absent).length}</span><span>أيام تأخير: ${days.filter(day => day.analysis?.lateMinutes > 0).length}</span><span>دقائق التأخير: ${days.reduce((sum, day) => sum + (day.analysis?.lateMinutes || 0), 0)}</span><span>إضافي محتمل بالدقائق: ${days.reduce((sum, day) => sum + (day.analysis?.overtimeMinutes || 0), 0)}</span>` : '';
   const employees = new Set(days.map(day => day.empId)).size;
   const rows = days.map(day => {
     const weekday = new Date(day.date + 'T12:00:00Z').toLocaleDateString('ar-SA', { weekday: 'long', timeZone: 'Asia/Riyadh' });
-    return `<tr>${[day.date, weekday, day.empName, day.departmentName || day.dept, formatPunch(day.first), formatPunch(day.last), formatMinutes(day.minutes), day.first?.location || 'غير مسجل', day.last?.location || 'غير مسجل', day.reportStatus, day.note || ''].map(value => `<td>${escapeHtml(value)}</td>`).join('')}</tr>`;
+    return `<tr>${[day.date, weekday, day.empName, day.departmentName || day.dept, formatPunch(day.first), formatPunch(day.last), formatMinutes(day.minutes), day.first?.location || 'غير مسجل', day.last?.location || 'غير مسجل', day.reportStatus, day.note || '', ...(analyzed ? [day.analysis ? `${day.analysis.status}؛ تأخير: ${day.analysis.lateMinutes ?? '—'} د؛ مبكر: ${day.analysis.earlyMinutes ?? '—'} د؛ إضافي محتمل: ${day.analysis.overtimeMinutes ?? '—'} د` : 'غير محلل'] : [])].map(value => `<td>${escapeHtml(value)}</td>`).join('')}</tr>`;
   }).join('');
   const approval = approvedAt ? `<p>نسخة معتمدة — المسؤول: ${escapeHtml(approvedBy)} — تاريخ الاعتماد: ${escapeHtml(new Date(approvedAt).toLocaleString('ar-SA', { timeZone: 'Asia/Riyadh' }))}</p>` : '<p>كشف للمراجعة — غير معتمد</p>';
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${escapeHtml(companyName)} — كشف الحضور</title><style>
@@ -29,9 +31,9 @@ export function attendancePrintHtml({ companyName, days, period, approvedAt, app
   @media print { .instruction { display: none; } th { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
   </style></head><body><div class="instruction">للطباعة أو حفظ PDF استخدم أمر الطباعة في المتصفح، واختر ورق A4 بالعرض. قد يمتد الكشف إلى أكثر من صفحة للحفاظ على وضوح الكتابة.</div>
   <header><h1>${escapeHtml(companyName || 'الشركة')}</h1><h2>كشف الحضور والانصراف</h2><p>الفترة: ${escapeHtml(period)}</p>${approval}</header>
-  <div class="summary"><span>الموظفون: ${employees}</span><span>أيام الموظفين المسجلة: ${days.length}</span><span>إجمالي مدة العمل: ${escapeHtml(formatMinutes(total))}</span><span>أيام تحتاج مراجعة: ${incomplete}</span></div>
-  <table><thead><tr>${['التاريخ', 'اليوم', 'الموظف', 'القسم', 'أول حضور', 'آخر انصراف', 'مدة العمل', 'مكان الحضور', 'مكان الانصراف', 'الحالة', 'ملاحظات'].map(title => `<th>${title}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
-  <p>مدة العمل من أول حضور إلى آخر انصراف وتشمل الفواصل بين الفترات. البصمات المكررة والوسيطة مستبعدة، والأيام الناقصة لا تدخل في إجمالي المدة. الكشف يعرض الأيام المسجلة فقط؛ لا يحسب الغياب أو التأخير من جدول الدوام.</p>
+  <div class="summary"><span>الموظفون: ${employees}</span><span>${analyzed ? 'أيام الموظفين في الكشف' : 'أيام الموظفين المسجلة'}: ${days.length}</span><span>إجمالي مدة العمل: ${escapeHtml(formatMinutes(total))}</span><span>أيام تحتاج مراجعة: ${incomplete}</span>${analysisTotals}</div>
+  <table><thead><tr>${['التاريخ', 'اليوم', 'الموظف', 'القسم', 'أول حضور', 'آخر انصراف', 'مدة العمل', 'مكان الحضور', 'مكان الانصراف', 'الحالة', 'ملاحظات', ...(analyzed ? ['تحليل الدوام'] : [])].map(title => `<th>${title}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
+  <p>مدة العمل من أول حضور إلى آخر انصراف وتشمل الفواصل بين الفترات. البصمات المكررة والوسيطة مستبعدة، والأيام الناقصة لا تدخل في إجمالي المدة. ${analyzed ? 'التحليل حسب الجدول الحالي؛ الغياب بعد انتهاء الدوام فقط والسماح يُخصم من التأخير. الإضافي المحتمل بعد نهاية الدوام يحتاج اعتمادًا منفصلًا، ودوام الفترتين يحتاج مراجعة بصمات الفترات.' : 'الكشف يعرض الأيام المسجلة فقط؛ لا يحسب الغياب أو التأخير من جدول الدوام.'}</p>
   <div class="signatures"><div>توقيع الموظف: ................................<br>التاريخ: ................................</div><div>مراجعة المسؤول: ................................<br>التاريخ: ................................</div><div>اعتماد الإدارة: ................................<br>التاريخ: ................................</div></div></body></html>`;
 }
 export function printAttendance(options: AttendancePrintOptions, target?: Window) {

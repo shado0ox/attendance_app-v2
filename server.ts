@@ -1,3 +1,4 @@
+import { analyzeAttendance } from './src/lib/attendanceAnalysis';
 import { parseAttendanceQuery, attendanceReportPage } from './src/lib/attendanceQuery';
 import { buildAttendanceDays } from './src/lib/attendanceReport';
 import { validMonth, validAttendanceDate, riyadhMonth } from './src/lib/attendanceMonths';
@@ -1101,10 +1102,15 @@ app.get('/api/attendance-report', requireAuth(['admin', 'superadmin']), async (r
       eq(schema.attendance.companyId, companyId),
       sql`${schema.attendance.date} >= ${query.from}`, sql`${schema.attendance.date} <= ${query.to}`,
       query.empId ? eq(schema.attendance.empId, query.empId) : undefined,
-      query.dept ? eq(schema.attendance.dept, query.dept) : undefined,
+      query.dept && !query.analysis ? eq(schema.attendance.dept, query.dept) : undefined,
     )).orderBy(desc(schema.attendance.id));
     const mainData = await getMainDataByCompanyId(companyId);
-    const days = buildAttendanceDays(records, mainData?.settings).map(day => ({ ...day, departmentName: mainData?.departments?.find((dept: any) => dept.id === day.dept)?.name || day.dept }));
+    let reportDays = buildAttendanceDays(records, mainData?.settings);
+    if (query.analysis) {
+      const leaves = await db.select().from(schema.requests).where(and(eq(schema.requests.companyId, companyId), eq(schema.requests.type, 'leave'), eq(schema.requests.status, 'approved'), sql`${schema.requests.date} >= ${query.from}`, sql`${schema.requests.date} <= ${query.to}`));
+      reportDays = analyzeAttendance(reportDays, mainData, query, leaves);
+    }
+    const days = reportDays.map(day => ({ ...day, departmentName: mainData?.departments?.find((dept: any) => dept.id === day.dept)?.name || day.dept }));
     return res.json({ ...attendanceReportPage(days, query), companyName: mainData?.settings?.companyName || companyId, from: query.from, to: query.to });
   } catch (error) { console.error('Attendance report query failed', error); return res.status(500).json({ error: 'تعذر تحميل كشف الحضور' }); }
 });

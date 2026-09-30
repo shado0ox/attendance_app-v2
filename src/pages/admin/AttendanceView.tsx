@@ -45,7 +45,8 @@ export default function AttendanceView({
 }: AttendanceViewProps) {
   const stats = getTodayAttendanceStats();
 
-  const filters = { from: attFilterFrom, to: attFilterTo, empId: attFilterEmp, dept: attFilterDept, status: attFilterStatus };
+  const [analysisEnabled, setAnalysisEnabled] = useState(true);
+  const filters = { analysis: analysisEnabled ? '1' : '', from: attFilterFrom, to: attFilterTo, empId: attFilterEmp, dept: attFilterDept, status: attFilterStatus };
   const [applied, setApplied] = useState(filters);
   const [page, setPage] = useState(1);
   const [refresh, setRefresh] = useState(0);
@@ -96,12 +97,12 @@ export default function AttendanceView({
     try {
     const data = await allResults();
     const filteredRecords = data.items;
-    const rows = [['التاريخ', 'اليوم', 'الموظف', 'القسم', 'أول حضور', 'آخر انصراف', 'مدة العمل', 'الساعات العشرية', 'مكان أول حضور', 'مكان آخر انصراف', 'الحالة', 'بصمات مستبعدة']];
+    const rows = [['التاريخ', 'اليوم', 'الموظف', 'القسم', 'أول حضور', 'آخر انصراف', 'مدة العمل', 'الساعات العشرية', 'مكان أول حضور', 'مكان آخر انصراف', 'الحالة', 'بصمات مستبعدة', 'حالة التحليل', 'دقائق الدوام المجدول', 'دقائق التأخير بعد السماح', 'دقائق الخروج المبكر', 'دقائق إضافي محتمل']];
     filteredRecords.forEach(r => {
       const department = { name: r.departmentName || r.dept };
       rows.push([r.date, new Date(r.date + 'T12:00:00').toLocaleDateString('ar-SA', { weekday: 'long' }), r.empName, department?.name || r.dept,
         formatPunch(r.first), formatPunch(r.last), formatMinutes(r.minutes), r.minutes === null ? '' : (r.minutes / 60).toFixed(2),
-        r.first?.location || 'غير مسجل', r.last?.location || 'غير مسجل', r.reportStatus, String(r.ignored)]);
+        r.first?.location || 'غير مسجل', r.last?.location || 'غير مسجل', r.reportStatus, String(r.ignored), r.analysis?.status || '', r.analysis?.scheduledMinutes ?? '', r.analysis?.lateMinutes ?? '', r.analysis?.earlyMinutes ?? '', r.analysis?.overtimeMinutes ?? '']);
     });
     const csv = '\uFEFF' + rows.map(row => row.map(csvCell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -115,7 +116,7 @@ export default function AttendanceView({
   const resetFilters = () => {
     const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
     setAttFilterFrom(todayStr); setAttFilterTo(todayStr); setAttFilterEmp(''); setAttFilterDept(''); setAttFilterStatus('');
-    setApplied({ from: todayStr, to: todayStr, empId: '', dept: '', status: '' }); setPage(1); setRefresh(value => value + 1); loadAttendance();
+    setApplied({ analysis: analysisEnabled ? '1' : '', from: todayStr, to: todayStr, empId: '', dept: '', status: '' }); setPage(1); setRefresh(value => value + 1); loadAttendance();
   };
 
   return (
@@ -161,6 +162,7 @@ export default function AttendanceView({
       {/* Reports Query Filter */}
       <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
         <h3 className="font-extrabold text-slate-800 text-sm">تصفية وبحث كشف الحضور</h3>
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={analysisEnabled} onChange={event => { setAnalysisEnabled(event.target.checked); setAttFilterStatus(''); }} />تحليل حسب جدول الموظف وإظهار الأيام المجدولة بدون بصمة</label>
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3.5 items-end min-w-0">
           <div className="flex flex-col gap-1 min-w-0">
             <label className="text-[10px] font-bold text-slate-500">من تاريخ</label>
@@ -217,6 +219,7 @@ export default function AttendanceView({
           <label className="flex flex-col gap-1 text-[10px] font-bold text-slate-500">حالة اليوم
             <select className="px-3 py-2 text-xs border rounded-lg bg-white" value={attFilterStatus} onChange={e => setAttFilterStatus(e.target.value)}>
               <option value="">كل الحالات</option><option value="checkedout">مكتمل</option><option value="present">ناقص / للمراجعة</option>
+              {analysisEnabled && <><option value="absent">غياب</option><option value="late">تأخير</option><option value="early">خروج مبكر</option><option value="overtime">إضافي محتمل</option></>}
             </select>
           </label>
         </div>
@@ -254,8 +257,10 @@ export default function AttendanceView({
         <strong>أيام الموظفين: {report?.total || 0}</strong>
         <strong>إجمالي المدة: {formatMinutes(report?.totalMinutes || 0)}</strong>
         <strong>أيام تحتاج مراجعة: {report?.reviewCount || 0}</strong>
+        {applied.analysis && <><strong>أيام الغياب: {report?.absentDays || 0}</strong><strong>أيام التأخير: {report?.lateDays || 0}</strong><strong>التأخير: {formatMinutes(report?.lateMinutes || 0)}</strong><strong>الخروج المبكر: {formatMinutes(report?.earlyMinutes || 0)}</strong><strong>إضافي محتمل: {formatMinutes(report?.overtimeMinutes || 0)}</strong></>}
         <p className="w-full text-xs text-slate-600">المدة من أول حضور إلى آخر انصراف، وتشمل الفواصل بين الفترات. البصمات الوسيطة والمكررة مستبعدة من الحساب، والسجلات الناقصة لا تدخل في الإجمالي.</p>
       </div>
+      {applied.analysis && <p className="text-xs text-slate-600">التحليل حسب الجدول الحالي؛ غير المجدول لا يُحسب غيابًا. السماح يُخصم من التأخير، والإضافي المحتمل بعد نهاية الدوام للمراجعة. الدوام على فترتين يحتاج مراجعة بصمات الفترات ولا يحسب إضافيًا تلقائيًا.</p>}
       <div className="flex flex-wrap items-center gap-3 text-xs">
         <button disabled={loading || exporting || currentPage === 1} onClick={() => setPage(currentPage - 1)} className="border rounded-lg px-3 py-2 disabled:opacity-40">السابق</button>
         <span>صفحة {currentPage} من {pageCount} — {report?.total || 0} يوم موظف</span>
@@ -276,6 +281,7 @@ export default function AttendanceView({
                 <th className="p-3 font-extrabold">الانصراف</th>
                 <th className="p-3 font-extrabold">مدة العمل</th>
                 <th className="p-3 font-extrabold">مكان البصمة</th>
+                <th className="p-3 font-extrabold">تحليل الدوام</th>
                 <th className="p-3 font-extrabold text-center">الإجراءات</th>
               </tr>
             </thead>
@@ -306,6 +312,12 @@ export default function AttendanceView({
                       <div className="text-xs">حضور: {rec.first?.location || 'غير مسجل'}</div>
                       <div className="text-xs text-slate-500 mt-1">انصراف: {rec.last?.location || 'غير مسجل'}</div>
                     </td>
+                    <td className="p-3 text-xs min-w-40">
+                      <div>{rec.analysis?.status || 'التحليل غير مفعّل'}</div>
+                      {rec.analysis?.start && <div className="text-slate-500">المجدول: {formatPunch({ time: rec.analysis.start })} — {formatPunch({ time: rec.analysis.end })}</div>}
+                      {rec.analysis?.lateMinutes != null && <div>تأخير: {rec.analysis.lateMinutes} د — مبكر: {rec.analysis.earlyMinutes} د</div>}
+                      {rec.analysis?.overtimeMinutes != null && <div>إضافي محتمل: {rec.analysis.overtimeMinutes} د</div>}
+                    </td>
                     <td className="p-3 text-center">
                       <button
                         onClick={() => {
@@ -315,7 +327,7 @@ export default function AttendanceView({
                             finally { setRefresh(value => value + 1); loadAttendance(); }
                           });
                         }}
-                        disabled={loading || exporting} className="p-1 hover:bg-rose-50 text-rose-500 rounded transition-all"
+                        disabled={loading || exporting || !rec.ids.length} className="p-1 hover:bg-rose-50 text-rose-500 rounded transition-all"
                         title="حذف السجل"
                       >
                         <Trash2 size={13} />
@@ -327,7 +339,7 @@ export default function AttendanceView({
 
               {!pageRecords.length && (
                 <tr>
-                  <td colSpan={9} className="p-10 text-center text-slate-400 font-medium">
+                  <td colSpan={10} className="p-10 text-center text-slate-400 font-medium">
                     {loading ? 'جارٍ تحميل النتائج...' : error ? 'تعذر تحميل النتائج؛ أعد المحاولة.' : 'لا توجد سجلات للفترة والفلاتر المختارة.'}
                   </td>
                 </tr>
