@@ -114,3 +114,11 @@ export const auditLog = pgTable('audit_log', {
   action: text('action').notNull(), entityId: text('entity_id'),
   details: jsonb('details').notNull(), createdAt: timestamp('created_at').defaultNow(),
 });
+
+// Frozen monthly reports; reopening is recorded in audit_log.
+export const attendanceMonths = pgTable('attendance_months', {
+  key: text('key').primaryKey(),
+  companyId: text('company_id').notNull(),
+  month: text('month').notNull(),
+  value: jsonb('value').notNull(),
+});

@@ -202,6 +202,10 @@ export const initializeSchemaAndTables = async () => {
         CREATE INDEX IF NOT EXISTS audit_log_company_time ON "${dbSchema}".audit_log (company_id, created_at);
         CREATE INDEX IF NOT EXISTS attendance_employee_day ON "${dbSchema}".attendance (company_id, emp_id, date);`);
 
+      await client.query(`CREATE TABLE IF NOT EXISTS "${dbSchema}".attendance_months (
+        key text PRIMARY KEY, company_id text NOT NULL, month text NOT NULL, value jsonb NOT NULL);
+        CREATE INDEX IF NOT EXISTS attendance_company_date ON "${dbSchema}".attendance (company_id, date);`);
+
       // Additive migration for existing installations; old punches stay untouched.
       await client.query(`ALTER TABLE "${dbSchema}"."attendance"
         ADD COLUMN IF NOT EXISTS check_in_location text,
