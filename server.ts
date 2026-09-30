@@ -1182,7 +1182,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       if (req.body.automatic === true) { values.source = 'GPS تلقائي'; values.note = ((record?.note || '') + ' [حضور تلقائي مؤكد بالموقع]').trim(); }
       if (!out && lat != null && lng != null) { values[base + 'Lat' + suffix] = Number(lat); values[base + 'Lng' + suffix] = Number(lng); }
       const saved = record ? await tx.update(schema.attendance).set(values).where(eq(schema.attendance.id, record.id)).returning()
-        : await tx.insert(schema.attendance).values({ ...values, empId: String(auth.id), empName: employee.name, dept: employee.dept || '', date, companyId, source: 'GPS', status: 'present' }).returning();
+        : await tx.insert(schema.attendance).values({ ...values, empId: String(auth.id), empName: employee.name, dept: employee.dept || '', date, companyId, source: req.body.automatic === true ? 'GPS تلقائي' : 'GPS', status: 'present' }).returning();
       await audit(tx, auth, companyId, 'punch.' + field, saved[0].id, { time: now, location: location.name, lat: lat ?? null, lng: lng ?? null, automatic: req.body.automatic === true, gpsAccuracy: req.body.automatic === true ? req.body.gpsAccuracy : undefined });
       return { status: 200, body: saved[0] };
     });
