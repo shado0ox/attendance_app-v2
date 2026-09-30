@@ -55,6 +55,51 @@ try {
   assert.equal((await punch({id:attendance.id,checkOut:'17:00',checkOutLat:26,checkOutLng:50})).status,200);
   const events = await pool.query('SELECT count(*)::int AS count FROM shift_app.audit_log WHERE actor_id=$1',['employee-ci']);
   assert.equal(events.rows[0].count,2);
+  const month = '2025-01';
+  const adminRecord = (body: any) => fetch(origin + '/api/attendance', { method: 'POST', headers, body: JSON.stringify({ companyId: 'default', ...body }) });
+  const monthly = (body: any) => fetch(origin + '/api/attendance-months', { method: 'POST', headers, body: JSON.stringify({ companyId: 'default', month, ...body }) });
+  assert.equal((await fetch(origin + '/api/attendance-months?companyId=default', { method: 'POST', headers, body: JSON.stringify({ companyId: 'other-company', month, action: 'approve' }) })).status, 400);
+  const historical = { empId: 'monthly-ci', empName: 'Monthly employee', date: month + '-10', checkIn: '08:00', checkOut: '17:00', source: 'تسجيل إداري' };
+  const created = await adminRecord(historical);
+  assert.equal(created.status, 200);
+  const record = await created.json() as any;
+  assert.equal((await monthly({ action: 'approve', month: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' }).slice(0, 7) })).status, 400);
+  assert.equal((await fetch(origin + '/api/attendance-months?companyId=default&month=' + month, { headers: employeeHeaders })).status, 403);
+  const approved = await monthly({ action: 'approve' });
+  assert.equal(approved.status, 200);
+  const frozen = await approved.json() as any;
+  assert.equal(frozen.status, 'approved');
+  assert.equal(frozen.snapshot.totalMinutes, 540);
+  assert.equal(frozen.snapshot.days[0].empName, 'Monthly employee');
+  assert.equal((await adminRecord({ id: record.id, note: 'blocked correction' })).status, 409);
+  assert.equal((await adminRecord({ id: record.id, date: '2025-02-10' })).status, 409);
+  assert.equal((await adminRecord(historical)).status, 409);
+  assert.equal((await fetch(origin + '/api/attendance/' + record.id, { method: 'DELETE', headers })).status, 409);
+  const outside = await adminRecord({ ...historical, date: '2025-02-10' });
+  assert.equal(outside.status, 200);
+  const outsideRecord = await outside.json() as any;
+  assert.equal((await adminRecord({ id: outsideRecord.id, date: month + '-11' })).status, 409);
+  assert.equal((await monthly({ action: 'reopen', reason: '' })).status, 400);
+  assert.equal((await monthly({ action: 'reopen', reason: 'تصحيح إداري موثق' })).status, 200);
+  assert.equal((await adminRecord({ id: record.id, note: 'allowed correction' })).status, 200);
+  assert.equal((await monthly({ action: 'approve' })).status, 200);
+  const monthAudit = await pool.query("SELECT action, details FROM shift_app.audit_log WHERE entity_id=$1 AND action LIKE 'attendance.month.%' ORDER BY id", [month]);
+  assert.deepEqual(monthAudit.rows.map(row => row.action), ['attendance.month.approve', 'attendance.month.reopen', 'attendance.month.approve']);
+  assert.equal(monthAudit.rows[1].details.reason, 'تصحيح إداري موثق');
+  const raceMonth = '2024-12';
+  assert.equal((await adminRecord({ ...historical, date: raceMonth + '-10' })).status, 200);
+  const [raceWrite, raceApprove] = await Promise.all([
+    adminRecord({ ...historical, date: raceMonth + '-11' }),
+    monthly({ month: raceMonth, action: 'approve' }),
+  ]);
+  assert.equal(raceApprove.status, 200);
+  const raceSnapshot = await raceApprove.json() as any;
+  assert.ok([200, 409].includes(raceWrite.status));
+  assert.equal(raceSnapshot.snapshot.days.length, raceWrite.status === 200 ? 2 : 1);
+  const raceRows = await pool.query("SELECT count(*)::int AS count FROM shift_app.attendance WHERE date LIKE $1", [raceMonth + '-%']);
+  assert.equal(raceRows.rows[0].count, raceSnapshot.snapshot.days.length);
+  assert.equal((await monthly({ month: raceMonth, action: 'reopen', reason: 'stale browser attempt', expectedStatus: 'approved', expectedRevision: 0 })).status, 409);
+  console.log('PASS: monthly snapshot, closed-month create/update/delete/date-move guards, reopening reason and audit.');
   console.log('PASS: per-employee server geofence, GPS required, duplicate punch serialization, scoped checkout and audit events.');
   console.log('PASS: concurrent saves, stale client rejection, reload-and-save, metadata not persisted.');
 } finally {

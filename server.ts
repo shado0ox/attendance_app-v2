@@ -1,3 +1,5 @@
+import { buildAttendanceDays } from './src/lib/attendanceReport';
+import { validMonth, validAttendanceDate, riyadhMonth } from './src/lib/attendanceMonths';
 import { mainDataVersion } from './src/lib/mainDataVersion';
 import { punchFields, validatePunchTransition, checkPunchLocation } from './src/lib/punchPolicy';
 import { matchAttendanceLocation } from './src/lib/attendanceLocations';
@@ -120,6 +122,7 @@ function requireAuth(roles: AuthTokenPayload['role'][], matchCompany: boolean = 
     if (!roles.includes(payload.role)) {
       return res.status(403).json({ error: 'ليس لديك صلاحية للقيام بهذا الإجراء' });
     }
+    if (req.query.companyId && req.body?.companyId && req.query.companyId !== req.body.companyId) return res.status(400).json({ error: 'معرّف الشركة في الطلب غير متطابق' });
     const requestedCompanyId = (req.query.companyId as string) || (req.body && req.body.companyId) || 'default';
     if (matchCompany && payload.role !== 'superadmin' && payload.companyId !== requestedCompanyId) {
       return res.status(403).json({ error: 'لا يمكن الوصول لبيانات شركة أخرى' });
@@ -1033,6 +1036,59 @@ app.delete('/api/registration-requests/:id', requireAuth(['admin', 'superadmin']
   }
 });
 
+// Approval and every attendance mutation share a company transaction lock.
+// This also protects date moves and prevents snapshots racing with writes.
+const lockAttendance = async (tx: any, companyId: string) => {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${'attendance-report:' + companyId}))`);
+};
+const attendanceError = (status: number, message: string) => Object.assign(new Error(message), { status });
+const assertMonthOpen = async (tx: any, companyId: string, date: unknown) => {
+  if (!validAttendanceDate(date)) throw attendanceError(400, 'تاريخ الحضور غير صالح');
+  const rows = await tx.select().from(schema.attendanceMonths).where(eq(schema.attendanceMonths.key, companyId + ':' + date.slice(0, 7))).limit(1);
+  if ((rows[0]?.value as any)?.status === 'approved') throw attendanceError(409, 'الشهر معتمد ومغلق؛ أعد فتحه بسبب مسجل قبل تعديل البصمات');
+};
+
+app.get('/api/attendance-months', requireAuth(['admin', 'superadmin']), async (req, res) => {
+  const companyId = String(req.query.companyId || 'default'), month = req.query.month;
+  if (!validMonth(month)) return res.status(400).json({ error: 'اختر شهرًا صالحًا' });
+  try {
+    const rows = await db.select().from(schema.attendanceMonths).where(eq(schema.attendanceMonths.key, companyId + ':' + month)).limit(1);
+    return res.json(rows[0]?.value || { month, status: 'open' });
+  } catch { return res.status(500).json({ error: 'تعذر قراءة حالة اعتماد الشهر' }); }
+});
+app.post('/api/attendance-months', requireAuth(['admin', 'superadmin']), async (req, res) => {
+  const companyId = String(req.body.companyId || 'default'), { month, action, reason } = req.body;
+  const auth = (req as any).auth as AuthTokenPayload;
+  if (!validMonth(month) || !['approve', 'reopen'].includes(action)) return res.status(400).json({ error: 'الشهر أو الإجراء غير صالح' });
+  if (action === 'approve' && month >= riyadhMonth()) return res.status(400).json({ error: 'يمكن اعتماد الشهور المنتهية فقط' });
+  if (action === 'reopen' && (typeof reason !== 'string' || reason.trim().length < 5 || reason.length > 1000)) return res.status(400).json({ error: 'اكتب سبب إعادة الفتح (5 إلى 1000 حرف)' });
+  try {
+    const result = await db.transaction(async tx => {
+      await lockAttendance(tx, companyId);
+      const key = companyId + ':' + month;
+      const rows = await tx.select().from(schema.attendanceMonths).where(eq(schema.attendanceMonths.key, key)).limit(1);
+      const old: any = rows[0]?.value || { month, status: 'open', revision: 0 };
+      if (req.body.expectedStatus !== undefined && (req.body.expectedStatus !== old.status || req.body.expectedRevision !== (old.revision || 0))) throw attendanceError(409, 'تغيرت حالة الشهر؛ حدّث الحالة قبل المتابعة');
+      if (action === 'approve' && old.status === 'approved') return old;
+      if (action === 'reopen' && old.status !== 'approved') throw attendanceError(409, 'الشهر مفتوح بالفعل؛ حدّث الحالة');
+      let value: any;
+      if (action === 'approve') {
+        const records = await tx.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, companyId), sql`${schema.attendance.date} LIKE ${month + '-%'}`));
+        const mainData = await getMainDataByCompanyId(companyId);
+        const days = buildAttendanceDays(records, mainData?.settings).map(day => ({ ...day, departmentName: mainData?.departments?.find((d: any) => d.id === day.dept)?.name || day.dept }));
+        if (!days.length) throw attendanceError(409, 'لا توجد سجلات لهذا الشهر');
+        if (days.some(day => day.minutes === null)) throw attendanceError(409, 'راجع السجلات الناقصة أو غير الصالحة قبل اعتماد الشهر');
+        value = { month, status: 'approved', revision: (old.revision || 0) + 1, approvedAt: new Date().toISOString(), approvedBy: auth.username || auth.id || auth.role,
+          snapshot: { companyName: mainData?.settings?.companyName || companyId, days, totalMinutes: days.reduce((sum, day) => sum + (day.minutes || 0), 0) } };
+      } else value = { ...old, status: 'open', reopenedAt: new Date().toISOString(), reopenedBy: auth.username || auth.id || auth.role, reopenReason: reason.trim() };
+      await tx.insert(schema.attendanceMonths).values({ key, companyId, month, value }).onConflictDoUpdate({ target: schema.attendanceMonths.key, set: { value } });
+      await audit(tx, auth, companyId, 'attendance.month.' + action, month, { revision: value.revision, snapshot: action === 'approve' ? value.snapshot : undefined, days: value.snapshot?.days.length, totalMinutes: value.snapshot?.totalMinutes, reason: action === 'reopen' ? reason.trim() : 'اعتماد كشف الشهر' });
+      return value;
+    });
+    return res.json(result);
+  } catch (error: any) { console.error('Monthly attendance operation failed', error); return res.status(error.status || 500).json({ error: error.status ? error.message : 'تعذر تحديث اعتماد الشهر' }); }
+});
+
 // 4. Attendance Endpoints (Tenant Aware)
 app.get('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), async (req, res) => {
   const companyId = (req.query.companyId as string) || 'default';
@@ -1061,6 +1117,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
   try {
     const result = await db.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${companyId + ':' + auth.id}))`);
+      await lockAttendance(tx, companyId);
       const mainData = await getMainDataByCompanyId(companyId);
       const employee = mainData?.employees?.find((e: any) => String(e.id) === String(auth.id));
       if (!employee) return { status: 403, body: { error: 'الموظف غير مسجل في الشركة' } };
@@ -1077,6 +1134,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
         const rows = await tx.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, companyId), eq(schema.attendance.empId, String(auth.id)), eq(schema.attendance.date, date))).orderBy(desc(schema.attendance.id)).limit(1);
         record = rows[0];
       }
+      await assertMonthOpen(tx, companyId, record?.date || date);
       const transition = validatePunchTransition(record, field);
       if (transition === 'duplicate') return { status: 200, body: record };
       if (transition) return { status: 409, body: { error: transition } };
@@ -1095,7 +1153,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       return { status: 200, body: saved[0] };
     });
     return res.status(result.status).json(result.body);
-  } catch (error) { console.error('Punch transaction failed', error); return res.status(500).json({ error: 'تعذر حفظ البصمة؛ لم يتم تأكيد التسجيل' }); }
+  } catch (error: any) { console.error('Punch transaction failed', error); return res.status(error.status || 500).json({ error: error.status ? error.message : 'تعذر حفظ البصمة؛ لم يتم تأكيد التسجيل' }); }
 });
 
 app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), async (req, res) => {
@@ -1106,13 +1164,14 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
     status, source, note, companyId
   } = req.body;
 
-  const activeCompanyId = companyId || 'default';
+  let activeCompanyId = companyId || 'default';
   const auth = (req as any).auth as AuthTokenPayload;
 
   try {
     if (id) {
       const rows = await db.select().from(schema.attendance).where(eq(schema.attendance.id, Number(id))).limit(1);
       if (!rows[0] || (auth.role !== 'superadmin' && rows[0].companyId !== auth.companyId)) return res.status(404).json({ error: 'سجل الحضور غير متاح' });
+      activeCompanyId = rows[0].companyId || 'default';
     }
     const mainData = await getMainDataByCompanyId(activeCompanyId);
     const locationLabel = (lat: any, lng: any) => {
@@ -1169,7 +1228,11 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       if (note !== undefined) updateData.note = note;
 
       const updated = await db.transaction(async tx => {
+        await lockAttendance(tx, activeCompanyId);
         const before = await tx.select().from(schema.attendance).where(eq(schema.attendance.id, Number(id))).limit(1);
+        if (!before[0]) throw attendanceError(404, 'السجل غير متاح');
+        await assertMonthOpen(tx, activeCompanyId, before[0].date);
+        if (date !== undefined) await assertMonthOpen(tx, activeCompanyId, date);
         const saved = await tx.update(schema.attendance).set(updateData).where(eq(schema.attendance.id, Number(id))).returning();
         await audit(tx, auth, before[0].companyId || 'default', 'attendance.correct', id, { before: before[0], after: saved[0], reason: note || 'تعديل إداري' });
         return saved;
@@ -1181,6 +1244,8 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       }
       // Insert new record in PostgreSQL
       const inserted = await db.transaction(async tx => {
+        await lockAttendance(tx, activeCompanyId);
+        await assertMonthOpen(tx, activeCompanyId, date);
         const saved = await tx.insert(schema.attendance).values({
         empId, empName, dept: dept || '', date, ...locations,
         checkIn, checkInTs: checkInTs ? String(checkInTs) : null, checkOut, checkOutTs: checkOutTs ? String(checkOutTs) : null, checkInLat, checkInLng,
@@ -1194,6 +1259,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       return res.json(inserted[0]);
     }
   } catch (error: any) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
     console.error('Error registering attendance in PostgreSQL:', error);
     return res.status(500).json({
       error: 'فشل تسجيل الحضور والانصراف في قاعدة البيانات PostgreSQL: ' + (error?.message || String(error))
@@ -1206,12 +1272,17 @@ app.delete('/api/attendance/:id', requireAuth(['admin', 'superadmin'], false), r
 
   try {
     await db.transaction(async tx => {
-      const record = (req as any).ownedRow;
+      await lockAttendance(tx, (req as any).ownedRow.companyId || 'default');
+      const rows = await tx.select().from(schema.attendance).where(eq(schema.attendance.id, id)).limit(1);
+      const record = rows[0];
+      if (!record) throw attendanceError(404, 'السجل غير متاح');
+      await assertMonthOpen(tx, record.companyId || 'default', record.date);
       await audit(tx, (req as any).auth, record.companyId || 'default', 'attendance.delete', id, { before: record });
       await tx.delete(schema.attendance).where(eq(schema.attendance.id, id));
     });
     return res.json({ success: true });
   } catch (error: any) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
     console.error('Error deleting attendance record from PostgreSQL:', error);
     return res.status(500).json({
       error: 'فشل حذف سجل الحضور من قاعدة البيانات',

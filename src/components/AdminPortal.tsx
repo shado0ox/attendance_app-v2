@@ -1145,6 +1145,7 @@ export default function AdminPortal({
           {/* View: Attendance Records list */}
           {activeView === 'attendance' && (
             <AttendanceView
+              companyId={companyId}
               appSettings={appSettings}
               attendanceRecords={attendanceRecords}
               employees={employees}

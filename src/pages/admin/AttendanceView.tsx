@@ -1,7 +1,9 @@
+import AttendanceMonthPanel from './AttendanceMonthPanel';
 import { buildAttendanceDays, formatMinutes, formatPunch, csvCell } from '../../lib/attendanceReport';
 import { UserCheck, UserX, Users, Search, Download, Trash2 } from 'lucide-react';
 
 interface AttendanceViewProps {
+  companyId: string;
   attendanceRecords: any[];
   appSettings: any;
   employees: any[];
@@ -23,6 +25,7 @@ interface AttendanceViewProps {
 }
 
 export default function AttendanceView({
+  companyId,
   attendanceRecords,
   appSettings,
   employees,
@@ -118,6 +121,8 @@ export default function AttendanceView({
           </div>
         </div>
       </div>
+
+      <AttendanceMonthPanel companyId={companyId} employeeId={attFilterEmp} requestConfirm={requestConfirm} />
 
       {/* Reports Query Filter */}
       <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">

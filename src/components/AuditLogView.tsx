@@ -3,7 +3,7 @@ export default function AuditLogView({ companyId }: { companyId: string }) {
   const [rows, setRows] = useState<any[]>([]);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const labels: Record<string, string> = { 'punch.checkIn':'حضور', 'punch.checkOut':'انصراف', 'punch.checkIn2':'حضور الفترة الثانية', 'punch.checkOut2':'انصراف الفترة الثانية', 'attendance.correct':'تصحيح إداري', 'attendance.create':'إضافة إدارية', 'attendance.delete':'حذف سجل' };
+  const labels: Record<string, string> = { 'punch.checkIn':'حضور', 'punch.checkOut':'انصراف', 'punch.checkIn2':'حضور الفترة الثانية', 'punch.checkOut2':'انصراف الفترة الثانية', 'attendance.correct':'تصحيح إداري', 'attendance.create':'إضافة إدارية', 'attendance.delete':'حذف سجل', 'attendance.month.approve':'اعتماد كشف الشهر', 'attendance.month.reopen':'إعادة فتح الشهر' };
   return <section className="p-6 bg-white border rounded-2xl flex flex-col gap-3">
     <div className="flex justify-between"><h3 className="font-bold">سجل البصمات والتعديلات</h3><button disabled={loading} className="text-sky-700 underline" onClick={async () => {
       setLoading(true); setMessage('');
