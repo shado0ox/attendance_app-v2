@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { canonicalData, mainDataVersion } from '../src/lib/mainDataVersion';
+const first = { employees: [{ id: 'e1', name: 'Test' }], schedule: { day: { e1: { note: '', shift: 'S' } } } };
+const reordered = { schedule: { day: { e1: { shift: 'S', note: '' } } }, employees: [{ name: 'Test', id: 'e1' }] };
+assert.equal(canonicalData(first), canonicalData(reordered));
+assert.equal(mainDataVersion(first), mainDataVersion(reordered));
+assert.notEqual(mainDataVersion(first), mainDataVersion({ ...first, employees: [] }));
+assert.notEqual(mainDataVersion({ items: [1, 2] }), mainDataVersion({ items: [2, 1] }));
+assert.equal(mainDataVersion({ x: undefined, y: null }), mainDataVersion({ y: null }));
+console.log('PASS: stable revisions under jsonb ordering; changed values and array order detected.');

@@ -1,3 +1,4 @@
+import { mainDataVersion } from './src/lib/mainDataVersion';
 import { punchFields, validatePunchTransition, checkPunchLocation } from './src/lib/punchPolicy';
 import { matchAttendanceLocation } from './src/lib/attendanceLocations';
 import dotenv from 'dotenv';
@@ -883,10 +884,10 @@ app.get('/api/main-data', async (req, res) => {
         value: initialVal,
       }).returning();
       
-      return res.json(visibleMainData(inserted[0].value));
+      return res.json(visibleMainData({ ...(inserted[0].value as any), _version: mainDataVersion(inserted[0].value) }));
     }
     
-    return res.json(visibleMainData(result[0].value));
+    return res.json(visibleMainData({ ...(result[0].value as any), _version: mainDataVersion(result[0].value) }));
   } catch (error: any) {
     console.error('Error fetching main-data from PostgreSQL:', error);
     return res.status(500).json({
@@ -903,7 +904,7 @@ app.get('/api/main-data', async (req, res) => {
 // this stops one logged-in employee token from rewriting another employee's data,
 // the schedule, or the whole company's settings.
 app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), async (req, res) => {
-  const payload = req.body;
+  const { _baseVersion, _version, ...payload } = req.body || {};
   const companyId = (req.query.companyId as string) || 'default';
   const key = companyId === 'default' ? 'mainData' : 'mainData_' + companyId;
   const auth = (req as any).auth as AuthTokenPayload;
@@ -920,10 +921,15 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
       const inserted = await db.insert(schema.systemData).values({
         key,
         value: initialValue,
-      }).returning();
-      return res.json(sanitizeMainData(inserted[0].value, true));
+      }).onConflictDoNothing().returning();
+      if (!inserted.length) return res.status(409).json({ error: 'تم إنشاء بيانات الشركة من جلسة أخرى. أعد تحميل البيانات قبل الحفظ.', code: 'DATA_CONFLICT' });
+      return res.json({ ...sanitizeMainData(inserted[0].value, true), _version: mainDataVersion(inserted[0].value) });
     }
 
+    const currentValue = result[0].value;
+    if (auth.role !== 'employee' && _baseVersion !== mainDataVersion(currentValue)) {
+      return res.status(409).json({ error: 'تغيرت البيانات في جلسة أخرى. لم يتم استبدالها. أعد تحميل آخر نسخة ثم أعد تطبيق تعديلك.', code: 'DATA_CONFLICT' });
+    }
     let valueToSave = payload;
     if (auth.role === 'employee') {
       // Only allow this employee to change their own password; everything else is
@@ -938,9 +944,10 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
 
     const updated = await db.update(schema.systemData)
       .set({ value: valueToSave, updatedAt: new Date() })
-      .where(eq(schema.systemData.key, key))
+      .where(and(eq(schema.systemData.key, key), eq(schema.systemData.value, currentValue)))
       .returning();
-    return res.json(sanitizeMainData(updated[0].value, auth.role !== 'employee'));
+    if (!updated.length) return res.status(409).json({ error: 'حفظ مستخدم آخر تعديلًا أثناء طلبك. أعد تحميل البيانات قبل المحاولة.', code: 'DATA_CONFLICT' });
+    return res.json({ ...sanitizeMainData(updated[0].value, auth.role !== 'employee'), _version: mainDataVersion(updated[0].value) });
   } catch (error: any) {
     console.error('Error saving main-data to PostgreSQL:', error);
     return res.status(500).json({

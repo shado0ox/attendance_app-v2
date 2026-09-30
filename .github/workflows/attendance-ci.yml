@@ -1,0 +1,42 @@
+name: Attendance checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: attendance_ci
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: attendance_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U attendance_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SQL_HOST: 127.0.0.1
+      SQL_PORT: 5432
+      SQL_USER: attendance_ci
+      SQL_PASSWORD: ci-only-password
+      SQL_DB_NAME: attendance_ci
+      DB_SCHEMA: shift_app
+      DB_SSL: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: node --import tsx --test tests/*.test.ts
+      - run: node --import tsx tests/mainDataConcurrency.integration.ts

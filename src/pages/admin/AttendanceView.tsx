@@ -82,7 +82,7 @@ export default function AttendanceView({
   };
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 min-w-0 w-full">
       {/* Widgets Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" dir="rtl">
         <div className="p-5 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center justify-between shadow-sm text-right">
@@ -122,14 +122,14 @@ export default function AttendanceView({
       {/* Reports Query Filter */}
       <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
         <h3 className="font-extrabold text-slate-800 text-sm">تصفية وبحث كشف الحضور</h3>
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3.5 items-end">
-          <div className="flex flex-col gap-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3.5 items-end min-w-0">
+          <div className="flex flex-col gap-1 min-w-0">
             <label className="text-[10px] font-bold text-slate-500">من تاريخ</label>
             <input
               type="date"
               value={attFilterFrom}
               onChange={(e) => setAttFilterFrom(e.target.value)}
-              className="px-3 py-2 text-xs border rounded-lg focus:outline-none"
+              className="w-full min-w-0 px-3 py-2 text-xs border rounded-lg focus:outline-none"
             />
           </div>
 
@@ -180,10 +180,11 @@ export default function AttendanceView({
               <option value="">كل الحالات</option><option value="checkedout">مكتمل</option><option value="present">ناقص / للمراجعة</option>
             </select>
           </label>
-          <div className="flex gap-2">
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-sky-100 pt-4 min-w-0">
             <button
               onClick={loadAttendance}
-              className="flex items-center justify-center gap-1.5 flex-1 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold text-xs shadow-sm transition-all"
+              className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold text-xs shadow-sm transition-all"
             >
               <Search size={14} />
               <span>تحديث</span>
@@ -199,12 +200,11 @@ export default function AttendanceView({
 
             <button
               onClick={exportCsv}
-              className="p-2.5 hover:bg-sky-50 border rounded-lg text-sky-600 transition-all"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg text-sky-700 font-bold transition-all disabled:opacity-50 max-w-full"
               title="تصدير النتائج المفلترة فقط" disabled={!filteredRecords.length}
             >
               <Download size={15} /><span className="text-xs">تصدير {attFilterEmp ? 'الموظف المختار' : 'النتائج'}</span>
             </button>
-          </div>
         </div>
       </div>
 
