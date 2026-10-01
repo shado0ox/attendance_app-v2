@@ -1,8 +1,11 @@
 import { useState } from 'react';
+import { printSchedule } from '../../lib/schedulePrint';
 import SchedulePlanner from './SchedulePlanner';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
 
 interface ScheduleViewProps {
+  companyName: string;
+  logoDataUrl?: string;
   onApplySchedule: (schedule: any) => Promise<boolean>;
   departments: any[];
   employees: any[];
@@ -20,6 +23,8 @@ interface ScheduleViewProps {
 }
 
 export default function ScheduleView({
+  companyName,
+  logoDataUrl,
   onApplySchedule,
   departments,
   employees,
@@ -35,6 +40,8 @@ export default function ScheduleView({
   DAYS_AR,
   onEditCell,
 }: ScheduleViewProps) {
+  const [exportAll, setExportAll] = useState(false);
+  const [exportError, setExportError] = useState('');
   const [plannerOpen, setPlannerOpen] = useState(false);
   const department = departments.find(d => d.id === selectedDept);
   const deptEmployees = employees.filter((e) => e.dept === selectedDept);
@@ -87,6 +94,18 @@ export default function ScheduleView({
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-3 items-center bg-slate-50 border rounded-xl p-3 text-xs" dir="rtl">
+        <label className="flex gap-2 items-center"><input type="checkbox" checked={exportAll} onChange={e => setExportAll(e.target.checked)}/> تضمين كل الأقسام (كل قسم بصفحات مستقلة)</label>
+        <button type="button" disabled={!departments.length || (!exportAll && !department)} onClick={() => {
+          setExportError('');
+          try {
+            const ok = printSchedule({ companyName, logoDataUrl, departments: exportAll ? departments : [department], employees, shiftTypes: shiftTypes || [], schedule, month: scheduleMonth });
+            if (!ok) setExportError('اسمح بفتح نافذة المعاينة في المتصفح ثم أعد التصدير');
+          } catch (e: any) { setExportError(e.message || 'تعذر إعداد التقرير'); }
+        }} className="px-4 py-2 bg-sky-700 text-white rounded-lg font-bold disabled:opacity-40">تصدير جدول {exportAll ? 'كل الأقسام' : 'القسم'} PDF</button>
+        <span className="text-slate-500">الشهر المحدد · معاينة ثم طباعة / حفظ PDF</span>
+        {exportError && <p role="alert" className="w-full text-rose-700">{exportError}</p>}
+      </div>
       {hasPermission('canEditSchedule') && department && <>
         <button type="button" onClick={() => setPlannerOpen(v => !v)} className="self-start px-4 py-2 bg-sky-100 text-sky-800 rounded-lg text-xs font-bold">
           {plannerOpen ? 'إغلاق أداة الاقتراح' : 'اقتراح توزيع الشيفتات والراحات'}
