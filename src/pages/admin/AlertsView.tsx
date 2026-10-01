@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Check, Trash2, AlertTriangle } from 'lucide-react';
 
 interface AlertsViewProps {
@@ -23,6 +24,7 @@ export default function AlertsView({
   onUpdateSettings,
   requestConfirm,
 }: AlertsViewProps) {
+  const [showRead, setShowRead] = useState(false);
   const allGaps = getShiftGaps();
   const unreadGaps = allGaps.filter((g) => !(appSettings.readAlerts || []).includes(g.id));
 
@@ -70,8 +72,13 @@ export default function AlertsView({
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2 text-xs">
+        <button type="button" onClick={() => setShowRead(false)} className={`px-3 py-2 rounded-lg ${!showRead ? 'bg-sky-100 text-sky-800' : 'bg-slate-50'}`}>غير مقروءة ({unreadGaps.length})</button>
+        <button type="button" onClick={() => setShowRead(true)} className={`px-3 py-2 rounded-lg ${showRead ? 'bg-sky-100 text-sky-800' : 'bg-slate-50'}`}>كل التنبيهات ({allGaps.length})</button>
+      </div>
+      <p className="text-xs text-slate-500">تُحسب التغطية حسب نوع الشيفت (صباحي / مسائي / مزدوج)، وتشمل الشيفتات المضافة حديثاً. الجمعة العادية تُفحص مثل باقي الأيام.</p>
       <div className="flex flex-col gap-3">
-        {unreadGaps.map((g) => {
+        {(showRead ? allGaps : unreadGaps).map((g) => {
           const isRead = (appSettings.readAlerts || []).includes(g.id);
           return (
             <div
@@ -116,9 +123,9 @@ export default function AlertsView({
         })}
       </div>
 
-      {unreadGaps.length === 0 && (
+      {(showRead ? allGaps : unreadGaps).length === 0 && (
         <div className="py-12 text-center text-xs text-slate-400 font-medium bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-          🎉 ممتاز! لا توجد تنبيهات نشطة غير مقروءة حالياً في كافة الأقسام النشطة!
+          {allGaps.length === 0 ? 'لا توجد تنبيهات نقص تغطية حالياً.' : 'كل التنبيهات الحالية مقروءة؛ يمكنك عرضها من تبويب كل التنبيهات.'}
         </div>
       )}
     </div>

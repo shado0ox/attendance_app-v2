@@ -1,6 +1,9 @@
+import { useState } from 'react';
+import SchedulePlanner from './SchedulePlanner';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
 
 interface ScheduleViewProps {
+  onApplySchedule: (schedule: any) => Promise<boolean>;
   departments: any[];
   employees: any[];
   shiftTypes: any[];
@@ -17,6 +20,7 @@ interface ScheduleViewProps {
 }
 
 export default function ScheduleView({
+  onApplySchedule,
   departments,
   employees,
   shiftTypes,
@@ -31,6 +35,8 @@ export default function ScheduleView({
   DAYS_AR,
   onEditCell,
 }: ScheduleViewProps) {
+  const [plannerOpen, setPlannerOpen] = useState(false);
+  const department = departments.find(d => d.id === selectedDept);
   const deptEmployees = employees.filter((e) => e.dept === selectedDept);
 
   return (
@@ -81,6 +87,12 @@ export default function ScheduleView({
         </div>
       </div>
 
+      {hasPermission('canEditSchedule') && department && <>
+        <button type="button" onClick={() => setPlannerOpen(v => !v)} className="self-start px-4 py-2 bg-sky-100 text-sky-800 rounded-lg text-xs font-bold">
+          {plannerOpen ? 'إغلاق أداة الاقتراح' : 'اقتراح توزيع الشيفتات والراحات'}
+        </button>
+        {plannerOpen && <SchedulePlanner key={selectedDept + scheduleMonth} department={department} employees={employees} shiftTypes={shiftTypes} schedule={schedule} month={scheduleMonth} onApply={onApplySchedule}/>}
+      </>}
       {/* Dynamic schedule table grid */}
       <div className="overflow-auto max-h-[72vh] rounded-xl border border-sky-100 shadow-2xs relative">
         <table className="w-full border-collapse text-right text-xs relative">
@@ -138,10 +150,10 @@ export default function ScheduleView({
                     let badgeLabel = '🏝️ إجازة';
 
                     if (st) {
-                      if (st.id === 'S') {
+                      if (st.type === 'morning' || (!st.type && st.id === 'S')) {
                         badgeStyle = 'text-emerald-700 bg-emerald-50 border border-emerald-200/60 font-bold';
                         badgeLabel = `🌅 ${st.name}`;
-                      } else if (st.id === 'E') {
+                      } else if (st.type === 'evening' || (!st.type && st.id === 'E')) {
                         badgeStyle = 'text-indigo-700 bg-indigo-50 border border-indigo-200/60 font-bold';
                         badgeLabel = `🌙 ${st.name}`;
                       } else if (st.type === 'double') {

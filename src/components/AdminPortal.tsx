@@ -1,3 +1,4 @@
+import { coverageAlerts } from '../lib/schedulePlanning';
 import { attendanceToday } from '../lib/attendanceQuery';
 import { getApprovedLocations } from '../lib/attendanceLocations';
 import { useState, useEffect } from 'react';
@@ -395,60 +396,10 @@ export default function AdminPortal({
     return dates;
   };
 
-  const getShiftGaps = () => {
-    const dates = getDaysInSelectedMonth();
-    const alerts: any[] = [];
-    dates.forEach(({ dateStr, date }) => {
-      const isFri = date.getDay() === 5;
-      departments.forEach((dept) => {
-        const deptEmps = employees.filter((e) => e.dept === dept.id);
-        const morningWorkers = deptEmps.filter((e) => {
-          const sType = schedule[dateStr]?.[e.id]?.shiftType;
-          const stObj = (shiftTypes || []).find((t: any) => t.id === sType);
-          return sType === 'S' || stObj?.type === 'double';
-        });
-        const eveningWorkers = deptEmps.filter((e) => {
-          const sType = schedule[dateStr]?.[e.id]?.shiftType;
-          const stObj = (shiftTypes || []).find((t: any) => t.id === sType);
-          return sType === 'E' || stObj?.type === 'double';
-        });
-
-        if (isFri) {
-          if (dept.friday === 'off') return;
-          if (dept.friday === 'partial') {
-            if (morningWorkers.length + eveningWorkers.length === 0) {
-              alerts.push({
-                id: `${dateStr}_${dept.id}_friday`,
-                date: dateStr,
-                dept: dept.name,
-                msg: `يوم الجمعة: لا يوجد أي تعيين لدوام الشيفت في القسم ${dept.name}`
-              });
-            }
-          }
-          return;
-        }
-
-        if (dept.needsMorning && morningWorkers.length === 0) {
-          alerts.push({
-            id: `${dateStr}_${dept.id}_morning`,
-            date: dateStr,
-            dept: dept.name,
-            msg: `تغطية ناقصة: الشيفت الصباحي فارغ في القسم ${dept.name}`
-          });
-        }
-        if (dept.needsEvening && eveningWorkers.length === 0) {
-          alerts.push({
-            id: `${dateStr}_${dept.id}_evening`,
-            date: dateStr,
-            dept: dept.name,
-            msg: `تغطية ناقصة: الشيفت المسائي فارغ في القسم ${dept.name}`
-          });
-        }
-      });
-    });
-    const deleted = appSettings.deletedAlerts || [];
-    return alerts.filter(a => !deleted.includes(a.id));
-  };
+  const getShiftGaps = () => coverageAlerts(
+    departments, employees, shiftTypes || [], schedule,
+    getDaysInSelectedMonth().map(d => d.dateStr)
+  ).filter(a => !(appSettings.deletedAlerts || []).includes(a.id));
 
   const toggleAlertRead = (alertId: string) => {
     const currentRead = appSettings.readAlerts || [];
@@ -1111,6 +1062,10 @@ export default function AdminPortal({
           {/* View: Schedule */}
           {activeView === 'schedule' && (
             <ScheduleView
+              onApplySchedule={async (nextSchedule) => {
+                if (!hasPermission('canEditSchedule')) return false;
+                return onUpdateAppData({ ...appData, schedule: nextSchedule });
+              }}
               departments={departments}
               employees={employees}
               shiftTypes={shiftTypes}
