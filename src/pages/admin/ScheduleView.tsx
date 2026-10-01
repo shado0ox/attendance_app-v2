@@ -91,7 +91,7 @@ export default function ScheduleView({
         <button type="button" onClick={() => setPlannerOpen(v => !v)} className="self-start px-4 py-2 bg-sky-100 text-sky-800 rounded-lg text-xs font-bold">
           {plannerOpen ? 'إغلاق أداة الاقتراح' : 'اقتراح توزيع الشيفتات والراحات'}
         </button>
-        {plannerOpen && <SchedulePlanner key={selectedDept + scheduleMonth} department={department} employees={employees} shiftTypes={shiftTypes} schedule={schedule} month={scheduleMonth} onApply={onApplySchedule}/>}
+        {plannerOpen && <div key={selectedDept + scheduleMonth}><SchedulePlanner department={department} employees={employees} shiftTypes={shiftTypes} schedule={schedule} month={scheduleMonth} onApply={onApplySchedule}/></div>}
       </>}
       {/* Dynamic schedule table grid */}
       <div className="overflow-auto max-h-[72vh] rounded-xl border border-sky-100 shadow-2xs relative">
