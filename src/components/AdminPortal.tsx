@@ -1062,6 +1062,8 @@ export default function AdminPortal({
           {/* View: Schedule */}
           {activeView === 'schedule' && (
             <ScheduleView
+              companyName={appSettings?.companyName || 'الشركة'}
+              logoDataUrl={appSettings?.logoDataUrl}
               onApplySchedule={async (nextSchedule) => {
                 if (!hasPermission('canEditSchedule')) return false;
                 return onUpdateAppData({ ...appData, schedule: nextSchedule });
