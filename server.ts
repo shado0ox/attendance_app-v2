@@ -1593,12 +1593,13 @@ async function startServer() {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath, {
       setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.html') || filePath.endsWith('manifest.json') || filePath.includes('sw.js') || filePath.includes('registerSW')) {
+        if (filePath.endsWith('.html') || filePath.endsWith('manifest.json') || filePath.includes('sw.js') || filePath.includes('registerSW') || filePath.endsWith('pwa-upgrade-bridge.js')) {
           res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         }
       },
     }));
     app.get('*', (req, res) => {
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
