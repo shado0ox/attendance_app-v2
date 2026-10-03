@@ -5,6 +5,10 @@ import { getEmployeeLocations as getApprovedLocations, matchAttendanceLocation }
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle, Fingerprint, ScanFace, ShieldCheck } from 'lucide-react';
 interface EmployeePortalProps {
+  onRefreshSchedule: () => Promise<boolean>;
+  scheduleRefreshing: boolean;
+  scheduleSyncedAt: number | null;
+  scheduleSyncError: string;
   employee: any;
   appSettings: any;
   departments: any[];
@@ -17,6 +21,10 @@ interface EmployeePortalProps {
 }
 
 export default function EmployeePortal({
+  onRefreshSchedule,
+  scheduleRefreshing,
+  scheduleSyncedAt,
+  scheduleSyncError,
   employee,
   appSettings: companySettings,
   departments,
@@ -231,7 +239,7 @@ export default function EmployeePortal({
 
   const getTodayShift = () => {
     const todayStr = getTodayStr();
-    const sched = schedule && Object.keys(schedule).length > 0 ? schedule : getLocalScheduleData();
+    const sched = schedule;
     const assigned = sched?.[todayStr]?.[employee.id];
     const stType = assigned?.shiftType || 'A';
     const sTypes = shiftTypes && shiftTypes.length > 0 ? shiftTypes : [];
@@ -441,19 +449,9 @@ export default function EmployeePortal({
     return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
   };
 
-  const getLocalScheduleData = () => {
-    const localDataStr = localStorage.getItem(`schedule_mainData_${companyId}`) || localStorage.getItem('schedule_mainData') || '{}';
-    try {
-      const raw = JSON.parse(localDataStr);
-      return raw.schedule || {};
-    } catch (e) {
-      return {};
-    }
-  };
-
   const isTodayRecordShiftDouble = (): boolean => {
     const todayStr = stateRef.current.todayRecord?.date || getTodayStr();
-    const sched = schedule && Object.keys(schedule).length > 0 ? schedule : getLocalScheduleData();
+    const sched = schedule;
     const assigned = sched?.[todayStr]?.[employee.id];
     const stType = assigned?.shiftType || 'A';
     const sTypes = shiftTypes && shiftTypes.length > 0 ? shiftTypes : [];
@@ -813,15 +811,8 @@ export default function EmployeePortal({
 
   const dept = departments.find((d) => d.id === employee.dept);
 
-  // Read schedules from props first, then fall back to local storage cache if empty
-  let scheduleData: any = schedule;
-  if (!scheduleData || Object.keys(scheduleData).length === 0) {
-    const localDataStr = localStorage.getItem(`schedule_mainData_${companyId}`) || localStorage.getItem('schedule_mainData') || '{}';
-    try {
-      const raw = JSON.parse(localDataStr);
-      scheduleData = raw.schedule || {};
-    } catch (e) {}
-  }
+  // App owns network/cached data; an authoritative empty schedule stays empty.
+  const scheduleData = schedule;
 
   return (
     <div id="emp-portal" className="min-h-screen pb-12 bg-sky-50 bg-opacity-40">
@@ -981,6 +972,12 @@ export default function EmployeePortal({
         </div>
 
         
+        <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-white border border-sky-100 text-xs">
+          <button type="button" disabled={scheduleRefreshing} onClick={() => { void onRefreshSchedule(); }} className="px-3 py-2 rounded-lg bg-sky-100 text-sky-800 font-bold disabled:opacity-50">{scheduleRefreshing ? 'جارٍ تحديث الجدول…' : 'تحديث جدول الدوام'}</button>
+          <span>آخر مزامنة مع السيرفر: {scheduleSyncedAt ? new Date(scheduleSyncedAt).toLocaleString('ar-SA', {timeZone:'Asia/Riyadh',numberingSystem:'latn'}) : 'لم يتم التحقق بعد'}</span>
+          <span className="text-slate-500">يتحدث تلقائياً خلال دقيقة أثناء فتح التطبيق، وعند العودة إليه أو رجوع الإنترنت.</span>
+          {scheduleSyncError && <p role="alert" className="w-full text-amber-800">{scheduleSyncError}</p>}
+        </div>
         {/* Month Selector */}
         <div className="flex items-center justify-between px-4 py-3 bg-white border border-sky-100 rounded-2xl shadow-sm">
           <button
@@ -1040,7 +1037,7 @@ export default function EmployeePortal({
                     const stType = assigned?.shiftType || 'A';
 
                     let cellBg = 'bg-white';
-                    let label = 'إجازة';
+                    let label = assigned?.shiftType ? 'إجازة / راحة' : 'غير مجدول';
                     let labelColor = 'text-slate-400';
 
                     const matchingShift = (shiftTypes || []).find((s: any) => s.id === stType);

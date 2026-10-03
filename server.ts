@@ -857,6 +857,8 @@ app.get('/api/db-status', requireAuth(['superadmin'], false), async (req, res) =
 
 // 1. Get/Seed Main App Data (Tenant Aware)
 app.get('/api/main-data', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  res.vary('Authorization');
   const companyId = (req.query.companyId as string) || 'default';
   const key = companyId === 'default' ? 'mainData' : 'mainData_' + companyId;
   const auth = tryReadAuth(req);

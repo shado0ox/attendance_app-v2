@@ -139,6 +139,25 @@ try {
   assert.equal(analyzed.items.find((day: any) => day.date === '2024-10-10').analysis.status, 'إجازة معتمدة');
   const absences = await (await fetch(origin + analysisQuery + '&status=absent', { headers })).json() as any;
   assert.equal(absences.total, 1); assert.equal(absences.items[0].date, '2024-10-12'); assert.deepEqual(absences.items[0].ids, []);
+  // An employee holding an older HTTP entity must receive new and cleared schedules.
+  const beforeEmployee = await fetch(origin + '/api/main-data?companyId=default', {headers:employeeHeaders});
+  const oldEntity = beforeEmployee.headers.get('etag');
+  assert.equal(beforeEmployee.headers.get('cache-control'), 'private, no-store');
+  assert.ok(beforeEmployee.headers.get('vary')?.includes('Authorization'));
+  const beforeEdit = await (await fetch(origin + '/api/main-data?companyId=default', {headers})).json() as any;
+  const updatedSchedule = {...beforeEdit.schedule, '2026-10-03':{'employee-ci':{shiftType:'S',note:'Updated by manager'}}};
+  const editedResponse = await fetch(origin + '/api/main-data?companyId=default', {method:'POST',headers,body:JSON.stringify({...beforeEdit,schedule:updatedSchedule,_baseVersion:beforeEdit._version})});
+  assert.equal(editedResponse.status,200);
+  const edited = await editedResponse.json() as any;
+  const afterEmployee = await fetch(origin + '/api/main-data?companyId=default', {headers:{...employeeHeaders,...(oldEntity ? {'If-None-Match':oldEntity} : {})}});
+  assert.equal(afterEmployee.status,200);
+  const employeeData = await afterEmployee.json() as any;
+  assert.equal(employeeData.schedule['2026-10-03']['employee-ci'].note,'Updated by manager');
+  const clearedResponse = await fetch(origin + '/api/main-data?companyId=default', {method:'POST',headers,body:JSON.stringify({...edited,schedule:{},_baseVersion:edited._version})});
+  assert.equal(clearedResponse.status,200);
+  const clearedEmployee = await (await fetch(origin + '/api/main-data?companyId=default', {headers:employeeHeaders})).json() as any;
+  assert.deepEqual(clearedEmployee.schedule,{});
+  console.log('PASS: employee reads reflect manager edits and explicit empty schedules without HTTP cache reuse.');
   console.log('PASS: schedule analysis, approved leave, rest, overnight absence, grace and potential overtime through HTTP.');
   console.log('PASS: scoped report period/employee/department, whole-day paging, complete export, totals and employee permissions.');
   console.log('PASS: monthly snapshot, closed-month create/update/delete/date-move guards, reopening reason and audit.');
