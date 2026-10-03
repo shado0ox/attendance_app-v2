@@ -4,6 +4,7 @@ import { Loader, Key, X, AlertCircle, Smartphone } from 'lucide-react';
 
 import LoginScreen from './components/LoginScreen';
 import AdminPortal from './components/AdminPortal';
+import SystemUpdateNotice from './components/SystemUpdateNotice';
 import EmployeePortal from './components/EmployeePortal';
 import { SESSION_EXPIRED_EVENT } from './lib/authFetch';
 
@@ -84,6 +85,10 @@ export default function App() {
   const pendingSaves = useRef(0);
   const revision = useRef(0);
   const unsaved = useRef(false);
+  const refreshMainData = useRef<() => Promise<boolean>>(async () => false);
+  const [dataRefreshing, setDataRefreshing] = useState(false);
+  const [dataSyncedAt, setDataSyncedAt] = useState<number | null>(null);
+  const [dataSyncError, setDataSyncError] = useState('');
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
   const cacheData = (id: string, data: any) => {
@@ -220,15 +225,23 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    let fetching = false;
+    let fetchTask: Promise<boolean> | null = null;
+    setDataSyncedAt(null);
+    setDataSyncError('');
     let receivedData = false;
     // 1. Fetch mainData from PostgreSQL API
-    const fetchMainData = async () => {
-      if (document.hidden || fetching || pendingSaves.current || unsaved.current) return;
-      fetching = true;
+    const fetchMainData = (): Promise<boolean> => {
+      if (fetchTask) return fetchTask;
+      fetchTask = loadMainData().finally(() => { fetchTask = null; });
+      return fetchTask;
+    };
+    refreshMainData.current = fetchMainData;
+    const loadMainData = async (): Promise<boolean> => {
+      if (cancelled || document.hidden || pendingSaves.current || unsaved.current) return false;
+      setDataRefreshing(true);
       const fetchRevision = revision.current;
       try {
-        const response = await fetch(`/api/main-data?companyId=${companyId}`);
+        const response = await fetch(`/api/main-data?companyId=${encodeURIComponent(companyId)}`, { cache: 'no-store' });
         if (!response.ok) {
           throw new Error(`API Handshake failed: Server returned status ${response.status} (${response.statusText})`);
         }
@@ -240,8 +253,10 @@ export default function App() {
         }
 
         const data = await response.json();
-        if (cancelled || fetchRevision !== revision.current || pendingSaves.current || unsaved.current) return;
+        if (cancelled || fetchRevision !== revision.current || pendingSaves.current || unsaved.current) return false;
         receivedData = true;
+        setDataSyncedAt(Date.now());
+        setDataSyncError('');
         if (data._version) serverVersions.current[companyId] = data._version;
         conflictCompanies.current.delete(companyId);
         setSaveConflict(false);
@@ -260,10 +275,12 @@ export default function App() {
           setAppSettings(data.settings);
         }
         cacheData(companyId, data);
+        return true;
       } catch (err: any) {
         console.error('[API Error] Failed to fetch main-data from backend:', err.message || err);
-        if (cancelled || fetchRevision !== revision.current || unsaved.current) return;
-        if (receivedData) return;
+        if (cancelled || fetchRevision !== revision.current || unsaved.current) return false;
+        setDataSyncError('تعذر تحديث الجدول من السيرفر؛ البيانات المعروضة قد تكون قديمة.');
+        if (receivedData) return false;
         const cached = localStorage.getItem(`schedule_mainData_${companyId}`);
         if (cached) {
           try {
@@ -285,9 +302,9 @@ export default function App() {
             console.error('Error parsing cached data:', e);
           }
         }
+        return false;
       } finally {
-        fetching = false;
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); setDataRefreshing(false); }
       }
     };
 
@@ -331,6 +348,9 @@ export default function App() {
       if (session.role === 'admin' || session.role === 'superadmin') void fetchRegRequests();
     };
     document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    window.addEventListener('online', onVisible);
+    window.addEventListener('pageshow', onVisible);
 
     // 3. Keep local sessions on reload
     const storedSession = localStorage.getItem('app_session');
@@ -347,6 +367,9 @@ export default function App() {
     return () => {
       cancelled = true;
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+      window.removeEventListener('online', onVisible);
+      window.removeEventListener('pageshow', onVisible);
       clearInterval(mainDataInterval);
       if (regRequestsInterval) clearInterval(regRequestsInterval);
     };
@@ -536,6 +559,7 @@ export default function App() {
   return (
     <div dir="rtl" className="font-tajawal text-slate-800 transition-all select-none">
       
+      <SystemUpdateNotice blocked={saving || !!saveError || saveConflict || unsaved.current}/>
       {(saving || saveError) && (
         <div role="status" className="sticky top-0 z-[120] p-3 bg-amber-50 border-b border-amber-200 text-sm text-center">
           {saving ? 'جاري حفظ البيانات...' : `لم يتم حفظ التعديلات: ${saveError}. التعديلات محفوظة مؤقتًا في هذه الصفحة.`}
@@ -584,7 +608,11 @@ export default function App() {
           element={
             session.role === 'employee' ? (
               <EmployeePortal
-                employee={session.info}
+                employee={appData.employees.find(e => String(e.id) === String(session.info.id)) || session.info}
+                onRefreshSchedule={() => refreshMainData.current()}
+                scheduleRefreshing={dataRefreshing}
+                scheduleSyncedAt={dataSyncedAt}
+                scheduleSyncError={dataSyncError}
                 appSettings={appSettings}
                 departments={appData.departments}
                 employees={appData.employees}

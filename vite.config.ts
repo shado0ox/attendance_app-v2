@@ -10,11 +10,11 @@ export default defineConfig(() => {
       react(),
       tailwindcss(),
       VitePWA({
-        registerType: 'autoUpdate',
-        injectRegister: 'auto',
+        registerType: 'prompt',
+        injectRegister: false,
         includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/app-icon.svg'],
         workbox: {
-          skipWaiting: true,
+          skipWaiting: false,
           clientsClaim: true,
           cleanupOutdatedCaches: true,
           navigateFallbackDenylist: [/^\/api\//],
