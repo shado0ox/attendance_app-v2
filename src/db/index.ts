@@ -206,6 +206,12 @@ export const initializeSchemaAndTables = async () => {
         key text PRIMARY KEY, company_id text NOT NULL, month text NOT NULL, value jsonb NOT NULL);
         CREATE INDEX IF NOT EXISTS attendance_company_date ON "${dbSchema}".attendance (company_id, date);`);
 
+      await client.query(`ALTER TABLE "${dbSchema}"."requests"
+        ADD COLUMN IF NOT EXISTS details jsonb DEFAULT '{}'::jsonb,
+        ADD COLUMN IF NOT EXISTS reviewed_by text,
+        ADD COLUMN IF NOT EXISTS reviewed_at timestamp,
+        ADD COLUMN IF NOT EXISTS review_reason text;`);
+
       // Additive migration for existing installations; old punches stay untouched.
       await client.query(`ALTER TABLE "${dbSchema}"."attendance"
         ADD COLUMN IF NOT EXISTS check_in_location text,

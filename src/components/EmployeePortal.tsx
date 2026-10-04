@@ -86,7 +86,7 @@ export default function EmployeePortal({
   const [actionLoading, setCheckActionLoading] = useState(false);
   const [geoStatus, setGeoStatus] = useState<string>('');
   const [requestModalOpen, setRequestModalOpen] = useState(false);
-  const [requestType, setRequestType] = useState<'leave' | 'shift_change' | 'swap'>('leave');
+  const [requestType, setRequestType] = useState<'leave' | 'shift_change' | 'swap' | 'attendance_adjustment'>('leave');
 
   // Custom Confirm modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -112,9 +112,13 @@ export default function EmployeePortal({
   const [reqNote, setReqNote] = useState('');
   const [reqSwapEmpId, setReqSwapEmpId] = useState('');
   const [reqTargetShift, setReqTargetShift] = useState('S');
-  const [reqCheckInTime, setReqCheckInTime] = useState('08:00');
-  const [reqCheckOutTime, setReqCheckOutTime] = useState('16:00');
+  const [reqCheckInTime, setReqCheckInTime] = useState('');
+  const [reqCheckOutTime, setReqCheckOutTime] = useState('');
 
+  const [correctionPeriod, setCorrectionPeriod] = useState(1);
+  const [correctionInNextDay, setCorrectionInNextDay] = useState(false);
+  const [correctionOutNextDay, setCorrectionOutNextDay] = useState(false);
+  const [requestSubmitting, setRequestSubmitting] = useState(false);
   // Auto Punch / Geofencing states
   const [autoCheckIn, setAutoCheckIn] = useState<boolean>(() => {
     return localStorage.getItem(`autoCheckIn_${employee.id}`) === 'true';
@@ -771,6 +775,7 @@ export default function EmployeePortal({
   };
 
   const handleRequestSubmit = async () => {
+    if (requestSubmitting) return;
     if (!reqDate) {
       alert('يرجى تحديد تاريخ الطلب');
       return;
@@ -802,10 +807,13 @@ export default function EmployeePortal({
     }
 
     if ((requestType as any) === 'attendance_adjustment') {
+      if (!reqNote.trim() || (!reqCheckInTime && !reqCheckOutTime)) { alert('حدد البصمة المطلوب تصحيحها واكتب السبب. اترك الطرف السليم فارغًا.'); return; }
+      payload.details = { period: correctionPeriod, checkInNextDay: correctionInNextDay, checkOutNextDay: correctionOutNextDay };
       payload.checkInTime = reqCheckInTime;
       payload.checkOutTime = reqCheckOutTime;
     }
 
+    setRequestSubmitting(true);
     try {
       const response = await fetch('/api/requests', {
         method: 'POST',
@@ -813,7 +821,8 @@ export default function EmployeePortal({
         body: JSON.stringify(payload)
       });
       if (!response.ok) {
-        throw new Error('فشل إرسال الطلب إلى الخادم');
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || 'فشل إرسال الطلب إلى الخادم');
       }
       alert('🎉 تم إرسال طلبك بنجاح وجاري المراجعة من الإدارة.');
       setRequestModalOpen(false);
@@ -821,7 +830,7 @@ export default function EmployeePortal({
       loadRequests();
     } catch (e: any) {
       alert('فشل إرسال الطلب: ' + e.message);
-    }
+    } finally { setRequestSubmitting(false); }
   };
 
   // Calendar render logic
@@ -1523,7 +1532,7 @@ export default function EmployeePortal({
           </button>
 
           <button
-            onClick={() => { setRequestType('attendance_adjustment' as any); setRequestModalOpen(true); }}
+            onClick={() => { setRequestType('attendance_adjustment'); setReqNote(''); setReqCheckInTime(''); setReqCheckOutTime(''); setCorrectionPeriod(1); setCorrectionInNextDay(false); setCorrectionOutNextDay(false); setRequestModalOpen(true); }}
             className="flex items-center gap-2 px-5 py-3 hover:transform hover:-translate-y-0.5 hover:shadow bg-white text-slate-700 border rounded-xl font-bold text-xs transition-all shadow-sm"
           >
             <Clock size={14} className="text-sky-500" />
@@ -1562,7 +1571,7 @@ export default function EmployeePortal({
                       <div className="font-extrabold text-slate-800">{reqTitle}</div>
                       <div className="text-slate-400 text-[10px] mt-1">
                         تاريخ الدوام: <strong className="font-bold text-slate-600">{r.date}</strong>
-                        {r.note && <span className="block mt-0.5 text-slate-500">✏️ {r.note}</span>}
+                        {(r.notes || r.note) && <span className="block mt-0.5 text-slate-500">✏️ {r.notes || r.note}</span>}{r.reviewReason && <span className="block mt-1 text-slate-600">رد الإدارة: {r.reviewReason}</span>}
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-1">
@@ -1596,7 +1605,7 @@ export default function EmployeePortal({
               {requestType === 'leave' && 'تقديم طلب إجازة'}
               {requestType === 'shift_change' && 'طلب تغيير شيفت الدوام'}
               {requestType === 'swap' && 'طلب تبديل شيفت مع زميل'}
-              {(requestType as any) === 'attendance_adjustment' && 'طلب تعديل لقطات البصمة الرياضية'}
+              {(requestType as any) === 'attendance_adjustment' && 'طلب تصحيح بصمة الحضور والانصراف'}
             </h3>
 
             <div className="flex flex-col gap-4">
@@ -1647,6 +1656,10 @@ export default function EmployeePortal({
 
               {(requestType as any) === 'attendance_adjustment' && (
                 <div className="grid grid-cols-2 gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                  <p className="col-span-2 text-xs text-slate-600">اكتب الوقت المطلوب فقط، واترك البصمة السليمة فارغة. التصحيح لا يسجل موقع GPS جديدًا ويحتاج موافقة الإدارة.</p>
+                  <label className="col-span-2 text-xs">الفترة <select value={correctionPeriod} onChange={e => setCorrectionPeriod(Number(e.target.value))} className="border rounded p-2 mr-2"><option value={1}>الفترة الأولى</option><option value={2}>الفترة الثانية (الدوام المزدوج)</option></select></label>
+                  <label className="text-xs flex gap-1"><input type="checkbox" checked={correctionInNextDay} onChange={e => setCorrectionInNextDay(e.target.checked)} />الحضور في اليوم التالي</label>
+                  <label className="text-xs flex gap-1"><input type="checkbox" checked={correctionOutNextDay} onChange={e => setCorrectionOutNextDay(e.target.checked)} />الانصراف في اليوم التالي</label>
                   <div className="flex flex-col gap-1">
                     <label className="text-[10px] font-bold text-slate-600">وقت الدخول المطلوب</label>
                     <input
@@ -1673,7 +1686,8 @@ export default function EmployeePortal({
                 <textarea
                   value={reqNote}
                   onChange={(e) => setReqNote(e.target.value)}
-                  placeholder="يرجى كتابة سبب طلب إجازة..."
+                  maxLength={1000}
+                  placeholder="اكتب سبب الطلب بالتفصيل..."
                   rows={3}
                   className="px-3 py-2 text-xs border rounded-lg focus:outline-none"
                 />
@@ -1687,10 +1701,11 @@ export default function EmployeePortal({
                   إلغاء
                 </button>
                 <button
+                  disabled={requestSubmitting}
                   onClick={handleRequestSubmit}
                   className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold text-xs"
                 >
-                  إرسال الطلب
+                  {requestSubmitting ? 'جارٍ إرسال الطلب…' : 'إرسال الطلب'}
                 </button>
               </div>
             </div>

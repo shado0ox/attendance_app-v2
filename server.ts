@@ -1,3 +1,4 @@
+import { correctionValues, validCorrectionTime, CorrectionValidationError } from './src/lib/attendanceCorrection';
 import { scheduleContent, effectiveScheduleData, employeeScheduleContent } from './src/lib/schedulePublication';
 import { employeeStatus, isActiveEmployee, employeeChanges } from './src/lib/employeeLifecycle';
 import { validEmployeeEmail } from './src/lib/employeeDirectory';
@@ -1452,6 +1453,32 @@ app.post('/api/requests', requireAuth(['employee', 'admin', 'superadmin']), asyn
     return res.status(403).json({ error: 'لا يمكنك تقديم طلب نيابة عن موظف آخر' });
   }
 
+  if (type === 'attendance_adjustment') {
+    const requestCompany = String(companyId || 'default');
+    const reason = String(notes || req.body.note || '').trim();
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
+    if (!validAttendanceDate(date) || date > today || (req.body.details?.period !== undefined && ![1, 2].includes(req.body.details.period)) || !reason || reason.length > 1000 || (!checkInTime && !checkOutTime) || (checkInTime && !validCorrectionTime(checkInTime)) || (checkOutTime && !validCorrectionTime(checkOutTime))) return res.status(400).json({ error: 'حدد يومًا غير مستقبلي ووقتًا صحيحًا وسبب التصحيح (حتى 1000 حرف)' });
+    const details = { period: req.body.details?.period === 2 ? 2 : 1, checkInNextDay: req.body.details?.checkInNextDay === true, checkOutNextDay: req.body.details?.checkOutNextDay === true };
+    try {
+      const result = await db.transaction(async tx => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${requestCompany + ':' + empId + ':' + date + ':correction'}))`);
+        const main = await getMainDataByCompanyId(requestCompany);
+        const employee = main?.employees?.find((e: any) => String(e.id) === String(empId));
+        if (!employee) throw attendanceError(404, 'الموظف غير موجود');
+        const pending = await tx.select().from(schema.requests).where(and(eq(schema.requests.companyId, requestCompany), eq(schema.requests.empId, String(empId)), eq(schema.requests.date, date), eq(schema.requests.type, type), eq(schema.requests.status, 'pending'))).limit(1);
+        if (pending.length) throw attendanceError(409, 'يوجد طلب تصحيح معلّق لنفس اليوم بالفعل');
+        const records = await tx.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, requestCompany), eq(schema.attendance.empId, String(empId)), eq(schema.attendance.date, date))).orderBy(schema.attendance.id);
+        if (records.length > 1) throw attendanceError(409, 'اليوم يحتوي عدة سجلات؛ اطلب مراجعة إدارية مباشرة');
+        const proposed = correctionValues({ date, checkInTime, checkOutTime, details }, records[0]);
+        if (Object.entries(proposed).some(([field, value]) => /Ts[2]?$/.test(field) && Number(value) > Date.now())) throw attendanceError(400, 'لا يمكن طلب بصمة في وقت مستقبلي');
+        const inserted = await tx.insert(schema.requests).values({ empId: String(empId), empName: employee.name, dept: employee.dept || '', date, type, notes: reason, status: 'pending', companyId: requestCompany, checkInTime: checkInTime || null, checkOutTime: checkOutTime || null, details: { ...details, baseline: mainDataVersion(records), original: records[0] || null } }).returning();
+        await audit(tx, auth, requestCompany, 'attendance.correction.request', inserted[0].id, { empId, date, reason, requested: { checkInTime, checkOutTime, ...details } });
+        return inserted[0];
+      });
+      return res.json(result);
+    } catch (error: any) { return res.status(error.status || (error instanceof CorrectionValidationError ? 400 : 500)).json({ error: error.status || error instanceof CorrectionValidationError ? error.message : 'تعذر تقديم طلب التصحيح' }); }
+  }
+
   try {
     const inserted = await db.insert(schema.requests).values({
       empId, empName: auth.role === 'employee' ? (auth.name || empName) : empName, dept: dept || '', date, type, notes: notes || req.body.note || '', status: auth.role === 'employee' ? 'pending' : (status || 'pending'),
@@ -1469,22 +1496,40 @@ app.post('/api/requests', requireAuth(['employee', 'admin', 'superadmin']), asyn
 });
 
 app.put('/api/requests/:id', requireAuth(['admin', 'superadmin'], false), requireOwnedRow(schema.requests), async (req, res) => {
-  const id = parseInt(req.params.id);
+  const id = Number(req.params.id), auth = (req as any).auth as AuthTokenPayload;
   const { status } = req.body;
-
+  if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'قرار المراجعة غير صحيح' });
+  const reviewReason = String(req.body.reviewReason || '').trim();
+  if (reviewReason.length > 1000 || (status === 'rejected' && !reviewReason)) return res.status(400).json({ error: 'أدخل سبب الرفض، بحد أقصى 1000 حرف' });
   try {
-    const updated = await db.update(schema.requests)
-      .set({ status })
-      .where(eq(schema.requests.id, id))
-      .returning();
-    return res.json(updated[0]);
-  } catch (error: any) {
-    console.error('Error updating request in PostgreSQL:', error);
-    return res.status(500).json({
-      error: 'فشل تحديث حالة الطلب في قاعدة البيانات',
-      details: error?.message || String(error)
+    const outcome = await db.transaction(async tx => {
+      const companyId = (req as any).ownedRow.companyId || 'default';
+      await lockAttendance(tx, companyId);
+      const rows = await tx.select().from(schema.requests).where(eq(schema.requests.id, id)).limit(1).for('update');
+      const request = rows[0];
+      if (!request) throw attendanceError(404, 'الطلب غير موجود');
+      if (request.status === status) return request;
+      if (request.status !== 'pending') throw attendanceError(409, 'تمت مراجعة الطلب بالفعل؛ لا يمكن تغيير قراره');
+      if (status === 'approved' && request.type === 'attendance_adjustment') {
+        await assertMonthOpen(tx, companyId, request.date);
+        const records = await tx.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, companyId), eq(schema.attendance.empId, request.empId), eq(schema.attendance.date, request.date))).orderBy(schema.attendance.id);
+        const details = request.details as any;
+        if (!details?.baseline) throw attendanceError(409, 'هذا طلب قديم بلا نسخة أصلية؛ اطلب من الموظف إعادة تقديمه');
+        if (mainDataVersion(records) !== details.baseline) throw attendanceError(409, 'البصمة تغيرت بعد تقديم الطلب؛ ارفضه واطلب نسخة جديدة للمراجعة');
+        if (records.length > 1) throw attendanceError(409, 'السجلات متعددة وتحتاج مراجعة مباشرة');
+        const values = correctionValues(request, records[0]);
+        const reviewedBy = auth.name || auth.username || 'المسؤول';
+        values.source = 'تصحيح معتمد';
+        values.note = [records[0]?.note, `تصحيح طلب #${id}: ${request.notes}`].filter(Boolean).join(' | ');
+        const saved = records.length ? await tx.update(schema.attendance).set(values).where(eq(schema.attendance.id, records[0].id)).returning() : await tx.insert(schema.attendance).values({ ...values, empId: request.empId, empName: request.empName, dept: request.dept, date: request.date, companyId, status: 'present' }).returning();
+        await audit(tx, auth, companyId, 'attendance.correction.approve', saved[0].id, { requestId: id, empId: request.empId, date: request.date, before: records[0] || null, after: saved[0], reason: request.notes, reviewReason, reviewedBy });
+      }
+      const updated = await tx.update(schema.requests).set({ status, reviewedBy: auth.name || auth.username || 'المسؤول', reviewedAt: new Date(), reviewReason }).where(eq(schema.requests.id, id)).returning();
+      await audit(tx, auth, companyId, 'request.' + status, id, { empId: request.empId, type: request.type, reason: reviewReason, actorName: auth.name || auth.username || 'المسؤول' });
+      return updated[0];
     });
-  }
+    return res.json(outcome);
+  } catch (error: any) { return res.status(error.status || (error instanceof CorrectionValidationError ? 400 : 500)).json({ error: error.status || error instanceof CorrectionValidationError ? error.message : 'تعذر مراجعة الطلب' }); }
 });
 
 // 6. Admin User Endpoints (Tenant Aware)
