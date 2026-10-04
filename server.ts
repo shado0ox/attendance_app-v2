@@ -1,3 +1,5 @@
+import { normalizedEmail, employeeEmailVerified, preserveEmailVerification } from './src/lib/emailVerification';
+import { emailVerificationKey, emailVerificationQuotaKey, verificationStatus, verificationRateLimit, newVerificationState, verificationCodeHash, matchesVerificationCode, verificationAttempts, verificationPayload } from './src/server/emailVerification';
 import { parseEmployeeProfileQuery, employeeProfileData, employeeProfileSchedule } from './src/lib/employeeProfile';
 import { correctionValues, validCorrectionTime, CorrectionValidationError } from './src/lib/attendanceCorrection';
 import { scheduleContent, effectiveScheduleData, employeeScheduleContent } from './src/lib/schedulePublication';
@@ -932,7 +934,7 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
 
       if (result.length === 0) {
         if (auth.role === 'employee') return { status: 404, body: { error: 'بيانات الشركة غير موجودة' } };
-        const initialValue = { ...payload, employees: saveEmploymentHistory([], payload.employees) };
+        const initialValue = { ...payload, employees: preserveEmailVerification([], saveEmploymentHistory([], payload.employees)) };
         const inserted = await tx.insert(schema.systemData).values({
           key,
           value: initialValue,
@@ -949,7 +951,7 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
       if (auth.role !== 'employee' && (currentValue as any).employees?.some((e: any) => !payload.employees.some((next: any) => String(next.id) === String(e.id)))) return { status: 400, body: { error: 'لا تحذف الموظفين نهائيًا؛ استخدم الأرشفة للحفاظ على سجلاتهم.' } };
       if (auth.role !== 'employee' && payload.employees.some((e: any) => { const old = (currentValue as any).employees?.find((previous: any) => String(previous.id) === String(e.id)); return old && employeeStatus(old) !== employeeStatus(e) && (typeof e.statusReason !== 'string' || !e.statusReason.trim() || e.statusReason.length > 500); })) return { status: 400, body: { error: 'أدخل سبب تغيير الحالة، بحد أقصى 500 حرف' } };
       if (auth.role !== 'employee') {
-        try { payload.employees = saveEmploymentHistory((currentValue as any).employees || [], payload.employees); }
+        try { payload.employees = preserveEmailVerification((currentValue as any).employees || [], saveEmploymentHistory((currentValue as any).employees || [], payload.employees)); }
         catch (error: any) { return { status: 400, body: { error: error.message } }; }
       }
       let valueToSave: any = { ...payload, _schedulePublication: (currentValue as any)._schedulePublication || { ...scheduleContent(currentValue), publishedAt: null, legacy: true } };
@@ -1027,8 +1029,10 @@ app.patch('/api/employee-profile/email', requireAuth(['employee']), async (req, 
       const rows = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1).for('update');
       const data: any = rows[0]?.value;
       if (!data?.employees?.some((e: any) => String(e.id) === String(auth.id))) return null;
-      if (data.employees.find((e: any) => String(e.id) === String(auth.id)).email === email) return true;
-      const value = { ...data, employees: data.employees.map((e: any) => String(e.id) === String(auth.id) ? { ...e, email } : e) };
+      const employee = data.employees.find((e: any) => String(e.id) === String(auth.id));
+      if (!isActiveEmployee(employee)) return null;
+      if (employee.email === email) return true;
+      const value = { ...data, employees: data.employees.map((e: any) => String(e.id) === String(auth.id) ? preserveEmailVerification([e], [{ ...e, email }])[0] : e) };
       await tx.update(schema.systemData).set({ value, updatedAt: new Date() }).where(eq(schema.systemData.key, key));
       await audit(tx, auth, auth.companyId, 'employee.email', auth.id, { name: data.employees.find((e: any) => String(e.id) === String(auth.id)).name, actorName: auth.name || 'الموظف', changes: { email: { before: data.employees.find((e: any) => String(e.id) === String(auth.id)).email || null, after: email } } });
       return true;
@@ -1036,6 +1040,96 @@ app.patch('/api/employee-profile/email', requireAuth(['employee']), async (req, 
     if (!result) return res.status(404).json({ error: 'حساب الموظف غير موجود' });
     return res.json({ email });
   } catch { return res.status(500).json({ error: 'تعذر حفظ البريد، حاول مرة أخرى' }); }
+});
+
+// OTP metadata is separate from main-data and never returned to clients.
+const emailVerificationAvailable = () => !!(process.env.RESEND_API_KEY && process.env.RESEND_FROM);
+app.get('/api/employee-profile/email-verification', requireAuth(['employee']), async (req, res) => {
+  const auth = (req as any).auth as AuthTokenPayload;
+  res.set('Cache-Control', 'private, no-store');
+  try {
+    const data = await getMainDataByCompanyId(auth.companyId);
+    const employee = data?.employees?.find((e: any) => String(e.id) === String(auth.id));
+    if (!employee) return res.status(404).json({ error: 'حساب الموظف غير موجود' });
+    const keys = [emailVerificationKey(auth.companyId, String(auth.id)), emailVerificationQuotaKey(auth.companyId)];
+    const rows = await db.select().from(schema.systemData).where(sql`${schema.systemData.key} IN (${keys[0]}, ${keys[1]})`);
+    return res.json(verificationStatus(employee, rows.find(r => r.key === keys[0])?.value, rows.find(r => r.key === keys[1])?.value, emailVerificationAvailable()));
+  } catch { return res.status(500).json({ error: 'تعذر تحميل حالة تأكيد البريد' }); }
+});
+app.post('/api/employee-profile/email-verification/send', requireAuth(['employee']), async (req, res) => {
+  const auth = (req as any).auth as AuthTokenPayload;
+  res.set('Cache-Control', 'private, no-store');
+  if (!emailVerificationAvailable()) return res.status(503).json({ error: 'خدمة تأكيد البريد غير مفعّلة؛ البريد محفوظ ويمكنك استخدام الجدول والبصمة' });
+  const key = emailVerificationKey(auth.companyId, String(auth.id)), quotaKey = emailVerificationQuotaKey(auth.companyId);
+  const nonce = crypto.randomUUID(), code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  let claim: any;
+  try {
+    claim = await db.transaction(async tx => {
+      // Company row serializes rate claims with email/profile changes; network calls run after commit.
+      const rows = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, getMainDataKey(auth.companyId))).limit(1).for('update');
+      const data: any = rows[0]?.value;
+      const employee = data?.employees?.find((e: any) => String(e.id) === String(auth.id));
+      if (!isActiveEmployee(employee)) return { status: 403, body: { error: 'حساب الموظف غير نشط' } };
+      if (!validEmployeeEmail(employee.email)) return { status: 400, body: { error: 'احفظ بريدًا إلكترونيًا صحيحًا أولًا' } };
+      if (employeeEmailVerified(employee)) return { status: 200, body: { ...verificationStatus(employee, null, null, true), message: 'بريدك مؤكد بالفعل' } };
+      const previousRows = await tx.select().from(schema.systemData).where(sql`${schema.systemData.key} IN (${key}, ${quotaKey})`);
+      const previous: any = previousRows.find(r => r.key === key)?.value, quota: any = previousRows.find(r => r.key === quotaKey)?.value;
+      const retryAfter = verificationRateLimit(previous, quota, Date.now());
+      if (retryAfter) return { status: 429, body: { ...verificationStatus(employee, previous, quota, true), error: 'انتظر قبل طلب رمز جديد', retryAfter } };
+      const now = Date.now();
+      const state = newVerificationState(previous, quota, employee.email, verificationCodeHash(JWT_SECRET, auth.companyId, String(auth.id), employee.email, nonce, code), nonce, now);
+      for (const [entryKey, value] of [[key, state.challenge], [quotaKey, state.quota]] as const) await tx.insert(schema.systemData).values({ key: entryKey, value }).onConflictDoUpdate({ target: schema.systemData.key, set: { value, updatedAt: new Date() } });
+      return { employee, company: data.settings?.companyName || 'الشركة', challenge: state.challenge, quota: state.quota };
+    });
+    if (claim.status) { if (claim.status === 429) res.set('Retry-After', String(claim.body.retryAfter)); return res.status(claim.status).json(claim.body); }
+    let providerId: string | undefined, delivery = 'sent';
+    try { providerId = await deliverWelcome(verificationPayload(claim.employee, claim.company, code), 'employee-email-verification-' + nonce); }
+    catch { delivery = 'failed'; }
+    const result = await db.transaction(async tx => {
+      const rows = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, getMainDataKey(auth.companyId))).limit(1).for('update');
+      const employee = (rows[0]?.value as any)?.employees?.find((e: any) => String(e.id) === String(auth.id));
+      const challenges = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
+      const current: any = challenges[0]?.value;
+      if (!isActiveEmployee(employee) || normalizedEmail(employee.email) !== claim.challenge.email || current?.nonce !== nonce) return null;
+      if (!current.consumedAt) await tx.update(schema.systemData).set({ value: { ...current, delivery, ...(providerId ? { providerId } : {}) }, updatedAt: new Date() }).where(eq(schema.systemData.key, key));
+      if (delivery === 'sent') await audit(tx, auth, auth.companyId, 'employee.email.verification.send', auth.id, { actorName: employee.name, email: employee.email });
+      return verificationStatus(employee, current, claim.quota, true);
+    });
+    if (!result) return res.status(409).json({ error: 'تغير البريد أو الحساب أثناء الإرسال؛ حدّث بياناتك ثم حاول مجددًا' });
+    return res.status(delivery === 'sent' ? 200 : 503).json({ ...result, ...(delivery === 'sent' ? { message: 'قُبلت رسالة الرمز بواسطة خدمة البريد. راجع البريد والرسائل غير المرغوب فيها' } : { error: 'تعذر تأكيد إرسال الرمز. إذا وصل يمكنك استخدامه، أو انتظر ثم أعد الإرسال' }) });
+  } catch { return res.status(500).json({ error: 'تعذر طلب رمز التأكيد، حاول لاحقًا' }); }
+});
+app.post('/api/employee-profile/email-verification/confirm', requireAuth(['employee']), async (req, res) => {
+  const auth = (req as any).auth as AuthTokenPayload;
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  res.set('Cache-Control', 'private, no-store');
+  if (!/^\d{6}$/.test(code)) return res.status(400).json({ error: 'أدخل رمزًا من 6 أرقام' });
+  try {
+    const outcome = await db.transaction(async tx => {
+      const key = getMainDataKey(auth.companyId), challengeKey = emailVerificationKey(auth.companyId, String(auth.id));
+      const rows = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1).for('update');
+      const data: any = rows[0]?.value;
+      const employee = data?.employees?.find((e: any) => String(e.id) === String(auth.id));
+      if (!isActiveEmployee(employee)) return { status: 403, body: { error: 'حساب الموظف غير نشط' } };
+      const challenges = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, challengeKey)).limit(1);
+      const challenge: any = challenges[0]?.value;
+      if (!challenge || challenge.consumedAt || challenge.email !== normalizedEmail(employee.email) || challenge.expiresAt <= Date.now()) return { status: 409, body: { error: 'الرمز منتهي أو البريد تغير؛ اطلب رمزًا جديدًا' } };
+      if (challenge.attempts >= verificationAttempts) return { status: 429, body: { error: 'انتهت المحاولات المسموحة؛ اطلب رمزًا جديدًا بعد مهلة الإرسال', attemptsRemaining: 0 } };
+      const expected = verificationCodeHash(JWT_SECRET, auth.companyId, String(auth.id), employee.email, challenge.nonce, code);
+      if (!matchesVerificationCode(challenge.codeHash, expected)) {
+        await tx.update(schema.systemData).set({ value: { ...challenge, attempts: challenge.attempts + 1 }, updatedAt: new Date() }).where(eq(schema.systemData.key, challengeKey));
+        return { status: 400, body: { error: 'الرمز غير صحيح', attemptsRemaining: verificationAttempts - challenge.attempts - 1 } };
+      }
+      const verifiedAt = new Date().toISOString();
+      const value = { ...data, employees: data.employees.map((e: any) => String(e.id) === String(auth.id) ? { ...e, emailVerifiedAt: verifiedAt, emailVerifiedAddress: normalizedEmail(employee.email) } : e) };
+      await tx.update(schema.systemData).set({ value, updatedAt: new Date() }).where(eq(schema.systemData.key, key));
+      const { codeHash: ignoredHash, ...consumed } = challenge;
+      await tx.update(schema.systemData).set({ value: { ...consumed, consumedAt: Date.now() }, updatedAt: new Date() }).where(eq(schema.systemData.key, challengeKey));
+      await audit(tx, auth, auth.companyId, 'employee.email.verify', auth.id, { actorName: employee.name, email: employee.email, verifiedAt });
+      return { status: 200, body: { ...verificationStatus({ ...employee, emailVerifiedAt: verifiedAt, emailVerifiedAddress: normalizedEmail(employee.email) }, { ...consumed, consumedAt: Date.now() }, null, emailVerificationAvailable()), message: 'تم تأكيد البريد الإلكتروني' } };
+    });
+    return res.status(outcome.status).json(outcome.body);
+  } catch { return res.status(500).json({ error: 'تعذر تأكيد البريد، حاول مرة أخرى' }); }
 });
 
 // Only stored employee addresses can receive welcome mail; durable claim prevents concurrent sends.
