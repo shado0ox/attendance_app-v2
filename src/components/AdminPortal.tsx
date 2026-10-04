@@ -1,5 +1,5 @@
 import { effectiveScheduleData } from '../lib/schedulePublication';
-import { employeeStatus, isActiveEmployee, type EmployeeStatus } from '../lib/employeeLifecycle';
+import { employeeStatus, isActiveEmployee, employmentToday, type EmployeeStatus } from '../lib/employeeLifecycle';
 import DepartmentBadge from './DepartmentBadge';
 import { coverageAlerts } from '../lib/schedulePlanning';
 import { attendanceToday } from '../lib/attendanceQuery';
@@ -436,7 +436,7 @@ export default function AdminPortal({
   };
 
   const getShiftGaps = () => coverageAlerts(
-    departments, employees.filter(isActiveEmployee), publishedData.shiftTypes, publishedData.schedule,
+    departments, employees, publishedData.shiftTypes, publishedData.schedule,
     getDaysInSelectedMonth().map(d => d.dateStr)
   ).filter(a => !(appSettings.deletedAlerts || []).includes(a.id));
 
@@ -557,9 +557,12 @@ export default function AdminPortal({
       color: emColor
     };
 
+    const oldEmployee = employees.find(e => e.id === editingEmpId);
+    const effectiveDate = oldEmployee && oldEmployee.dept !== newEmp.dept ? askEmploymentDate() : undefined;
+    if (effectiveDate === null) return;
     let updatedEmployees = [...employees];
     if (editingEmpId) {
-      updatedEmployees = updatedEmployees.map((e) => (e.id === editingEmpId ? { ...e, ...newEmp } : e));
+      updatedEmployees = updatedEmployees.map((e) => (e.id === editingEmpId ? { ...e, ...newEmp, ...(effectiveDate ? { _employmentEffectiveDate: effectiveDate } : {}) } : e));
     } else {
       updatedEmployees.push(newEmp);
     }
@@ -571,14 +574,22 @@ export default function AdminPortal({
     if (shouldWelcome) await sendWelcome(newEmp.id);
   };
 
+  const askEmploymentDate = () => {
+    const date = window.prompt('تاريخ سريان التغيير (YYYY-MM-DD، حتى اليوم). لن تتغير البصمات المسجلة أو التقارير المعتمدة:', employmentToday());
+    if (date === null) return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > employmentToday()) { alert('أدخل تاريخًا صحيحًا حتى اليوم'); return null; }
+    return date;
+  };
   const handleEmployeeStatus = (id: string, status: EmployeeStatus) => {
     const employee = employees.find(e => e.id === id);
     if (!employee || employeeStatus(employee) === status) return;
     const action = status === 'archived' ? 'أرشفة' : status === 'suspended' ? 'إيقاف' : 'تفعيل / استعادة';
     const reason = window.prompt(`سبب ${action} ${employee.name} (مطلوب):`);
     if (!reason?.trim()) return;
+    const effectiveDate = askEmploymentDate();
+    if (!effectiveDate) return;
     requestConfirm(`${action} ${employee.name}؟ ستظل سجلات الحضور والجدول محفوظة.${status !== 'active' ? ' سيتم منع الدخول والبصمة من الحساب.' : ''}`, () => {
-      void onUpdateAppData({ ...appData, employees: employees.map(e => e.id === id ? { ...e, status, statusReason: reason.trim(), statusChangedAt: new Date().toISOString() } : e) });
+      void onUpdateAppData({ ...appData, employees: employees.map(e => e.id === id ? { ...e, status, _employmentEffectiveDate: effectiveDate, statusReason: reason.trim(), statusChangedAt: new Date().toISOString() } : e) });
     });
   };
   const handleDeleteEmployee = (id: string) => handleEmployeeStatus(id, 'archived');
@@ -1187,7 +1198,9 @@ export default function AdminPortal({
               welcomeBusy={welcomeBusy}
               onAssignDepartment={async (ids, department) => {
                 if (!departments.some(d => d.id === department)) return false;
-                return onUpdateAppData({ ...appData, employees: employees.map(e => ids.includes(e.id) ? { ...e, dept: department } : e) });
+                const effectiveDate = askEmploymentDate();
+                if (!effectiveDate) return false;
+                return onUpdateAppData({ ...appData, employees: employees.map(e => ids.includes(e.id) ? { ...e, dept: department, _employmentEffectiveDate: effectiveDate } : e) });
               }}
             />
           )}

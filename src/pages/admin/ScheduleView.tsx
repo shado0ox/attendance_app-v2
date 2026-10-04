@@ -1,5 +1,5 @@
 import SchedulePublication from '../../components/SchedulePublication';
-import { isActiveEmployee, employeeStatus, statusLabels } from '../../lib/employeeLifecycle';
+import { employeeAtDate, isActiveEmployee, employeeStatus, statusLabels } from '../../lib/employeeLifecycle';
 import { useState } from 'react';
 import { printSchedule } from '../../lib/schedulePrint';
 import SchedulePlanner from './SchedulePlanner';
@@ -52,7 +52,8 @@ export default function ScheduleView({
   const [exportError, setExportError] = useState('');
   const [plannerOpen, setPlannerOpen] = useState(false);
   const department = departments.find(d => d.id === selectedDept);
-  const deptEmployees = employees.filter((e) => e.dept === selectedDept);
+  const monthDates = getDaysInSelectedMonth().map(day => day.dateStr);
+  const deptEmployees = employees.filter(e => monthDates.some(date => employeeAtDate(e, date).dept === selectedDept));
 
   return (
     <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-5">
@@ -171,6 +172,7 @@ export default function ScheduleView({
                     {DAYS_AR[date.getDay()]}
                   </td>
                   {deptEmployees.map((emp) => {
+                    if (employeeAtDate(emp, dateStr).dept !== selectedDept) return <td key={emp.id} className="p-2 text-center text-slate-400 text-[10px] border-r border-sky-100">خارج القسم</td>;
                     const entry = schedule[dateStr]?.[emp.id];
                     const stType = entry?.shiftType || 'A';
 

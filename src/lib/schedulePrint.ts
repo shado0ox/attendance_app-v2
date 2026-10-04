@@ -1,3 +1,4 @@
+import { employeeAtDate, isActiveEmployee } from './employeeLifecycle';
 import { coverage, planningDates, requirements, shiftPeriods } from './schedulePlanning';
 
 const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
@@ -38,10 +39,12 @@ export function schedulePrintHtml(o: SchedulePrintOptions) {
   const row = (values: unknown[]) => `<tr>${values.map(v => `<td>${escape(v)}</td>`).join('')}</tr>`;
   const add = (dept: any, subtitle: string, body: string) => pages.push(`<section class="page"><header>${logo}<div><h1>${escape(o.companyName || 'الشركة')}</h1><h2>جدول الدوام والشيفتات - ${escape(dept.name)}</h2>${o.publicationLabel ? `<p><strong>${escape(o.publicationLabel)}</strong></p>` : ''}<p>الشهر: <b dir="ltr">${escape(o.month)}</b> · ${escape(subtitle)}</p></div></header>${body}<div class="section-footer">${escape(dept.name)} · ${escape(o.month)} · جزء التقرير ${pages.length + 1}</div></section>`);
   for (const dept of o.departments) {
-    const staff = o.employees.filter(e => e.dept === dept.id);
+    const belongs = (e: any, date: string) => employeeAtDate(e, date).dept === dept.id;
+    const staff = o.employees.filter(e => dates.some(date => belongs(e, date)));
     const summaries = staff.map(e => {
       const totals = { work: 0, morning: 0, evening: 0, rest: 0, missing: 0, unknown: 0, invalid: 0, minutes: 0 };
       for (const date of dates) {
+        if (!belongs(e, date) || !isActiveEmployee(employeeAtDate(e, date))) continue;
         const entry = o.schedule[date]?.[e.id], id = entry?.shiftType;
         if (!id) { totals.missing++; continue; }
         if (['A', 'OFF'].includes(id)) { totals.rest++; continue; }
@@ -60,7 +63,7 @@ export function schedulePrintHtml(o: SchedulePrintOptions) {
     for (const group of chunk(summaries.length ? summaries : [{ e: null, totals: null }], 12)) {
       add(dept, 'ملخص توزيع الموظفين للمراجعة', `<div class="cards"><span>الموظفون: ${staff.length}</span><span>ساعات مخططة معلومة: <b dir="ltr">${hoursLabel(totalMinutes)}</b></span><span>خانات غير مجدولة: ${missing}</span><span>تعيينات تحتاج مراجعة: ${unknown}</span></div><p class="notice">نسخة للمراجعة وليست اعتماداً للجدول. الساعات مخططة حسب مواعيد الشيفتات، وليست ساعات حضور فعلية. الشيفت المزدوج يُحسب يوماً واحداً للعمل وفترة في كل من الصباح والمساء. المواعيد الناقصة والتعيينات غير المعروفة لا تدخل في إجمالي الساعات.</p>${table(['الموظف','أيام العمل','صباحي','مسائي','راحة / إجازة','غير مجدول','تحتاج مراجعة','ساعات مخططة'], group.map(({e,totals:t}) => e ? row([e.name,t.work,t.morning,t.evening,t.rest,t.missing,t.unknown+t.invalid,hoursLabel(t.minutes)]) : row(['لا يوجد موظفون بالقسم','','','','','','',''])).join(''))}<div class="signatures"><span>إعداد: ................................</span><span>مراجعة: ................................</span><span>اعتماد الإدارة: ................................</span></div>`);
     }
-    const used = o.shiftTypes.filter(s => !['A', 'OFF'].includes(s.id) && dates.some(d => staff.some(e => o.schedule[d]?.[e.id]?.shiftType === s.id)));
+    const used = o.shiftTypes.filter(s => !['A', 'OFF'].includes(s.id) && dates.some(d => staff.some(e => belongs(e, d) && o.schedule[d]?.[e.id]?.shiftType === s.id)));
     for (const group of chunk(used.length ? used : [null], 10)) {
       add(dept, 'دليل الشيفتات ومواعيد العمل', table(['الرمز','الشيفت','التصنيف','مواعيد الفترات','مدة العمل'],group.map(s => {
         if (!s) return row(['—','لا توجد شيفتات عمل معينة','','','']);
@@ -70,6 +73,7 @@ export function schedulePrintHtml(o: SchedulePrintOptions) {
     }
     for (const employees of chunk(staff, 6)) for (const days of chunk(dates, 4)) {
       const rows = days.map(date => `<tr class="${new Date(date+'T12:00:00Z').getUTCDay()===5?'friday':''}"><td><b dir="ltr">${date}</b><br>${escape(weekday(date))}</td>${employees.map(e=> {
+        if (!belongs(e, date)) return `<td>خارج القسم في هذا التاريخ</td>`;
         const entry=o.schedule[date]?.[e.id], id=entry?.shiftType;
         const shift=byId.get(id);
         const rest=['A','OFF'].includes(id);
@@ -80,8 +84,9 @@ export function schedulePrintHtml(o: SchedulePrintOptions) {
       add(dept, `التوزيع اليومي · ${days[0]} إلى ${days[days.length-1]}`, `<p class="notice">الجدول مقسم حسب الأيام والموظفين للحفاظ على وضوح القراءة. تفاصيل الملاحظات في الملحق.</p>${table(['التاريخ / اليوم',...employees.map(e=>e.name)],rows,'class="matrix"')}<p class="legend">صباحي: أخضر · مسائي: أزرق · مزدوج: كهرماني · راحة / إجازة: رمادي · الخانات غير المجدولة تحتاج تعييناً.</p>`);
     }
     const coverRows = dates.map(date=> {
-      const counts=coverage(staff,o.shiftTypes,o.schedule,date),need=requirements(dept,date);
-      const any=staff.filter(e=>shiftPeriods(byId.get(o.schedule[date]?.[e.id]?.shiftType)).length).length;
+      const dayStaff=staff.filter(e=>belongs(e,date) && isActiveEmployee(employeeAtDate(e,date)));
+      const counts=coverage(dayStaff,o.shiftTypes,o.schedule,date),need=requirements(dept,date);
+      const any=dayStaff.filter(e=>shiftPeriods(byId.get(o.schedule[date]?.[e.id]?.shiftType)).length).length;
       const gaps: string[]=[];
       if(counts.morning<need.morning) gaps.push('نقص صباحي');
       if(counts.evening<need.evening) gaps.push('نقص مسائي');
@@ -92,7 +97,7 @@ export function schedulePrintHtml(o: SchedulePrintOptions) {
     const notes: {date:string;name:string;shift:string;note:string}[]=[];
     for(const date of dates) for(const e of staff) {
       const entry=o.schedule[date]?.[e.id];
-      if(entry?.note) notes.push({date,name:e.name,shift:byId.get(entry.shiftType)?.name || (['A','OFF'].includes(entry.shiftType)?'راحة / إجازة':entry.shiftType || 'غير مجدول'),note:entry.note});
+      if(belongs(e,date) && entry?.note) notes.push({date,name:e.name,shift:byId.get(entry.shiftType)?.name || (['A','OFF'].includes(entry.shiftType)?'راحة / إجازة':entry.shiftType || 'غير مجدول'),note:entry.note});
     }
     if(notes.length) add(dept,'ملحق الملاحظات التفصيلي',table(['التاريخ','اليوم','الموظف','التعيين','الملاحظة كاملة'],notes.map(n=>row([n.date,weekday(n.date),n.name,n.shift,n.note])).join(''),'class="notes"').replace('<thead>', `<thead><tr><th colspan="5">${escape(o.companyName)} - ${escape(dept.name)} - ${escape(o.month)} - متابعة الملاحظات</th></tr>`)+'<p>نهاية ملاحظات القسم.</p>');
   }
