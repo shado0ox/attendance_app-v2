@@ -10,9 +10,9 @@ const punchLabel = (punch: { time: number } | undefined, date: string) => {
   return `${formatPunch(punch)}${actualDate !== date ? ` (${actualDate})` : ''}`;
 };
 const dayName = (date: string) => new Date(date + 'T12:00:00Z').toLocaleDateString('ar-SA', { weekday: 'long', timeZone: 'Asia/Riyadh' });
-export default function AttendanceExceptionsView({ canExport = true, companyId, employees, departments, onOpenDay }: { canExport?: boolean; companyId: string; employees: any[]; departments: any[]; onOpenDay: (empId: string, date: string) => void }) {
+export default function AttendanceExceptionsView({ initialSelection, canExport = true, companyId, employees, departments, onOpenDay }: { initialSelection?: { date: string; dept: string; empId?: string }; canExport?: boolean; companyId: string; employees: any[]; departments: any[]; onOpenDay: (empId: string, date: string) => void }) {
   const today = attendanceToday();
-  const [draft, setDraft] = useState({ from: today.slice(0, 7) + '-01', to: today, empId: '', dept: '', type: '' });
+  const [draft, setDraft] = useState({ from: initialSelection?.date || today.slice(0, 7) + '-01', to: initialSelection?.date || today, empId: initialSelection?.empId || '', dept: initialSelection?.dept || '', type: '' });
   const [applied, setApplied] = useState(draft);
   const [page, setPage] = useState(1);
   const [refresh, setRefresh] = useState(0);

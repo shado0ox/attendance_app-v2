@@ -1,3 +1,5 @@
+import { parseNotificationQuery, notificationPage, updateNotificationRead } from './src/lib/adminNotifications';
+import { buildAdminNotifications, notificationPermissions, notificationStateKey } from './src/server/adminNotifications';
 import { fullAdminAccess, parseAdminAccess, scopedMainData, mergeAdminData, ownsEmployee, ownsDay, allowedAdminRoute, type AdminAccess } from './src/lib/adminAccess';
 import { normalizedEmail, employeeEmailVerified, preserveEmailVerification } from './src/lib/emailVerification';
 import { emailVerificationKey, emailVerificationQuotaKey, verificationStatus, verificationRateLimit, newVerificationState, verificationCodeHash, matchesVerificationCode, verificationAttempts, verificationPayload } from './src/server/emailVerification';
@@ -24,7 +26,7 @@ import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
 import { db, schema, pool, initializeSchemaAndTables, getDbSchemaName } from './src/db/index.ts';
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { eq, desc, and, sql, inArray } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -1350,6 +1352,48 @@ app.get('/api/attendance-report', requireAuth(['admin', 'superadmin']), async (r
   } catch (error) { console.error('Attendance report query failed', error); return res.status(500).json({ error: 'تعذر تحميل كشف الحضور' }); }
 });
 
+// Derived notification center; read flags are per account and never update company settings.
+async function collectNotifications(req: Request) {
+  let query: ReturnType<typeof parseNotificationQuery>;
+  try { query = parseNotificationQuery(req.query); } catch (error: any) { throw attendanceError(400, error.message); }
+  const companyId = String(req.query.companyId || 'default'), access = requestAccess(req);
+  const data = await getMainDataByCompanyId(companyId);
+  if (!data) throw attendanceError(404, 'بيانات الشركة غير موجودة');
+  if (query.dept && (!data.departments?.some((d: any) => d.id === query.dept) || (access.departmentIds !== null && !access.departmentIds.includes(query.dept)))) throw attendanceError(403, 'القسم خارج نطاق حسابك');
+  const permissions = notificationPermissions(access);
+  if (!Object.values(permissions).some(Boolean) || (query.category && !permissions[query.category])) throw attendanceError(403, 'ليس لديك صلاحية لهذه التنبيهات');
+  const employeeIds = access.departmentIds === null ? null : (data.employees || []).filter((e: any) => access.departmentIds!.includes(e.dept)).map((e: any) => String(e.id));
+  const [records, requests] = await Promise.all([
+    permissions.attendance ? db.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, companyId), employeeIds === null ? undefined : inArray(schema.attendance.empId, employeeIds), sql`${schema.attendance.date} >= ${query.from}`, sql`${schema.attendance.date} <= ${query.to}`)).orderBy(desc(schema.attendance.id)) : Promise.resolve([]),
+    db.select().from(schema.requests).where(and(eq(schema.requests.companyId, companyId), employeeIds === null ? undefined : inArray(schema.requests.empId, employeeIds), sql`${schema.requests.date} >= ${query.from}`, sql`${schema.requests.date} <= ${query.to}`, sql`(${schema.requests.status} = 'pending' OR (${schema.requests.status} = 'approved' AND ${schema.requests.type} = 'leave'))`)).orderBy(desc(schema.requests.id)),
+  ]);
+  return { query, companyId, permissions, items: buildAdminNotifications(companyId, data, records, requests, access, query) };
+}
+app.get('/api/notifications', requireAuth(['admin', 'superadmin']), async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  try {
+    const result = await collectNotifications(req), key = notificationStateKey(result.companyId, (req as any).auth);
+    const state = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
+    return res.json({ ...notificationPage(result.items, state[0]?.value, result.query), from: result.query.from, to: result.query.to, permissions: result.permissions, generatedAt: new Date().toISOString() });
+  } catch (error: any) { return res.status(error.status || 500).json({ error: error.status ? error.message : 'تعذر تحميل التنبيهات' }); }
+});
+app.post('/api/notifications/read', requireAuth(['admin', 'superadmin']), async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  try {
+    const result = await collectNotifications(req), key = notificationStateKey(result.companyId, (req as any).auth);
+    const allowed = new Set(result.items.map(item => item.id));
+    // Validate before any insert; fabricated or resolved IDs cannot create metadata.
+    try { updateNotificationRead({}, req.body?.ids, req.body?.read, allowed); } catch (error: any) { return res.status(400).json({ error: error.message }); }
+    await db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key}))`);
+      const rows = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
+      const value = updateNotificationRead(rows[0]?.value, req.body.ids, req.body.read, allowed);
+      await tx.insert(schema.systemData).values({ key, value }).onConflictDoUpdate({ target: schema.systemData.key, set: { value, updatedAt: new Date() } });
+    });
+    return res.json({ success: true });
+  } catch (error: any) { return res.status(error.status || 500).json({ error: error.status ? error.message : 'تعذر حفظ حالة التنبيه' }); }
+});
+
 // Read-only review queue: use published shifts and preserve historical punch departments.
 app.get('/api/attendance-exceptions', requireAuth(['admin', 'superadmin']), async (req, res) => {
   let query: ReturnType<typeof parseExceptionQuery>;
@@ -1772,6 +1816,7 @@ app.delete('/api/admins/:id', requireAuth(['admin', 'superadmin'], false), requi
     await db.transaction(async tx => {
       await tx.delete(schema.admins).where(eq(schema.admins.id, id));
       await tx.delete(schema.systemData).where(eq(schema.systemData.key, adminAccessKey((req as any).ownedRow.companyId || 'default', id)));
+      await tx.delete(schema.systemData).where(eq(schema.systemData.key, notificationStateKey((req as any).ownedRow.companyId || 'default', { role: 'admin', id })));
       await audit(tx, (req as any).auth, (req as any).ownedRow.companyId || 'default', 'admin.delete', id, { name: (req as any).ownedRow.name });
     });
     return res.json({ success: true });

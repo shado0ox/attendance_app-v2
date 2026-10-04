@@ -11,7 +11,7 @@ interface DashboardViewProps {
   setSelectedDept: (id: string) => void;
   hasPermission: (perm: string) => boolean;
   getShiftGaps: () => any[];
-  toggleAlertRead: (id: string) => void;
+  onOpenNotifications: () => void;
   onEditCell: (empId: string, dateStr: string, shiftType: string, note: string) => void;
   DAYS_AR: string[];
 }
@@ -59,12 +59,12 @@ export default function DashboardView({
   setSelectedDept,
   hasPermission,
   getShiftGaps,
-  toggleAlertRead,
+  onOpenNotifications,
   onEditCell,
   DAYS_AR,
 }: DashboardViewProps) {
   const gaps = getShiftGaps();
-  const unreadGaps = gaps.filter((g) => !(appSettings.readAlerts || []).includes(g.id));
+  const unreadGaps = gaps;
 
   const current = new Date();
   const dayOfWeek = current.getDay(); // 0 Sun ... 6 Sat
@@ -229,7 +229,7 @@ export default function DashboardView({
             {unreadGaps.length === 0 ? (
               <div className="p-10 text-center text-xs text-slate-400 font-medium border border-dashed border-slate-200 rounded-xl bg-slate-50/50 flex flex-col items-center gap-2">
                 <span className="text-2xl animate-bounce">🎉</span>
-                <span>ممتاز! جميع الأقسام مغطاة بالكامل ولا توجد تنبيهات غير مقروءة حالياً.</span>
+                <span>لا توجد فجوات تغطية في جدول الشهر المعروض. راجع مركز التنبيهات لمتابعة الحالات والإجازات المعتمدة.</span>
               </div>
             ) : (
               unreadGaps.slice(0, 5).map((g) => (
@@ -243,11 +243,11 @@ export default function DashboardView({
                     <span className="text-[10px] text-rose-800 font-bold">{g.msg}</span>
                   </div>
                   <button
-                    onClick={() => toggleAlertRead(g.id)}
+                    onClick={onOpenNotifications}
                     className="p-1 hover:bg-rose-100 rounded-lg text-rose-600 transition-all flex-shrink-0"
-                    title="تحديد كمقروء وحذف من القائمة الفعّالة"
+                    title="فتح مركز التنبيهات للمراجعة"
                   >
-                    <Check size={14} className="stroke-[3]" />
+                    <span className="text-[10px]">مراجعة</span>
                   </button>
                 </div>
               ))
