@@ -1,3 +1,4 @@
+import { employeeStatus, isActiveEmployee, employeeChanges } from './src/lib/employeeLifecycle';
 import { validEmployeeEmail } from './src/lib/employeeDirectory';
 import { welcomePayload, deliverWelcome } from './src/server/welcomeEmail';
 import { autoFix } from './src/lib/autoPunch';
@@ -113,7 +114,7 @@ const signToken = (payload: AuthTokenPayload) => jwt.sign(payload, JWT_SECRET, {
 // Requires a valid bearer token with one of `roles`. When `matchCompany` is true (default),
 // the token's companyId must match the request's companyId (superadmin is always exempt).
 function requireAuth(roles: AuthTokenPayload['role'][], matchCompany: boolean = true) {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     const header = req.headers.authorization;
     if (!header?.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'يلزم تسجيل الدخول للوصول لهذا المورد' });
@@ -131,6 +132,13 @@ function requireAuth(roles: AuthTokenPayload['role'][], matchCompany: boolean = 
     const requestedCompanyId = (req.query.companyId as string) || (req.body && req.body.companyId) || 'default';
     if (matchCompany && payload.role !== 'superadmin' && payload.companyId !== requestedCompanyId) {
       return res.status(403).json({ error: 'لا يمكن الوصول لبيانات شركة أخرى' });
+    }
+    if (payload.role === 'employee') {
+      try {
+        const result = await db.execute(sql`SELECT employee->>'status' AS status FROM ${schema.systemData}, jsonb_array_elements(${schema.systemData.value}->'employees') AS employee WHERE ${schema.systemData.key} = ${getMainDataKey(payload.companyId)} AND employee->>'id' = ${String(payload.id)} LIMIT 1`);
+        const employee = result.rows[0];
+        if (!isActiveEmployee(employee)) return res.status(403).json({ error: 'حساب الموظف غير نشط. تواصل مع الإدارة.', code: 'EMPLOYEE_INACTIVE' });
+      } catch { return res.status(503).json({ error: 'تعذر التحقق من حالة الحساب' }); }
     }
     (req as any).auth = payload;
     next();
@@ -213,22 +221,18 @@ async function getMainDataByCompanyId(companyId: string) {
   return rows[0]?.value as any;
 }
 
-async function saveMainDataByCompanyId(companyId: string, value: any) {
-  const key = getMainDataKey(companyId);
-  const rows = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
-
-  if (!rows.length) {
-    await db.insert(schema.systemData).values({
-      key,
-      value,
-      updatedAt: new Date(),
-    });
-    return;
-  }
-
-  await db.update(schema.systemData)
-    .set({ value, updatedAt: new Date() })
-    .where(eq(schema.systemData.key, key));
+async function saveEmployeeCredentials(companyId: string, empId: string, credentials: StoredWebAuthnCredential[]) {
+  await db.transaction(async tx => {
+    const key = getMainDataKey(companyId);
+    const rows = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1).for('update');
+    const value: any = rows[0]?.value;
+    const employee = value?.employees?.find((e: any) => String(e.id) === String(empId));
+    if (!isActiveEmployee(employee)) throw new Error('حساب الموظف غير نشط');
+    const merged = new Map<string, StoredWebAuthnCredential>((employee.webauthnCredentials || []).map((c: StoredWebAuthnCredential) => [c.id, c]));
+    for (const credential of credentials) merged.set(credential.id, { ...credential, counter: Math.max(credential.counter, merged.get(credential.id)?.counter || 0) });
+    const employees = value.employees.map((e: any) => String(e.id) === String(empId) ? { ...e, webauthnCredentials: [...merged.values()] } : e);
+    await tx.update(schema.systemData).set({ value: { ...value, employees }, updatedAt: new Date() }).where(eq(schema.systemData.key, key));
+  });
 }
 
 function getChallengeMapKey(companyId: string, empId: string | number, type: 'registration' | 'authentication') {
@@ -441,7 +445,7 @@ app.post('/api/auth/admin-login', async (req, res) => {
       const ok = verifyPassword(password, storedPassword, (hash) => {
         db.update(schema.systemData)
           .set({ value: { ...mainDataValue, settings: { ...settings, password: hash } }, updatedAt: new Date() })
-          .where(eq(schema.systemData.key, key))
+          .where(and(eq(schema.systemData.key, key), eq(schema.systemData.value, mainDataValue)))
           .catch((e) => console.error('Failed to upgrade superadmin password hash:', e));
       });
       if (ok) {
@@ -532,6 +536,7 @@ app.post('/api/auth/employee-login', async (req, res) => {
       return res.status(401).json({ error: 'هذا الموظف غير مسجل في قائمة الموظفين النشطة' });
     }
 
+    if (!isActiveEmployee(matchedEmp)) return res.status(403).json({ error: 'حساب الموظف غير نشط. تواصل مع الإدارة.' });
     const targetPassword = matchedEmp.password || '123456';
     // Employee PIN codes are intentionally kept as plain values (admins can view/share
     // them from the dashboard), so we compare directly rather than via bcrypt.
@@ -661,10 +666,7 @@ app.post('/api/auth/webauthn-register-verify', requireAuth(['employee', 'admin',
       webauthnCredentials: [...withoutSameId, newCredential],
     };
 
-    await saveMainDataByCompanyId(companyId, {
-      ...mainData,
-      employees,
-    });
+    await saveEmployeeCredentials(companyId, String(empId), employees[employeeIndex].webauthnCredentials);
 
     return res.json({ verified: true, message: 'تم تسجيل البصمة بنجاح' });
   } catch (error: any) {
@@ -690,6 +692,7 @@ app.post('/api/auth/webauthn-challenge', async (req, res) => {
       return res.status(404).json({ error: 'الموظف غير موجود' });
     }
 
+    if (!isActiveEmployee(employee)) return res.status(403).json({ error: 'حساب الموظف غير نشط. تواصل مع الإدارة.' });
     const creds: StoredWebAuthnCredential[] = employee.webauthnCredentials || [];
     if (!creds.length) {
       return res.status(404).json({ error: 'لم يتم تسجيل بصمة بيومترية لهذا الموظف بعد' });
@@ -748,6 +751,7 @@ app.post('/api/auth/webauthn-verify', async (req, res) => {
       return res.status(404).json({ error: 'الموظف غير موجود' });
     }
 
+    if (!isActiveEmployee(employee)) return res.status(403).json({ error: 'حساب الموظف غير نشط. تواصل مع الإدارة.' });
     const creds: StoredWebAuthnCredential[] = employee.webauthnCredentials || [];
     const storedCred = creds.find((c) => c.id === credentialId);
 
@@ -786,18 +790,7 @@ app.post('/api/auth/webauthn-verify', async (req, res) => {
 
     storedCred.counter = verification.authenticationInfo.newCounter;
 
-    const updatedEmployees = employees.map((e: any) => {
-      if (String(e.id) !== String(empId)) return e;
-      return {
-        ...e,
-        webauthnCredentials: creds,
-      };
-    });
-
-    await saveMainDataByCompanyId(companyId, {
-      ...mainData,
-      employees: updatedEmployees,
-    });
+    await saveEmployeeCredentials(companyId, String(empId), creds);
 
     const { password: _pw, ...safeEmp } = employee;
     const token = signToken({
@@ -879,6 +872,7 @@ app.get('/api/main-data', async (req, res) => {
   try {
     const result = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
     
+    if (auth?.role === 'employee' && !isActiveEmployee((result[0]?.value as any)?.employees?.find((e: any) => String(e.id) === String(auth.id)))) return res.status(403).json({ error: 'حساب الموظف غير نشط. تواصل مع الإدارة.', code: 'EMPLOYEE_INACTIVE' });
     if (result.length === 0) {
       if (!auth) return res.json(visibleMainData(defaultMainData));
       // Seed initial data directly into PostgreSQL database
@@ -922,42 +916,50 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
     return res.status(400).json({ error: 'بيانات الحفظ ناقصة أو غير صحيحة. لم يتم تعديل البيانات المسجلة.' });
   }
 
+  if (auth.role !== 'employee' && payload.employees.some((e: any) => e.status !== undefined && !['active', 'suspended', 'archived'].includes(e.status))) return res.status(400).json({ error: 'حالة الموظف غير صحيحة' });
   try {
-    const result = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
+    const outcome = await db.transaction(async tx => {
+      const result = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
 
-    if (result.length === 0) {
-      if (auth.role === 'employee') return res.status(404).json({ error: 'بيانات الشركة غير موجودة' });
-      const initialValue = payload;
-      const inserted = await db.insert(schema.systemData).values({
-        key,
-        value: initialValue,
-      }).onConflictDoNothing().returning();
-      if (!inserted.length) return res.status(409).json({ error: 'تم إنشاء بيانات الشركة من جلسة أخرى. أعد تحميل البيانات قبل الحفظ.', code: 'DATA_CONFLICT' });
-      return res.json({ ...sanitizeMainData(inserted[0].value, true), _version: mainDataVersion(inserted[0].value) });
-    }
+      if (result.length === 0) {
+        if (auth.role === 'employee') return { status: 404, body: { error: 'بيانات الشركة غير موجودة' } };
+        const initialValue = payload;
+        const inserted = await tx.insert(schema.systemData).values({
+          key,
+          value: initialValue,
+        }).onConflictDoNothing().returning();
+        if (!inserted.length) return { status: 409, body: { error: 'تم إنشاء بيانات الشركة من جلسة أخرى. أعد تحميل البيانات قبل الحفظ.', code: 'DATA_CONFLICT' } };
+        for (const change of employeeChanges([], payload.employees)) await audit(tx, auth, companyId, change.action, change.id, { ...change, actorName: auth.name || auth.username || 'المسؤول' });
+        return { status: 200, body: { ...sanitizeMainData(inserted[0].value, true), _version: mainDataVersion(inserted[0].value) } };
+      }
 
-    const currentValue = result[0].value;
-    if (auth.role !== 'employee' && _baseVersion !== mainDataVersion(currentValue)) {
-      return res.status(409).json({ error: 'تغيرت البيانات في جلسة أخرى. لم يتم استبدالها. أعد تحميل آخر نسخة ثم أعد تطبيق تعديلك.', code: 'DATA_CONFLICT' });
-    }
-    let valueToSave = payload;
-    if (auth.role === 'employee') {
-      // Only allow this employee to change their own password; everything else is
-      // taken from the data already stored on the server, ignoring the rest of the payload.
-      const current = result[0].value as any;
-      const incomingEmp = (payload?.employees || []).find((e: any) => String(e.id) === String(auth.id));
-      const nextEmployees = (current.employees || []).map((e: any) =>
-        String(e.id) === String(auth.id) && incomingEmp ? { ...e, password: incomingEmp.password } : e
-      );
-      valueToSave = { ...current, employees: nextEmployees, updatedAt: Date.now() };
-    }
+      const currentValue = result[0].value;
+      if (auth.role !== 'employee' && _baseVersion !== mainDataVersion(currentValue)) {
+        return { status: 409, body: { error: 'تغيرت البيانات في جلسة أخرى. لم يتم استبدالها. أعد تحميل آخر نسخة ثم أعد تطبيق تعديلك.', code: 'DATA_CONFLICT' } };
+      }
+      if (auth.role !== 'employee' && (currentValue as any).employees?.some((e: any) => !payload.employees.some((next: any) => String(next.id) === String(e.id)))) return { status: 400, body: { error: 'لا تحذف الموظفين نهائيًا؛ استخدم الأرشفة للحفاظ على سجلاتهم.' } };
+      if (auth.role !== 'employee' && payload.employees.some((e: any) => { const old = (currentValue as any).employees?.find((previous: any) => String(previous.id) === String(e.id)); return old && employeeStatus(old) !== employeeStatus(e) && (typeof e.statusReason !== 'string' || !e.statusReason.trim() || e.statusReason.length > 500); })) return { status: 400, body: { error: 'أدخل سبب تغيير الحالة، بحد أقصى 500 حرف' } };
+      let valueToSave = payload;
+      if (auth.role === 'employee') {
+        // Only allow this employee to change their own password; everything else is
+        // taken from the data already stored on the server, ignoring the rest of the payload.
+        const current = result[0].value as any;
+        const incomingEmp = (payload?.employees || []).find((e: any) => String(e.id) === String(auth.id));
+        const nextEmployees = (current.employees || []).map((e: any) =>
+          String(e.id) === String(auth.id) && incomingEmp ? { ...e, password: incomingEmp.password } : e
+        );
+        valueToSave = { ...current, employees: nextEmployees, updatedAt: Date.now() };
+      }
 
-    const updated = await db.update(schema.systemData)
-      .set({ value: valueToSave, updatedAt: new Date() })
-      .where(and(eq(schema.systemData.key, key), eq(schema.systemData.value, currentValue)))
-      .returning();
-    if (!updated.length) return res.status(409).json({ error: 'حفظ مستخدم آخر تعديلًا أثناء طلبك. أعد تحميل البيانات قبل المحاولة.', code: 'DATA_CONFLICT' });
-    return res.json({ ...sanitizeMainData(updated[0].value, auth.role !== 'employee'), _version: mainDataVersion(updated[0].value) });
+      const updated = await tx.update(schema.systemData)
+        .set({ value: valueToSave, updatedAt: new Date() })
+        .where(and(eq(schema.systemData.key, key), eq(schema.systemData.value, currentValue)))
+        .returning();
+      if (!updated.length) return { status: 409, body: { error: 'حفظ مستخدم آخر تعديلًا أثناء طلبك. أعد تحميل البيانات قبل المحاولة.', code: 'DATA_CONFLICT' } };
+      for (const change of employeeChanges((currentValue as any).employees || [], valueToSave.employees)) await audit(tx, auth, companyId, change.action, change.id, { ...change, actorName: auth.name || auth.username || 'المسؤول' });
+      return { status: 200, body: { ...sanitizeMainData(updated[0].value, auth.role !== 'employee'), _version: mainDataVersion(updated[0].value) } };
+    });
+    return res.status(outcome.status).json(outcome.body);
   } catch (error: any) {
     console.error('Error saving main-data to PostgreSQL:', error);
     return res.status(500).json({
@@ -984,6 +986,7 @@ app.patch('/api/employee-profile/email', requireAuth(['employee']), async (req, 
       if (data.employees.find((e: any) => String(e.id) === String(auth.id)).email === email) return true;
       const value = { ...data, employees: data.employees.map((e: any) => String(e.id) === String(auth.id) ? { ...e, email } : e) };
       await tx.update(schema.systemData).set({ value, updatedAt: new Date() }).where(eq(schema.systemData.key, key));
+      await audit(tx, auth, auth.companyId, 'employee.email', auth.id, { name: data.employees.find((e: any) => String(e.id) === String(auth.id)).name, actorName: auth.name || 'الموظف', changes: { email: { before: data.employees.find((e: any) => String(e.id) === String(auth.id)).email || null, after: email } } });
       return true;
     });
     if (!result) return res.status(404).json({ error: 'حساب الموظف غير موجود' });
@@ -1206,7 +1209,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       await lockAttendance(tx, companyId);
       const mainData = await getMainDataByCompanyId(companyId);
       const employee = mainData?.employees?.find((e: any) => String(e.id) === String(auth.id));
-      if (!employee) return { status: 403, body: { error: 'الموظف غير مسجل في الشركة' } };
+      if (!isActiveEmployee(employee)) return { status: 403, body: { error: 'حساب الموظف غير نشط' } };
       const now = Date.now();
       const date = new Date(now).toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
       let record: any;
@@ -1523,6 +1526,17 @@ app.delete('/api/admins/:id', requireAuth(['admin', 'superadmin'], false), requi
       details: error?.message || String(error)
     });
   }
+});
+
+app.get('/api/employee-audit', requireAuth(['admin', 'superadmin']), async (req, res) => {
+  const companyId = String(req.query.companyId || 'default');
+  const empId = String(req.query.empId || '');
+  if (!empId) return res.status(400).json({ error: 'اختر موظفًا' });
+  try {
+    const rows = await db.select().from(schema.auditLog).where(and(eq(schema.auditLog.companyId, companyId), eq(schema.auditLog.entityId, empId), sql`${schema.auditLog.action} LIKE 'employee.%'`)).orderBy(desc(schema.auditLog.createdAt), desc(schema.auditLog.id)).limit(100);
+    res.set('Cache-Control', 'private, no-store');
+    return res.json(rows);
+  } catch { return res.status(500).json({ error: 'تعذر تحميل سجل الموظف' }); }
 });
 
 app.get('/api/audit-log', requireAuth(['admin', 'superadmin']), async (req, res) => {
