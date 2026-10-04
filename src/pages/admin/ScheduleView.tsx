@@ -1,3 +1,4 @@
+import SchedulePublication from '../../components/SchedulePublication';
 import { isActiveEmployee, employeeStatus, statusLabels } from '../../lib/employeeLifecycle';
 import { useState } from 'react';
 import { printSchedule } from '../../lib/schedulePrint';
@@ -5,6 +6,10 @@ import SchedulePlanner from './SchedulePlanner';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
 
 interface ScheduleViewProps {
+  publishedSchedule: any;
+  publishedShiftTypes: any[];
+  companyId: string;
+  onPublished: () => Promise<boolean>;
   companyName: string;
   logoDataUrl?: string;
   onApplySchedule: (schedule: any) => Promise<boolean>;
@@ -24,6 +29,7 @@ interface ScheduleViewProps {
 }
 
 export default function ScheduleView({
+  companyId, onPublished, publishedSchedule, publishedShiftTypes,
   companyName,
   logoDataUrl,
   onApplySchedule,
@@ -41,6 +47,7 @@ export default function ScheduleView({
   DAYS_AR,
   onEditCell,
 }: ScheduleViewProps) {
+  const [exportPublished, setExportPublished] = useState(false);
   const [exportAll, setExportAll] = useState(false);
   const [exportError, setExportError] = useState('');
   const [plannerOpen, setPlannerOpen] = useState(false);
@@ -49,6 +56,7 @@ export default function ScheduleView({
 
   return (
     <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-5">
+      {hasPermission('canEditSchedule') && <SchedulePublication companyId={companyId} schedule={schedule} shiftTypes={shiftTypes} onPublished={onPublished} />}
       {/* Department filtering tabs */}
       <div className="flex justify-between items-center flex-wrap gap-4 border-b pb-3">
         <div className="flex p-0.5 bg-slate-100 rounded-xl flex-wrap">
@@ -96,15 +104,15 @@ export default function ScheduleView({
       </div>
 
       <div className="flex flex-wrap gap-3 items-center bg-slate-50 border rounded-xl p-3 text-xs" dir="rtl">
-        <label className="flex gap-2 items-center"><input type="checkbox" checked={exportAll} onChange={e => setExportAll(e.target.checked)}/> تضمين كل الأقسام (كل قسم بصفحات مستقلة)</label>
+        <select aria-label="نسخة جدول التصدير" value={exportPublished ? 'published' : 'draft'} onChange={e => setExportPublished(e.target.value === 'published')} className="border rounded p-2"><option value="draft">مسودة الإدارة</option><option value="published">النسخة المنشورة للموظفين</option></select><label className="flex gap-2 items-center"><input type="checkbox" checked={exportAll} onChange={e => setExportAll(e.target.checked)}/> تضمين كل الأقسام (كل قسم بصفحات مستقلة)</label>
         <button type="button" disabled={!departments.length || (!exportAll && !department)} onClick={() => {
           setExportError('');
           try {
-            const ok = printSchedule({ companyName, logoDataUrl, departments: exportAll ? departments : [department], employees, shiftTypes: shiftTypes || [], schedule, month: scheduleMonth });
+            const ok = printSchedule({ companyName, logoDataUrl, departments: exportAll ? departments : [department], employees, shiftTypes: exportPublished ? publishedShiftTypes : shiftTypes || [], schedule: exportPublished ? publishedSchedule : schedule, month: scheduleMonth, publicationLabel: exportPublished ? 'النسخة المنشورة للموظفين' : 'مسودة الإدارة — غير معتمدة للنشر' });
             if (!ok) setExportError('اسمح بفتح نافذة المعاينة في المتصفح ثم أعد التصدير');
           } catch (e: any) { setExportError(e.message || 'تعذر إعداد التقرير'); }
         }} className="px-4 py-2 bg-sky-700 text-white rounded-lg font-bold disabled:opacity-40">تصدير جدول {exportAll ? 'كل الأقسام' : 'القسم'} PDF</button>
-        <span className="text-slate-500">الشهر المحدد · معاينة ثم طباعة / حفظ PDF</span>
+        <span className="text-slate-500">نسخة التصدير محددة أعلاه · معاينة ثم طباعة / حفظ PDF</span>
         {exportError && <p role="alert" className="w-full text-rose-700">{exportError}</p>}
       </div>
       {hasPermission('canEditSchedule') && department && <>

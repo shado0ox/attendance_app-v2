@@ -1,3 +1,4 @@
+import { scheduleContent, effectiveScheduleData, employeeScheduleContent } from './src/lib/schedulePublication';
 import { employeeStatus, isActiveEmployee, employeeChanges } from './src/lib/employeeLifecycle';
 import { validEmployeeEmail } from './src/lib/employeeDirectory';
 import { welcomePayload, deliverWelcome } from './src/server/welcomeEmail';
@@ -420,6 +421,14 @@ const createCleanCompanyData = (companyName: string) => ({
     officeLocation: { lat: 24.7136, lng: 46.6753, radius: 150 }
   }
 });
+
+function employeeMainData(value: any, auth: AuthTokenPayload) {
+  const { _schedulePublication, ...safe } = sanitizeMainData(value, false);
+  const published = effectiveScheduleData(value);
+  return { ...safe, schedule: published.schedule, shiftTypes: published.shiftTypes,
+    employees: (value.employees || []).map((e: any) => String(e.id) === String(auth.id) ? { ...e, password: undefined, webauthnCredentials: undefined } : { id: e.id, name: e.name, dept: e.dept }),
+    scheduleNotice: { revision: mainDataVersion(employeeScheduleContent(value, String(auth.id))), publishedAt: _schedulePublication?.publishedAt || null } };
+}
 
 // --- AUTH ENDPOINTS ---
 // Password checks used to happen entirely in the browser (full admin/employee lists,
@@ -863,9 +872,7 @@ app.get('/api/main-data', async (req, res) => {
   const visibleMainData = (value: any) => {
     if (!auth) return { departments: [], employees: [], shiftTypes: [], schedule: {}, settings: { companyName: value?.settings?.companyName, logoDataUrl: value?.settings?.logoDataUrl } };
     if (auth.role !== 'employee') return sanitizeMainData(value, true);
-    return { ...sanitizeMainData(value, false), employees: (value?.employees || []).map((e: any) =>
-      String(e.id) === String(auth.id) ? { ...e, password: undefined, webauthnCredentials: undefined } : { id: e.id, name: e.name, dept: e.dept }),
-      schedule: value?.schedule || {} };
+    return employeeMainData(value, auth);
   };
   const canSeeSecrets = !!auth && (auth.role === 'superadmin' || (auth.role === 'admin' && auth.companyId === companyId));
 
@@ -908,7 +915,7 @@ app.get('/api/main-data', async (req, res) => {
 // this stops one logged-in employee token from rewriting another employee's data,
 // the schedule, or the whole company's settings.
 app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), async (req, res) => {
-  const { _baseVersion, _version, ...payload } = req.body || {};
+  const { _baseVersion, _version, _schedulePublication: ignoredPublication, scheduleNotice: ignoredNotice, ...payload } = req.body || {};
   const companyId = (req.query.companyId as string) || 'default';
   const key = companyId === 'default' ? 'mainData' : 'mainData_' + companyId;
   const auth = (req as any).auth as AuthTokenPayload;
@@ -939,7 +946,7 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
       }
       if (auth.role !== 'employee' && (currentValue as any).employees?.some((e: any) => !payload.employees.some((next: any) => String(next.id) === String(e.id)))) return { status: 400, body: { error: 'لا تحذف الموظفين نهائيًا؛ استخدم الأرشفة للحفاظ على سجلاتهم.' } };
       if (auth.role !== 'employee' && payload.employees.some((e: any) => { const old = (currentValue as any).employees?.find((previous: any) => String(previous.id) === String(e.id)); return old && employeeStatus(old) !== employeeStatus(e) && (typeof e.statusReason !== 'string' || !e.statusReason.trim() || e.statusReason.length > 500); })) return { status: 400, body: { error: 'أدخل سبب تغيير الحالة، بحد أقصى 500 حرف' } };
-      let valueToSave = payload;
+      let valueToSave: any = { ...payload, _schedulePublication: (currentValue as any)._schedulePublication || { ...scheduleContent(currentValue), publishedAt: null, legacy: true } };
       if (auth.role === 'employee') {
         // Only allow this employee to change their own password; everything else is
         // taken from the data already stored on the server, ignoring the rest of the payload.
@@ -957,7 +964,7 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
         .returning();
       if (!updated.length) return { status: 409, body: { error: 'حفظ مستخدم آخر تعديلًا أثناء طلبك. أعد تحميل البيانات قبل المحاولة.', code: 'DATA_CONFLICT' } };
       for (const change of employeeChanges((currentValue as any).employees || [], valueToSave.employees)) await audit(tx, auth, companyId, change.action, change.id, { ...change, actorName: auth.name || auth.username || 'المسؤول' });
-      return { status: 200, body: { ...sanitizeMainData(updated[0].value, auth.role !== 'employee'), _version: mainDataVersion(updated[0].value) } };
+      return { status: 200, body: { ...(auth.role === 'employee' ? employeeMainData(updated[0].value, auth) : sanitizeMainData(updated[0].value, true)), _version: mainDataVersion(updated[0].value) } };
     });
     return res.status(outcome.status).json(outcome.body);
   } catch (error: any) {
@@ -972,6 +979,37 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
 // 3. Registration Requests (Tenant Aware)
 // Submitting a request stays public (it's the sign-up form itself); reading the list
 // (which includes the applicant's chosen password) and approving/rejecting are admin-only.
+app.get('/api/schedule-publication', requireAuth(['admin', 'superadmin']), async (req, res) => {
+  try {
+    const data = await getMainDataByCompanyId(String(req.query.companyId || 'default'));
+    if (!data) return res.status(404).json({ error: 'بيانات الشركة غير موجودة' });
+    res.set('Cache-Control', 'private, no-store');
+    return res.json({ publishedSignature: mainDataVersion(scheduleContent(effectiveScheduleData(data))), publishedAt: data._schedulePublication?.publishedAt || null, publishedBy: data._schedulePublication?.publishedBy || null });
+  } catch { return res.status(500).json({ error: 'تعذر تحميل حالة النشر' }); }
+});
+app.post('/api/schedule-publication', requireAuth(['admin', 'superadmin']), async (req, res) => {
+  const auth = (req as any).auth as AuthTokenPayload;
+  const companyId = String(req.query.companyId || 'default');
+  const expectedSignature = req.body?.expectedSignature;
+  if (typeof expectedSignature !== 'string' || !/^[a-f0-9]{64}$/.test(expectedSignature)) return res.status(400).json({ error: 'يلزم مراجعة الجدول قبل نشره' });
+  try {
+    const outcome = await db.transaction(async tx => {
+      const key = getMainDataKey(companyId);
+      const rows = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1).for('update');
+      const data: any = rows[0]?.value;
+      if (!data) return { status: 404, body: { error: 'بيانات الشركة غير موجودة' } };
+      const signature = mainDataVersion(scheduleContent(data));
+      if (signature !== expectedSignature) return { status: 409, body: { error: 'تغيّر الجدول أو لم تُحفظ تعديلاتك. حدّث البيانات وراجعها قبل النشر.' } };
+      if (signature === mainDataVersion(scheduleContent(effectiveScheduleData(data)))) return { status: 200, body: { publishedSignature: signature, publishedAt: data._schedulePublication?.publishedAt || null, unchanged: true } };
+      const publication = { ...scheduleContent(data), publishedAt: new Date().toISOString(), publishedBy: auth.name || auth.username || 'المسؤول' };
+      await tx.update(schema.systemData).set({ value: { ...data, _schedulePublication: publication }, updatedAt: new Date() }).where(eq(schema.systemData.key, key));
+      await audit(tx, auth, companyId, 'schedule.publish', companyId, { actorName: publication.publishedBy, signature, publishedAt: publication.publishedAt });
+      return { status: 200, body: { publishedSignature: signature, publishedAt: publication.publishedAt, publishedBy: publication.publishedBy } };
+    });
+    return res.status(outcome.status).json(outcome.body);
+  } catch { return res.status(500).json({ error: 'تعذر نشر الجدول، لم يتم تأكيد النشر' }); }
+});
+
 // Narrow employee profile update: token identity only, locked row preserves admin changes.
 app.patch('/api/employee-profile/email', requireAuth(['employee']), async (req, res) => {
   const auth = (req as any).auth as AuthTokenPayload;
@@ -1169,7 +1207,7 @@ app.get('/api/attendance-report', requireAuth(['admin', 'superadmin']), async (r
     let reportDays = buildAttendanceDays(records, mainData?.settings);
     if (query.analysis) {
       const leaves = await db.select().from(schema.requests).where(and(eq(schema.requests.companyId, companyId), eq(schema.requests.type, 'leave'), eq(schema.requests.status, 'approved'), sql`${schema.requests.date} >= ${query.from}`, sql`${schema.requests.date} <= ${query.to}`));
-      reportDays = analyzeAttendance(reportDays, mainData, query, leaves);
+      reportDays = analyzeAttendance(reportDays, effectiveScheduleData(mainData), query, leaves);
     }
     const days = reportDays.map(day => ({ ...day, departmentName: mainData?.departments?.find((dept: any) => dept.id === day.dept)?.name || day.dept }));
     return res.json({ ...attendanceReportPage(days, query), companyName: mainData?.settings?.companyName || companyId, from: query.from, to: query.to });

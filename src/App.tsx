@@ -91,8 +91,9 @@ export default function App() {
   const [dataSyncError, setDataSyncError] = useState('');
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
+  const cacheKey = (id: string) => `schedule_mainData_v2_${JSON.stringify([id, session.role, session.info?.id || session.info?.username || null])}`;
   const cacheData = (id: string, data: any) => {
-    try { localStorage.setItem(`schedule_mainData_${id}`, JSON.stringify(data)); }
+    try { localStorage.setItem(cacheKey(id), JSON.stringify(data)); }
     catch (error) { console.warn('Could not cache application data', error); }
   };
 
@@ -262,14 +263,14 @@ export default function App() {
         setSaveConflict(false);
         dataRef.current = {
           departments: data.departments || [], employees: data.employees || [],
-          shiftTypes: data.shiftTypes || defaultShiftTypes, schedule: data.schedule || {}
+          shiftTypes: data.shiftTypes || defaultShiftTypes, schedule: data.schedule || {}, scheduleNotice: data.scheduleNotice, _schedulePublication: data._schedulePublication
         };
         if (data.settings) settingsRef.current = data.settings;
         setAppData({
           departments: data.departments || [],
           employees: data.employees || [],
           shiftTypes: data.shiftTypes || defaultShiftTypes,
-          schedule: data.schedule || {}
+          schedule: data.schedule || {}, scheduleNotice: data.scheduleNotice, _schedulePublication: data._schedulePublication
         });
         if (data.settings) {
           setAppSettings(data.settings);
@@ -281,19 +282,19 @@ export default function App() {
         if (cancelled || fetchRevision !== revision.current || unsaved.current) return false;
         setDataSyncError('تعذر تحديث الجدول من السيرفر؛ البيانات المعروضة قد تكون قديمة.');
         if (receivedData) return false;
-        const cached = localStorage.getItem(`schedule_mainData_${companyId}`);
+        const cached = localStorage.getItem(cacheKey(companyId));
         if (cached) {
           try {
             console.log('[Cache Fallback] Loading application data from local storage cache.');
             const data = JSON.parse(cached);
             if (data._version) serverVersions.current[companyId] = data._version;
-            dataRef.current = { departments: data.departments || [], employees: data.employees || [], shiftTypes: data.shiftTypes || defaultShiftTypes, schedule: data.schedule || {} };
+            dataRef.current = { departments: data.departments || [], employees: data.employees || [], shiftTypes: data.shiftTypes || defaultShiftTypes, schedule: data.schedule || {}, scheduleNotice: data.scheduleNotice, _schedulePublication: data._schedulePublication };
             if (data.settings) settingsRef.current = data.settings;
             setAppData({
               departments: data.departments || [],
               employees: data.employees || [],
               shiftTypes: data.shiftTypes || defaultShiftTypes,
-              schedule: data.schedule || {}
+              schedule: data.schedule || {}, scheduleNotice: data.scheduleNotice, _schedulePublication: data._schedulePublication
             });
             if (data.settings) {
               setAppSettings(data.settings);
@@ -378,7 +379,8 @@ export default function App() {
   // Serialize full snapshots; polling must never replace an in-flight or failed edit.
   const saveMainData = (): Promise<boolean> => {
     const targetCompany = companyId;
-    const payload = { ...dataRef.current, settings: settingsRef.current, updatedAt: Date.now() };
+    const { _schedulePublication: serverPublication, scheduleNotice: employeeNotice, ...editableData } = dataRef.current;
+    const payload = { ...editableData, settings: settingsRef.current, updatedAt: Date.now() };
     const saveRevision = ++revision.current;
     unsaved.current = true;
     pendingSaves.current++;
@@ -400,6 +402,8 @@ export default function App() {
         cacheData(targetCompany, result);
         if (companyRef.current === targetCompany && revision.current === saveRevision) {
           unsaved.current = false;
+          dataRef.current = { ...dataRef.current, _schedulePublication: result._schedulePublication };
+          setAppData((previous: any) => ({ ...previous, _schedulePublication: result._schedulePublication }));
           setSaveError('');
         }
         return true;
@@ -608,6 +612,7 @@ export default function App() {
           element={
             session.role === 'employee' ? (
               <EmployeePortal
+                scheduleNotice={appData.scheduleNotice}
                 employee={appData.employees.find(e => String(e.id) === String(session.info.id)) || session.info}
                 onRefreshSchedule={() => refreshMainData.current()}
                 scheduleRefreshing={dataRefreshing}
@@ -644,6 +649,7 @@ export default function App() {
                 onLogout={handleLogout}
                 onUpdateSettings={handleUpdateSettings}
                 onUpdateAppData={handleUpdateAppData}
+                onRefreshData={() => refreshMainData.current()}
                 registrationRequests={registrationRequests}
                 companyId={companyId}
                 companiesList={companiesList}

@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
+import { mainDataVersion } from '../src/lib/mainDataVersion';
 
 const pool = new pg.Pool({ host: process.env.SQL_HOST, port: Number(process.env.SQL_PORT || 5432), user: process.env.SQL_USER, password: process.env.SQL_PASSWORD, database: process.env.SQL_DB_NAME });
 const child = spawn(process.execPath, ['dist/server.cjs'], { env: { ...process.env, NODE_ENV: 'production', JWT_SECRET: 'ci-integration-only-secret' }, stdio: 'inherit' });
@@ -163,6 +164,7 @@ try {
     schedule: { '2024-10-10': { 'analysis-ci': { shiftType: 'S' } }, '2024-10-11': { 'analysis-ci': { shiftType: 'A' } }, '2024-10-12': { 'analysis-ci': { shiftType: 'N' } }, '2024-10-13': { 'analysis-ci': { shiftType: 'S' } } },
     settings: { ...stored.rows[0].value.settings, attendanceAnalysis: { graceMinutes: 5 } },
   };
+  (analysisData as any)._schedulePublication = { schedule: analysisData.schedule, shiftTypes: analysisData.shiftTypes, publishedAt: null };
   await pool.query('UPDATE shift_app.system_data SET value=$1 WHERE key=$2', [JSON.stringify(analysisData), 'mainData']);
   await pool.query("INSERT INTO shift_app.requests (emp_id,emp_name,date,type,status,company_id) VALUES ('analysis-ci','Analysis employee','2024-10-10','leave','approved','default')");
   assert.equal((await adminRecord({ empId: 'analysis-ci', empName: 'Analysis employee', dept: 'analysis-dept', date: '2024-10-13', checkIn: '08:15', checkOut: '17:30' })).status, 200);
@@ -179,17 +181,34 @@ try {
   assert.ok(beforeEmployee.headers.get('vary')?.includes('Authorization'));
   const beforeEdit = await (await fetch(origin + '/api/main-data?companyId=default', {headers})).json() as any;
   const updatedSchedule = {...beforeEdit.schedule, '2026-10-03':{'employee-ci':{shiftType:'S',note:'Updated by manager'}}};
-  const editedResponse = await fetch(origin + '/api/main-data?companyId=default', {method:'POST',headers,body:JSON.stringify({...beforeEdit,schedule:updatedSchedule,_baseVersion:beforeEdit._version})});
+  const editedResponse = await fetch(origin + '/api/main-data?companyId=default', {method:'POST',headers,body:JSON.stringify({...beforeEdit,schedule:updatedSchedule,_schedulePublication:{schedule:updatedSchedule,shiftTypes:beforeEdit.shiftTypes},_baseVersion:beforeEdit._version})});
   assert.equal(editedResponse.status,200);
   const edited = await editedResponse.json() as any;
   const afterEmployee = await fetch(origin + '/api/main-data?companyId=default', {headers:{...employeeHeaders,...(oldEntity ? {'If-None-Match':oldEntity} : {})}});
   assert.equal(afterEmployee.status,200);
   const employeeData = await afterEmployee.json() as any;
-  assert.equal(employeeData.schedule['2026-10-03']['employee-ci'].note,'Updated by manager');
-  const clearedResponse = await fetch(origin + '/api/main-data?companyId=default', {method:'POST',headers,body:JSON.stringify({...edited,schedule:{},_baseVersion:edited._version})});
+  assert.equal(employeeData.schedule['2026-10-03'], undefined, 'employee never sees draft assignments');
+  assert.equal(employeeData._schedulePublication, undefined, 'employee does not receive private draft/publication payload');
+  const publish = (signature: string, requestHeaders = headers) => fetch(origin + '/api/schedule-publication?companyId=default', { method: 'POST', headers: requestHeaders, body: JSON.stringify({ expectedSignature: signature }) });
+  const signature = mainDataVersion({ schedule: updatedSchedule, shiftTypes: edited.shiftTypes });
+  assert.equal((await publish(signature, employeeHeaders)).status, 403);
+  assert.equal((await publish('0'.repeat(64))).status, 409);
+  assert.equal((await publish(signature)).status, 200);
+  assert.equal((await publish(signature)).status, 200, 'duplicate publication is a no-op');
+  const publishedEmployee = await (await fetch(origin + '/api/main-data?companyId=default', { headers: employeeHeaders })).json() as any;
+  assert.equal(publishedEmployee.schedule['2026-10-03']['employee-ci'].note, 'Updated by manager');
+  assert.notEqual(publishedEmployee.scheduleNotice.revision, employeeData.scheduleNotice.revision);
+  const latestPublished = await (await fetch(origin + '/api/main-data?companyId=default', { headers })).json() as any;
+  const clearedResponse = await fetch(origin + '/api/main-data?companyId=default', {method:'POST',headers,body:JSON.stringify({...latestPublished,schedule:{},_baseVersion:latestPublished._version})});
   assert.equal(clearedResponse.status,200);
   const clearedEmployee = await (await fetch(origin + '/api/main-data?companyId=default', {headers:employeeHeaders})).json() as any;
-  assert.deepEqual(clearedEmployee.schedule,{});
+  assert.equal(clearedEmployee.schedule['2026-10-03']['employee-ci'].note, 'Updated by manager', 'clearing the draft does not erase published schedule');
+  assert.equal((await publish(mainDataVersion({ schedule: {}, shiftTypes: latestPublished.shiftTypes }))).status, 200);
+  const finalClearedEmployee = await (await fetch(origin + '/api/main-data?companyId=default', { headers: employeeHeaders })).json() as any;
+  assert.deepEqual(finalClearedEmployee.schedule, {});
+  assert.notEqual(finalClearedEmployee.scheduleNotice.revision, publishedEmployee.scheduleNotice.revision);
+  const publishAudit = await pool.query("SELECT count(*)::int AS count FROM shift_app.audit_log WHERE action='schedule.publish'");
+  assert.equal(publishAudit.rows[0].count, 2);
   const changeStatus = async (status: string) => {
     const data = await (await fetch(origin + '/api/main-data?companyId=default', { headers })).json() as any;
     return fetch(origin + '/api/main-data?companyId=default', { method: 'POST', headers, body: JSON.stringify({ ...data, employees: data.employees.map((e: any) => e.id === 'employee-ci' ? { ...e, status, statusReason: 'CI lifecycle test' } : e), _baseVersion: data._version }) });
@@ -215,7 +234,7 @@ try {
   assert.equal((await fetch(origin + '/api/employee-audit?companyId=default&empId=employee-ci', { headers: employeeHeaders })).status, 403);
   assert.equal((await pool.query('SELECT count(*)::int AS count FROM shift_app.attendance WHERE emp_id=$1', ['employee-ci'])).rows[0].count, 1);
   console.log('PASS: inactive accounts cannot login/read/punch/change email or request WebAuthn; archival retains history, restoration works, audit is scoped and secrets are excluded.');
-  console.log('PASS: employee reads reflect manager edits and explicit empty schedules without HTTP cache reuse.');
+  console.log('PASS: drafts stay private; explicit publish and explicit published clearing update employee schedules/notices without cache reuse, with guarded/idempotent publication and audit.');
   console.log('PASS: schedule analysis, approved leave, rest, overnight absence, grace and potential overtime through HTTP.');
   console.log('PASS: scoped report period/employee/department, whole-day paging, complete export, totals and employee permissions.');
   console.log('PASS: monthly snapshot, closed-month create/update/delete/date-move guards, reopening reason and audit.');
