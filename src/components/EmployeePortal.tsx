@@ -1,9 +1,9 @@
-import { validEmployeeEmail } from '../lib/employeeDirectory';
+import EmployeeEmailVerification from './EmployeeEmailVerification';
 import { useAutoPunch } from '../hooks/useAutoPunch';
 import { autoPeriodWindow } from '../lib/autoPunch';
 import { showPwaNotification } from '../lib/pwaNotification';
 import { getEmployeeLocations as getApprovedLocations, matchAttendanceLocation } from '../lib/attendanceLocations';
-import { useState, useEffect, useRef, useMemo, type FormEvent } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle, Fingerprint, ScanFace, ShieldCheck } from 'lucide-react';
 interface EmployeePortalProps {
   scheduleNotice?: { revision: string; publishedAt: string | null };
@@ -40,32 +40,6 @@ export default function EmployeePortal({
 }: EmployeePortalProps) {
   const currentProfile = employees.find(e => String(e.id) === String(employee.id)) || employee;
   const appSettings = useMemo(() => ({ ...companySettings, _attendanceEmployee: currentProfile }), [companySettings, currentProfile]);
-  const [emailDraft, setEmailDraft] = useState(currentProfile.email || '');
-  const [emailOpen, setEmailOpen] = useState(!validEmployeeEmail(currentProfile.email));
-  const [emailSaved, setEmailSaved] = useState('');
-  const [emailBusy, setEmailBusy] = useState(false);
-  const [emailError, setEmailError] = useState('');
-  const profileScope = companyId + ':' + employee.id;
-  useEffect(() => {
-    setEmailDraft(currentProfile.email || '');
-    setEmailSaved('');
-    setEmailOpen(!validEmployeeEmail(currentProfile.email));
-    setEmailError('');
-  }, [profileScope]);
-  const saveEmail = async (event: FormEvent) => {
-    event.preventDefault();
-    if (emailBusy) return;
-    if (!validEmployeeEmail(emailDraft.trim())) { setEmailError('أدخل بريدًا إلكترونيًا صحيحًا'); return; }
-    setEmailBusy(true); setEmailError('');
-    try {
-      const response = await fetch(`/api/employee-profile/email?companyId=${encodeURIComponent(companyId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: emailDraft.trim() }) });
-      const result = await response.json();
-      if (!response.ok) { setEmailError(result.error || 'تعذر حفظ البريد'); return; }
-      setEmailSaved(result.email); setEmailOpen(false);
-      await onRefreshSchedule();
-    } catch { setEmailError('تعذر تأكيد الحفظ. تحقق من الاتصال وحاول مرة أخرى.'); }
-    finally { setEmailBusy(false); }
-  };
   const [scheduleChanged, setScheduleChanged] = useState(false);
   useEffect(() => {
     if (!scheduleNotice?.revision) return;
@@ -866,8 +840,7 @@ export default function EmployeePortal({
 
   return (
     <div id="emp-portal" className="min-h-screen pb-12 bg-sky-50 bg-opacity-40">
-      {emailOpen && <div className="fixed inset-0 z-[100] bg-black/40 p-4 flex items-center justify-center" dir="rtl"><form onSubmit={saveEmail} role="dialog" aria-modal="true" aria-labelledby="employee-email-title" className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90dvh] overflow-y-auto shadow-xl flex flex-col gap-4"><h2 id="employee-email-title" className="font-bold text-lg">أكمل بريدك الإلكتروني</h2><p className="text-sm text-slate-600">احفظ بريدك في بيانات الموظف لتتمكن الإدارة من التواصل معك وإرسال رابط البرنامج. إدخال البريد لا يرسل رسائل تلقائيًا ولا يغيّر بيانات دخولك.</p><label className="text-sm">البريد الإلكتروني<input autoFocus required type="email" maxLength={254} dir="ltr" value={emailDraft} onChange={e => setEmailDraft(e.target.value)} placeholder="name@example.com" className="border rounded-lg p-3 w-full mt-2" /></label>{emailError && <p role="alert" className="text-sm text-rose-600">{emailError}</p>}<div className="flex gap-3"><button disabled={emailBusy} className="bg-sky-600 text-white rounded-lg px-4 py-2 disabled:opacity-50">{emailBusy ? 'جارٍ الحفظ…' : 'حفظ البريد'}</button><button type="button" disabled={emailBusy} onClick={() => setEmailOpen(false)} className="border rounded-lg px-4 py-2">لاحقًا</button></div></form></div>}
-      {!validEmployeeEmail(emailSaved || currentProfile.email) && !emailOpen && <div className="bg-amber-50 border-b p-3 text-center text-xs" dir="rtl">لم تسجل بريدك بعد. <button onClick={() => setEmailOpen(true)} className="font-bold underline">إضافة البريد</button></div>}
+      <div key={companyId + ':' + employee.id}><EmployeeEmailVerification employee={currentProfile} companyId={companyId} onSaved={onRefreshSchedule} /></div>
       {scheduleChanged && <div className="bg-sky-100 border-b border-sky-200 p-3 text-sm flex flex-wrap justify-center items-center gap-3" dir="rtl"><strong>تم تحديث جدول دوامك أو مواعيد شيفتاتك.</strong><span>راجع الأيام والمواعيد في الجدول أدناه.</span><button onClick={acknowledgeSchedule} className="bg-white border rounded px-3 py-1 text-xs">اطلعت على التحديث</button></div>}
       {/* Top Navbar */}
       <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bg-white border-b border-sky-100 shadow-sm">

@@ -1,3 +1,4 @@
+import { employeeEmailVerified } from './emailVerification';
 import { validMonth } from './attendanceMonths';
 import { employeeAtDate, employeeStatus } from './employeeLifecycle';
 import { effectiveScheduleData } from './schedulePublication';
@@ -18,6 +19,7 @@ export function employeeProfileData(employee: any, departments: any[]) {
   return {
     id: String(employee.id), name: employee.name || '', dept: employee.dept || '',
     departmentName: departments.find(d => d.id === employee.dept)?.name || 'بدون قسم',
+    emailVerified: employeeEmailVerified(employee), emailVerifiedAt: employeeEmailVerified(employee) ? employee.emailVerifiedAt : null,
     phone: employee.phone || '', email: employee.email || '', username: employee.username || '',
     status: employeeStatus(employee), statusReason: employee.statusReason || '',
     employmentEffectiveDate: employee.employmentEffectiveDate || null,

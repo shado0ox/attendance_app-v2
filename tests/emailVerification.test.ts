@@ -1,0 +1,54 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { employeeEmailVerified, preserveEmailVerification } from '../src/lib/emailVerification';
+import { emailVerificationKey, verificationCodeHash, matchesVerificationCode, verificationRateLimit, newVerificationState, verificationStatus, verificationPayload } from '../src/server/emailVerification';
+const now = Date.parse('2026-10-04T23:00:00Z');
+const verified = { id: 'a', email: 'a@example.com', emailVerifiedAt: '2026-10-04T22:00:00Z', emailVerifiedAddress: 'a@example.com' };
+test('email proof is server-owned and revoked when the normalized address changes', () => {
+  assert.equal(employeeEmailVerified(verified), true);
+  assert.equal(employeeEmailVerified({ ...verified, email: 'b@example.com' }), false);
+  assert.equal(employeeEmailVerified({ ...verified, emailVerifiedAt: 'invalid' }), false);
+  assert.equal(employeeEmailVerified({ email: 'a@example.com' }), false);
+  const [preserved] = preserveEmailVerification([verified], [{ ...verified, email: ' A@example.com ', emailVerifiedAt: 'forged', emailVerifiedAddress: 'forged' }]);
+  assert.equal(preserved.emailVerifiedAt, verified.emailVerifiedAt);
+  assert.equal(employeeEmailVerified(preserved), false, 'saved email must be a valid trimmed value');
+  assert.equal(employeeEmailVerified({ ...preserved, email: preserved.email.trim() }), true);
+  assert.equal(preserveEmailVerification([verified], [{ ...verified, email: 'b@example.com' }])[0].emailVerifiedAt, undefined);
+  assert.equal(preserveEmailVerification([], [verified])[0].emailVerifiedAt, undefined);
+});
+test('OTP hashes are bound to company, employee, email, nonce and secret', () => {
+  const hash = verificationCodeHash('secret', 'company', 'employee', 'A@example.com', 'nonce', '123456');
+  assert.equal(hash.length, 64);
+  assert.equal(matchesVerificationCode(hash, verificationCodeHash('secret', 'company', 'employee', 'a@example.com', 'nonce', '123456')), true);
+  for (const args of [['different','company','employee','a@example.com','nonce'], ['secret','other','employee','a@example.com','nonce'], ['secret','company','other','a@example.com','nonce'], ['secret','company','employee','b@example.com','nonce'], ['secret','company','employee','a@example.com','other']]) assert.equal(matchesVerificationCode(hash, verificationCodeHash(args[0],args[1],args[2],args[3],args[4],'123456')), false);
+  assert.equal(matchesVerificationCode(hash, 'invalid'), false);
+  assert.notEqual(emailVerificationKey('a_b', 'c'), emailVerificationKey('a', 'b_c'));
+});
+test('send quotas survive address changes and cooldown/expiry use server time', () => {
+  const state = newVerificationState(null, null, 'a@example.com', 'hash', 'nonce', now);
+  assert.equal(verificationRateLimit(state.challenge, state.quota, now + 1000), 59);
+  assert.equal(verificationRateLimit({ ...state.challenge, sendCount: 6 }, state.quota, now + 61000), 3539);
+  assert.equal(verificationRateLimit({ ...state.challenge, requestedAt: now - 61000 }, { ...state.quota, count: 100 }, now), 3600);
+  const next = newVerificationState(state.challenge, state.quota, 'b@example.com', 'newhash', 'newnonce', now + 61000);
+  assert.equal(next.challenge.sendCount, 2);
+  assert.equal(next.challenge.email, 'b@example.com');
+  assert.equal(newVerificationState(state.challenge, state.quota, 'b@example.com', 'hash', 'nonce', now + 3600001).challenge.sendCount, 1);
+  const status = verificationStatus({ email: 'a@example.com' }, state.challenge, state.quota, true, now);
+  assert.equal(status.codePending, true);
+  assert.equal(status.retryAfter, 60);
+  for (const key of ['codeHash', 'nonce', 'providerId', 'sendCount']) assert.equal((status as any)[key], undefined);
+  assert.equal(verificationStatus({ email: 'b@example.com' }, state.challenge, state.quota, true, now).codePending, false);
+  assert.equal(verificationStatus({ email: 'a@example.com' }, state.challenge, state.quota, true, now + 600000).codePending, false);
+  assert.equal(verificationStatus({ email: 'a@example.com' }, { ...state.challenge, attempts: 5 }, state.quota, true, now).codePending, false);
+  assert.equal(verificationStatus(verified, state.challenge, state.quota, true, now).verified, true);
+});
+test('verification mail validates config, escapes text, and needs no app URL', () => {
+  const env = { RESEND_API_KEY: 'fake-key', RESEND_FROM: 'Attendance <attendance@example.com>' };
+  const payload = verificationPayload({ name: '<script>A</script>', email: 'a@example.com' }, '<company>', '123456', env);
+  assert.deepEqual(payload.to, ['a@example.com']);
+  assert.ok(payload.text.includes('123456'));
+  assert.ok(!payload.html.includes('<script>'));
+  assert.ok(payload.html.includes('&lt;company&gt;'));
+  assert.throws(() => verificationPayload({ name: 'A', email: 'bad' }, 'Company', '123456', env));
+  assert.throws(() => verificationPayload({ name: 'A', email: 'a@example.com' }, 'Company', '123456', {}));
+});
