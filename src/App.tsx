@@ -646,8 +646,7 @@ export default function App() {
           path="/admin/:view"
           element={
             session.role === 'admin' || session.role === 'superadmin' ? (
-              <AdminPortal
-                key={JSON.stringify([companyId, session.info?.id, session.info?.departmentIds ?? null, session.info?.permissions || null])}
+              <div className="contents" key={JSON.stringify([companyId, session.info?.id, session.info?.departmentIds ?? null, session.info?.permissions || null])}><AdminPortal
                 admin={session.info}
                 appSettings={appSettings}
                 appData={appData}
@@ -663,7 +662,7 @@ export default function App() {
                 companyId={companyId}
                 companiesList={companiesList}
                 fetchCompanies={fetchCompanies}
-              />
+              /></div>
             ) : (
               <Navigate to="/login" replace />
             )
