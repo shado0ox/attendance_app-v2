@@ -647,6 +647,7 @@ export default function App() {
           element={
             session.role === 'admin' || session.role === 'superadmin' ? (
               <AdminPortal
+                key={JSON.stringify([companyId, session.info?.id, session.info?.departmentIds ?? null, session.info?.permissions || null])}
                 admin={session.info}
                 appSettings={appSettings}
                 appData={appData}
