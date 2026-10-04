@@ -1,3 +1,4 @@
+import { effectiveScheduleData } from '../lib/schedulePublication';
 import { employeeStatus, isActiveEmployee, type EmployeeStatus } from '../lib/employeeLifecycle';
 import DepartmentBadge from './DepartmentBadge';
 import { coverageAlerts } from '../lib/schedulePlanning';
@@ -26,6 +27,7 @@ import SettingsView from '../pages/admin/SettingsView';
 import CompaniesView from '../pages/admin/CompaniesView';
 
 interface AdminPortalProps {
+  onRefreshData: () => Promise<boolean>;
   admin: any;
   appSettings: any;
   appData: any;
@@ -43,6 +45,7 @@ interface AdminPortalProps {
 }
 
 export default function AdminPortal({
+  onRefreshData,
   admin,
   appSettings,
   appData,
@@ -61,6 +64,7 @@ export default function AdminPortal({
   const { view: routeView } = useParams<{ view: string }>();
   const navigate = useNavigate();
   const activeView = routeView || 'dashboard';
+  const publishedData = effectiveScheduleData(appData);
   const setActiveTab = (view: string) => navigate(`/admin/${view}`);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -432,7 +436,7 @@ export default function AdminPortal({
   };
 
   const getShiftGaps = () => coverageAlerts(
-    departments, employees.filter(isActiveEmployee), shiftTypes || [], schedule,
+    departments, employees.filter(isActiveEmployee), publishedData.shiftTypes, publishedData.schedule,
     getDaysInSelectedMonth().map(d => d.dateStr)
   ).filter(a => !(appSettings.deletedAlerts || []).includes(a.id));
 
@@ -473,7 +477,7 @@ export default function AdminPortal({
 
     // Who is scheduled today?
     const scheduledEmpIds = employees.filter(isActiveEmployee).filter(emp => {
-      const daySchedule = schedule[todayStrFull]?.[emp.id];
+      const daySchedule = publishedData.schedule[todayStrFull]?.[emp.id];
       return daySchedule && daySchedule.shiftType && daySchedule.shiftType !== 'OFF';
     }).map(emp => emp.id);
 
@@ -871,13 +875,13 @@ export default function AdminPortal({
       const dateStr = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(
         current.getDate()
       ).padStart(2, '0')}`;
-      const entry = schedule[dateStr]?.[emp.id];
+      const entry = publishedData.schedule[dateStr]?.[emp.id];
       const dow = current.getDay();
 
       let shiftLabel = 'إجازة';
       let icon = '⬜';
 
-      const st = (shiftTypes || []).find((t: any) => t.id === entry?.shiftType);
+      const st = (publishedData.shiftTypes || []).find((t: any) => t.id === entry?.shiftType);
       if (st) {
         shiftLabel = st.name;
         if (st.type === 'double') {
@@ -1085,8 +1089,8 @@ export default function AdminPortal({
             <DashboardView
               employees={employees}
               departments={departments}
-              shiftTypes={shiftTypes}
-              schedule={schedule}
+              shiftTypes={publishedData.shiftTypes}
+              schedule={publishedData.schedule}
               appSettings={appSettings}
               selectedDept={selectedDept}
               setSelectedDept={setSelectedDept}
@@ -1108,6 +1112,10 @@ export default function AdminPortal({
           {/* View: Schedule */}
           {activeView === 'schedule' && (
             <ScheduleView
+              companyId={companyId}
+              onPublished={onRefreshData}
+              publishedSchedule={publishedData.schedule}
+              publishedShiftTypes={publishedData.shiftTypes}
               companyName={appSettings?.companyName || 'الشركة'}
               logoDataUrl={appSettings?.logoDataUrl}
               onApplySchedule={async (nextSchedule) => {
@@ -2321,7 +2329,7 @@ export default function AdminPortal({
                     // Current month cells
                     for (let d = 1; d <= totalDaysInMonth; d++) {
                       const dateStr = `${selYear}-${String(selMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                      const entry = schedule[dateStr]?.[waTargetId];
+                      const entry = publishedData.schedule[dateStr]?.[waTargetId];
                       cells.push({
                         empty: false,
                         dayNum: d,
@@ -2437,7 +2445,7 @@ export default function AdminPortal({
                             }
 
                             const stType = cell.entry?.shiftType || 'A';
-                            const st = (shiftTypes || []).find((t: any) => t.id === stType);
+                            const st = (publishedData.shiftTypes || []).find((t: any) => t.id === stType);
                             
                             let bgStyle = '#f1f5f9';
                             let textStyle = '#475569';

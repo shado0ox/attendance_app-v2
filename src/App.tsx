@@ -262,14 +262,14 @@ export default function App() {
         setSaveConflict(false);
         dataRef.current = {
           departments: data.departments || [], employees: data.employees || [],
-          shiftTypes: data.shiftTypes || defaultShiftTypes, schedule: data.schedule || {}
+          shiftTypes: data.shiftTypes || defaultShiftTypes, schedule: data.schedule || {}, scheduleNotice: data.scheduleNotice, _schedulePublication: data._schedulePublication
         };
         if (data.settings) settingsRef.current = data.settings;
         setAppData({
           departments: data.departments || [],
           employees: data.employees || [],
           shiftTypes: data.shiftTypes || defaultShiftTypes,
-          schedule: data.schedule || {}
+          schedule: data.schedule || {}, scheduleNotice: data.scheduleNotice, _schedulePublication: data._schedulePublication
         });
         if (data.settings) {
           setAppSettings(data.settings);
@@ -287,13 +287,13 @@ export default function App() {
             console.log('[Cache Fallback] Loading application data from local storage cache.');
             const data = JSON.parse(cached);
             if (data._version) serverVersions.current[companyId] = data._version;
-            dataRef.current = { departments: data.departments || [], employees: data.employees || [], shiftTypes: data.shiftTypes || defaultShiftTypes, schedule: data.schedule || {} };
+            dataRef.current = { departments: data.departments || [], employees: data.employees || [], shiftTypes: data.shiftTypes || defaultShiftTypes, schedule: data.schedule || {}, scheduleNotice: data.scheduleNotice, _schedulePublication: data._schedulePublication };
             if (data.settings) settingsRef.current = data.settings;
             setAppData({
               departments: data.departments || [],
               employees: data.employees || [],
               shiftTypes: data.shiftTypes || defaultShiftTypes,
-              schedule: data.schedule || {}
+              schedule: data.schedule || {}, scheduleNotice: data.scheduleNotice, _schedulePublication: data._schedulePublication
             });
             if (data.settings) {
               setAppSettings(data.settings);
@@ -400,6 +400,8 @@ export default function App() {
         cacheData(targetCompany, result);
         if (companyRef.current === targetCompany && revision.current === saveRevision) {
           unsaved.current = false;
+          dataRef.current = { ...dataRef.current, _schedulePublication: result._schedulePublication };
+          setAppData((previous: any) => ({ ...previous, _schedulePublication: result._schedulePublication }));
           setSaveError('');
         }
         return true;
@@ -608,6 +610,7 @@ export default function App() {
           element={
             session.role === 'employee' ? (
               <EmployeePortal
+                scheduleNotice={appData.scheduleNotice}
                 employee={appData.employees.find(e => String(e.id) === String(session.info.id)) || session.info}
                 onRefreshSchedule={() => refreshMainData.current()}
                 scheduleRefreshing={dataRefreshing}
@@ -644,6 +647,7 @@ export default function App() {
                 onLogout={handleLogout}
                 onUpdateSettings={handleUpdateSettings}
                 onUpdateAppData={handleUpdateAppData}
+                onRefreshData={() => refreshMainData.current()}
                 registrationRequests={registrationRequests}
                 companyId={companyId}
                 companiesList={companiesList}

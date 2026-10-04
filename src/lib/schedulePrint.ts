@@ -21,7 +21,7 @@ export function shiftPrintInfo(shift: any) {
 }
 export interface SchedulePrintOptions {
   companyName: string; logoDataUrl?: string; departments: any[]; employees: any[];
-  shiftTypes: any[]; schedule: any; month: string; exportedAt?: Date;
+  shiftTypes: any[]; schedule: any; month: string; exportedAt?: Date; publicationLabel?: string;
 }
 export function schedulePrintHtml(o: SchedulePrintOptions) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(o.month)) throw new Error('اختر شهراً صحيحاً للتصدير');
@@ -36,7 +36,7 @@ export function schedulePrintHtml(o: SchedulePrintOptions) {
   const byId = new Map(o.shiftTypes.map(s => [s.id, s]));
   const table = (head: string[], rows: string, extra = '') => `<table ${extra}>${extra.includes('notes') ? '<colgroup><col style="width:12%"><col style="width:9%"><col style="width:19%"><col style="width:17%"><col style="width:43%"></colgroup>' : ''}<thead><tr>${head.map(h => `<th>${escape(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
   const row = (values: unknown[]) => `<tr>${values.map(v => `<td>${escape(v)}</td>`).join('')}</tr>`;
-  const add = (dept: any, subtitle: string, body: string) => pages.push(`<section class="page"><header>${logo}<div><h1>${escape(o.companyName || 'الشركة')}</h1><h2>جدول الدوام والشيفتات - ${escape(dept.name)}</h2><p>الشهر: <b dir="ltr">${escape(o.month)}</b> · ${escape(subtitle)}</p></div></header>${body}<div class="section-footer">${escape(dept.name)} · ${escape(o.month)} · جزء التقرير ${pages.length + 1}</div></section>`);
+  const add = (dept: any, subtitle: string, body: string) => pages.push(`<section class="page"><header>${logo}<div><h1>${escape(o.companyName || 'الشركة')}</h1><h2>جدول الدوام والشيفتات - ${escape(dept.name)}</h2>${o.publicationLabel ? `<p><strong>${escape(o.publicationLabel)}</strong></p>` : ''}<p>الشهر: <b dir="ltr">${escape(o.month)}</b> · ${escape(subtitle)}</p></div></header>${body}<div class="section-footer">${escape(dept.name)} · ${escape(o.month)} · جزء التقرير ${pages.length + 1}</div></section>`);
   for (const dept of o.departments) {
     const staff = o.employees.filter(e => e.dept === dept.id);
     const summaries = staff.map(e => {
