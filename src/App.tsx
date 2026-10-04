@@ -91,8 +91,9 @@ export default function App() {
   const [dataSyncError, setDataSyncError] = useState('');
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
+  const cacheKey = (id: string) => `schedule_mainData_v2_${JSON.stringify([id, session.role, session.info?.id || session.info?.username || null])}`;
   const cacheData = (id: string, data: any) => {
-    try { localStorage.setItem(`schedule_mainData_${id}`, JSON.stringify(data)); }
+    try { localStorage.setItem(cacheKey(id), JSON.stringify(data)); }
     catch (error) { console.warn('Could not cache application data', error); }
   };
 
@@ -281,7 +282,7 @@ export default function App() {
         if (cancelled || fetchRevision !== revision.current || unsaved.current) return false;
         setDataSyncError('تعذر تحديث الجدول من السيرفر؛ البيانات المعروضة قد تكون قديمة.');
         if (receivedData) return false;
-        const cached = localStorage.getItem(`schedule_mainData_${companyId}`);
+        const cached = localStorage.getItem(cacheKey(companyId));
         if (cached) {
           try {
             console.log('[Cache Fallback] Loading application data from local storage cache.');
