@@ -1,13 +1,14 @@
 interface RequestsViewProps {
+  reviewingRequest?: string | null;
   adminRequests: any[];
   requestsLoading: boolean;
   onReview: (requestId: string, decision: 'approved' | 'rejected') => void;
 }
 
-export default function RequestsView({ adminRequests, requestsLoading, onReview }: RequestsViewProps) {
+export default function RequestsView({ adminRequests, requestsLoading, onReview, reviewingRequest }: RequestsViewProps) {
   return (
     <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
-      <h3 className="font-extrabold text-slate-800 text-sm mb-3">طلبات الإجازات والشيفتات الواردة</h3>
+      <h3 className="font-extrabold text-slate-800 text-sm mb-3">طلبات الدوام وتصحيح البصمة</h3>
 
       {requestsLoading ? (
         <div className="py-8 text-center text-xs text-slate-400">جاري تحميل الطلبات الواردة...</div>
@@ -22,7 +23,7 @@ export default function RequestsView({ adminRequests, requestsLoading, onReview 
             let typeLabel = 'طلب إجازة';
             if (req.type === 'shift_change') typeLabel = 'تغيير شيفت الدوام';
             if (req.type === 'swap') typeLabel = `تبديل شيفت مع ${req.swapWithEmpName}`;
-            if (req.type === 'attendance_adjustment') typeLabel = 'تعديل لقطات البصمة';
+            if (req.type === 'attendance_adjustment') typeLabel = 'تصحيح بصمة الحضور والانصراف';
 
             return (
               <div key={req.id} className="p-4 border border-sky-50 rounded-xl bg-slate-50/50 flex justify-between items-start flex-wrap gap-3 text-xs">
@@ -39,16 +40,18 @@ export default function RequestsView({ adminRequests, requestsLoading, onReview 
                       </span>
                     )}
                   </div>
-                  {req.note && <div className="p-2 bg-white rounded mt-1.5 border leading-relaxed text-[11px]">{req.note}</div>}
+                  {(req.notes || req.note) && <div className="p-2 bg-white rounded mt-1.5 border leading-relaxed text-[11px]">{req.notes || req.note}</div>}
 
+                  {req.type === 'attendance_adjustment' && <div className="text-xs mt-2 space-y-1"><p>الفترة: {req.details?.period === 2 ? 'الثانية' : 'الأولى'} · الطرف الفارغ لن يتغير</p><p>البصمة الأصلية: حضور {req.details?.original?.[req.details?.period === 2 ? 'checkIn2' : 'checkIn'] || 'غير مسجل'} · انصراف {req.details?.original?.[req.details?.period === 2 ? 'checkOut2' : 'checkOut'] || 'غير مسجل'}</p>{req.details?.checkInNextDay && <p>الحضور المطلوب في اليوم التالي</p>}{req.details?.checkOutNextDay && <p>الانصراف المطلوب في اليوم التالي</p>}<p className="text-slate-500">الأصل محفوظ في سجل التصحيح. إذا تغيرت البصمة بعد التقديم، لن تُعتمد نسخة قديمة.</p></div>}
+                  {req.reviewReason && <p className="mt-2 text-xs">سبب / ملاحظة المراجعة: {req.reviewReason}</p>}
                   {!isPending && (req.reviewedBy || req.reviewedAt) && (
                     <div className="mt-2 text-[10px] text-slate-600 bg-slate-100/60 p-2 border border-slate-200/50 rounded-lg flex items-center gap-2 flex-wrap">
                       <span>
-                        👮 مراجع البوبة: <strong className="font-extrabold text-slate-900">{req.reviewedBy || 'المدير'}</strong>
+                        👮 راجع الطلب: <strong className="font-extrabold text-slate-900">{req.reviewedBy || 'المدير'}</strong>
                       </span>
                       <span className="text-slate-300">|</span>
                       <span>
-                        وقت الإجراء: <strong className="font-extrabold text-slate-700">{req.reviewedAt}</strong>
+                        وقت الإجراء: <strong className="font-extrabold text-slate-700">{req.reviewedAt ? new Date(req.reviewedAt).toLocaleString('ar-SA-u-ca-gregory', { timeZone: 'Asia/Riyadh' }) : '-'}</strong>
                       </span>
                     </div>
                   )}
@@ -70,12 +73,14 @@ export default function RequestsView({ adminRequests, requestsLoading, onReview 
                   {isPending && (
                     <div className="flex gap-1.5 mt-2">
                       <button
+                        disabled={!!reviewingRequest}
                         onClick={() => onReview(req.id, 'approved')}
                         className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold transition-all"
                       >
                         قبول واعتماد
                       </button>
                       <button
+                        disabled={!!reviewingRequest}
                         onClick={() => onReview(req.id, 'rejected')}
                         className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-[10px] font-bold transition-all"
                       >

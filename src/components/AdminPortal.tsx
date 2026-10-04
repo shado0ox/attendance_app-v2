@@ -695,29 +695,35 @@ export default function AdminPortal({
     }
   };
 
+  const [reviewingRequest, setReviewingRequest] = useState<string | null>(null);
   const handleReviewRequest = async (requestId: string, decision: 'approved' | 'rejected') => {
     if (!hasPermission('canApproveRequests')) {
       alert('ليس لديك صلاحية لاعتماد الطلبات');
       return;
     }
 
-    const matchedReq = adminRequests.find((r) => r.id === requestId);
+    if (reviewingRequest) return;
+    const matchedReq = adminRequests.find((r) => String(r.id) === String(requestId));
     if (!matchedReq) return;
-
+    const reviewReason = window.prompt(decision === 'rejected' ? 'سبب رفض الطلب (مطلوب):' : 'ملاحظة الموافقة (اختياري):', '');
+    if (reviewReason === null || (decision === 'rejected' && !reviewReason.trim())) return;
+    if (decision === 'approved' && matchedReq.type === 'attendance_adjustment' && !window.confirm('اعتماد الأوقات المطلوبة وتصحيح السجل؟ راجع البصمة الأصلية والسبب المعروضين أولًا.')) return;
+    setReviewingRequest(String(requestId));
     try {
       // 1. Update request status
       const reqResponse = await fetch(`/api/requests/${requestId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: decision })
+        body: JSON.stringify({ status: decision, reviewReason })
       });
 
       if (!reqResponse.ok) {
-        throw new Error('فشل تحديث حالة الطلب في قاعدة البيانات');
+        const result = await reqResponse.json().catch(() => ({}));
+        throw new Error(result.error || 'فشل تحديث حالة الطلب في قاعدة البيانات');
       }
 
       // Apply changes inline to schedule on approval
-      if (decision === 'approved') {
+      if (decision === 'approved' && matchedReq.type !== 'attendance_adjustment') {
         const updatedSch = { ...schedule };
         if (!updatedSch[matchedReq.date]) updatedSch[matchedReq.date] = {};
 
@@ -731,57 +737,6 @@ export default function AdminPortal({
 
           updatedSch[matchedReq.date][matchedReq.empId] = { shiftType: originalShift2.shiftType, note: `بديل لـ ${matchedReq.swapWithEmpName}` };
           updatedSch[matchedReq.date][matchedReq.swapWithEmpId] = { shiftType: originalShift1.shiftType, note: `بديل لـ ${matchedReq.empName}` };
-        } else if (matchedReq.type === 'attendance_adjustment') {
-          // Look up this employee-day independently of the currently displayed report.
-          const existingResponse = await fetch(`/api/attendance?${new URLSearchParams({ companyId, from: matchedReq.date, to: matchedReq.date, empId: matchedReq.empId })}`);
-          if (!existingResponse.ok) throw new Error('تعذر التحقق من سجل البصمة');
-          const existingRecord = (await existingResponse.json())[0];
-
-          const formattedCheckIn = matchedReq.checkInTime || '08:00';
-          const formattedCheckOut = matchedReq.checkOutTime || '16:00';
-
-          const [inH, inM] = formattedCheckIn.split(':').map(Number);
-          const [outH, outM] = formattedCheckOut.split(':').map(Number);
-
-          const inDateObj = new Date(matchedReq.date);
-          inDateObj.setHours(inH || 8, inM || 0, 0, 0);
-
-          const outDateObj = new Date(matchedReq.date);
-          outDateObj.setHours(outH || 16, outM || 0, 0, 0);
-
-          const checkInTimestamp = isNaN(inDateObj.getTime()) ? Date.now() : inDateObj.getTime();
-          const checkOutTimestamp = isNaN(outDateObj.getTime()) ? Date.now() : outDateObj.getTime();
-
-          const attendancePayload: any = {
-            empId: matchedReq.empId,
-            empName: matchedReq.empName,
-            date: matchedReq.date,
-            checkIn: formattedCheckIn,
-            checkInTs: checkInTimestamp,
-            checkOut: formattedCheckOut,
-            checkOutTs: checkOutTimestamp,
-            note: 'تم البصم بموافقة الإدارة',
-            status: 'present',
-            source: 'الإدارة',
-            companyId: companyId || 'default'
-          };
-
-          if (existingRecord) {
-            attendancePayload.id = existingRecord.id;
-          } else {
-            const empObj = employees.find((e) => e.id === matchedReq.empId);
-            attendancePayload.dept = empObj?.dept || '';
-          }
-
-          const attResponse = await fetch('/api/attendance', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(attendancePayload)
-          });
-
-          if (!attResponse.ok) {
-            throw new Error('فشل تعديل سجل البصمة المعتمدة');
-          }
         }
 
         onUpdateAppData({ ...appData, schedule: updatedSch });
@@ -792,7 +747,7 @@ export default function AdminPortal({
       loadAttendance();
     } catch (e: any) {
       alert('حدث خطأ: ' + e.message);
-    }
+    } finally { setReviewingRequest(null); }
   };
 
   const handleLogoUpload = (e: any) => {
@@ -1274,7 +1229,8 @@ export default function AdminPortal({
 
           {/* View: Received Requests approval */}
           {activeView === 'requests' && (
-            <RequestsView adminRequests={adminRequests} requestsLoading={requestsLoading} onReview={handleReviewRequest} />
+            <RequestsView adminRequests={adminRequests} requestsLoading={requestsLoading} onReview={handleReviewRequest}
+              reviewingRequest={reviewingRequest} />
           )}
 
           {/* View: Shift Types Management */}

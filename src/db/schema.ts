@@ -103,6 +103,10 @@ export const requests = pgTable('requests', {
   checkInTime: text('check_in_time'),
   checkOutTime: text('check_out_time'),
   
+  details: jsonb('details').default({}),
+  reviewedBy: text('reviewed_by'),
+  reviewedAt: timestamp('reviewed_at'),
+  reviewReason: text('review_reason'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
