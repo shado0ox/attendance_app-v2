@@ -1,3 +1,4 @@
+import { parseEmployeeProfileQuery, employeeProfileData, employeeProfileSchedule } from './src/lib/employeeProfile';
 import { correctionValues, validCorrectionTime, CorrectionValidationError } from './src/lib/attendanceCorrection';
 import { scheduleContent, effectiveScheduleData, employeeScheduleContent } from './src/lib/schedulePublication';
 import { employeeStatus, isActiveEmployee, employeeChanges, saveEmploymentHistory, employeeAtDate } from './src/lib/employeeLifecycle';
@@ -1613,6 +1614,46 @@ app.delete('/api/admins/:id', requireAuth(['admin', 'superadmin'], false), requi
       details: error?.message || String(error)
     });
   }
+});
+
+// Sections are requested on demand; never return another employee's records or login secrets.
+app.get('/api/employees/:id/profile', requireAuth(['admin', 'superadmin']), async (req, res) => {
+  let query: ReturnType<typeof parseEmployeeProfileQuery>;
+  try { query = parseEmployeeProfileQuery(req.query); } catch (error: any) { return res.status(400).json({ error: error.message }); }
+  const companyId = String(req.query.companyId || 'default');
+  res.set('Cache-Control', 'private, no-store');
+  try {
+    const mainData = await getMainDataByCompanyId(companyId);
+    const employee = mainData?.employees?.find((e: any) => String(e.id) === req.params.id);
+    if (!employee) return res.status(404).json({ error: 'الموظف غير موجود في هذه الشركة' });
+    if (query.section === 'overview') return res.json({ employee: employeeProfileData(employee, mainData.departments || []) });
+    if (query.section === 'schedule') return res.json(employeeProfileSchedule(mainData, employee, query));
+    if (query.section === 'history') {
+      const items = await db.select().from(schema.auditLog).where(and(eq(schema.auditLog.companyId, companyId), eq(schema.auditLog.entityId, String(employee.id)), sql`${schema.auditLog.action} LIKE 'employee.%'`)).orderBy(desc(schema.auditLog.createdAt), desc(schema.auditLog.id)).limit(100);
+      return res.json({ items });
+    }
+    if (query.section === 'requests') {
+      const scope = and(eq(schema.requests.companyId, companyId), eq(schema.requests.empId, String(employee.id)), sql`${schema.requests.date} >= ${query.from}`, sql`${schema.requests.date} <= ${query.to}`);
+      const [counts] = await db.select({ total: sql<number>`count(*)::int`, pending: sql<number>`count(*) filter (where ${schema.requests.status} = 'pending')::int`, approved: sql<number>`count(*) filter (where ${schema.requests.status} = 'approved')::int`, rejected: sql<number>`count(*) filter (where ${schema.requests.status} = 'rejected')::int` }).from(schema.requests).where(scope);
+      const pageCount = Math.max(1, Math.ceil(counts.total / query.pageSize)), page = Math.min(query.page, pageCount);
+      const items = await db.select({ id: schema.requests.id, date: schema.requests.date, type: schema.requests.type, notes: schema.requests.notes, status: schema.requests.status, createdAt: schema.requests.createdAt, reviewReason: schema.requests.reviewReason, reviewedAt: schema.requests.reviewedAt, targetShift: schema.requests.targetShift, swapWithEmpName: schema.requests.swapWithEmpName, checkInTime: schema.requests.checkInTime, checkOutTime: schema.requests.checkOutTime, details: schema.requests.details }).from(schema.requests).where(scope).orderBy(desc(schema.requests.createdAt), desc(schema.requests.id)).limit(query.pageSize).offset((page - 1) * query.pageSize);
+      return res.json({ items: items.map(({ details, ...item }) => {
+        const info = details as any;
+        const suffix = info?.period === 2 ? '2' : '';
+        return { ...item, period: info?.period === 2 ? 2 : 1, checkInNextDay: info?.checkInNextDay === true, checkOutNextDay: info?.checkOutNextDay === true,
+          originalCheckIn: info?.original?.['checkIn' + suffix] || null, originalCheckOut: info?.original?.['checkOut' + suffix] || null,
+          targetShiftName: mainData.shiftTypes?.find((shift: any) => shift.id === item.targetShift)?.name || item.targetShift || '' };
+      }), ...counts, page, pageCount });
+    }
+    const scope = and(eq(schema.attendance.companyId, companyId), eq(schema.attendance.empId, String(employee.id)), sql`${schema.attendance.date} >= ${query.from}`, sql`${schema.attendance.date} <= ${query.to}`);
+    const records = await db.select().from(schema.attendance).where(scope).orderBy(desc(schema.attendance.id));
+    const leaves = await db.select().from(schema.requests).where(and(eq(schema.requests.companyId, companyId), eq(schema.requests.empId, String(employee.id)), eq(schema.requests.type, 'leave'), eq(schema.requests.status, 'approved'), sql`${schema.requests.date} >= ${query.from}`, sql`${schema.requests.date} <= ${query.to}`));
+    const analysisQuery = parseAttendanceQuery({ from: query.from, to: query.to, empId: String(employee.id), analysis: '1', mode: 'all' });
+    const days = analyzeAttendance(buildAttendanceDays(records, mainData.settings), effectiveScheduleData(mainData), analysisQuery, leaves);
+    const report = attendanceReportPage(days, analysisQuery);
+    // Keep actual attendance locations, but avoid exposing raw coordinates or unrelated metadata.
+    return res.json({ ...report, items: report.items.map(day => ({ date: day.date, departmentName: mainData.departments?.find((d: any) => d.id === day.dept)?.name || day.dept || 'بدون قسم', first: day.first, last: day.last, minutes: day.minutes, reportStatus: day.reportStatus, analysis: day.analysis, note: day.note || '' })) });
+  } catch (error) { console.error('Employee profile query failed', error); return res.status(500).json({ error: 'تعذر تحميل ملف الموظف' }); }
 });
 
 app.get('/api/employee-audit', requireAuth(['admin', 'superadmin']), async (req, res) => {
