@@ -151,6 +151,19 @@ export default function AdminPortal({
   const [emDept, setEmDept] = useState('');
   const [emUsername, setEmUsername] = useState('');
   const [emPhone, setEmPhone] = useState('');
+  const [emEmail, setEmEmail] = useState('');
+  const [emWelcome, setEmWelcome] = useState(true);
+  const [welcomeBusy, setWelcomeBusy] = useState(false);
+  const sendWelcome = async (id: string) => {
+    if (welcomeBusy) return;
+    setWelcomeBusy(true);
+    try {
+      const response = await fetch(`/api/employees/${encodeURIComponent(id)}/welcome-email?companyId=${encodeURIComponent(companyId)}`, { method: 'POST' });
+      const result = await response.json();
+      alert(response.ok ? result.message : `الموظف محفوظ، لكن البريد لم يُرسل: ${result.error}`);
+    } catch { alert('الموظف محفوظ؛ تعذر تأكيد إرسال البريد. استخدم زر رسالة الترحيب للمحاولة مرة أخرى.'); }
+    finally { setWelcomeBusy(false); }
+  };
   const [emColor, setEmColor] = useState('#01696f');
   const [emPassword, setEmPassword] = useState('');
   const [emRestrictLocations, setEmRestrictLocations] = useState(false);
@@ -501,6 +514,7 @@ export default function AdminPortal({
 
   const handleAddEmployee = async () => {
     if (!emName.trim()) return;
+    if (emEmail.trim() && !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(emEmail.trim())) { alert('أدخل بريدًا إلكترونيًا صحيحًا'); return; }
     if (emRestrictLocations && !emLocationIds.some(id => employeeLocationOptions.some(site => site.id === id))) {
       alert('اختر موقع بصمة مفعّلًا واحدًا على الأقل للموظف.'); return;
     }
@@ -511,6 +525,7 @@ export default function AdminPortal({
       name: emName.trim(),
       dept: emDept || departments[0]?.id || '',
       phone: emPhone.trim(),
+      email: emEmail.trim(),
       username: emUsername.trim(),
       password: emPassword.trim(),
       color: emColor
@@ -524,8 +539,10 @@ export default function AdminPortal({
     }
 
     if (!await onUpdateAppData({ ...appData, employees: updatedEmployees })) return;
+    const shouldWelcome = !editingEmpId && emWelcome && !!newEmp.email;
     setEmpModalOpen(false);
     setEditingEmpId(null);
+    if (shouldWelcome) await sendWelcome(newEmp.id);
   };
 
   const handleDeleteEmployee = (id: string) => {
@@ -1149,6 +1166,8 @@ export default function AdminPortal({
                 setEmDept(departments[0]?.id || '');
                 setEmUsername('');
                 setEmPhone('');
+                setEmEmail('');
+                setEmWelcome(true);
                 setEmColor('#01696f');
                 setEmPassword('');
                 setEmRestrictLocations(false);
@@ -1161,6 +1180,7 @@ export default function AdminPortal({
                 setEmDept(emp.dept);
                 setEmUsername(emp.username || '');
                 setEmPhone(emp.phone || '');
+                setEmEmail(emp.email || '');
                 setEmColor(emp.color || '#01696f');
                 setEmPassword(emp.password || '');
                 setEmRestrictLocations(!!emp.restrictAttendanceLocations);
@@ -1169,6 +1189,8 @@ export default function AdminPortal({
               }}
               onDelete={handleDeleteEmployee}
               onOpenWhatsApp={handleOpenWaModal}
+              onSendWelcome={sendWelcome}
+              welcomeBusy={welcomeBusy}
             />
           )}
 
@@ -1902,6 +1924,11 @@ export default function AdminPortal({
                 />
               </div>
 
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold">البريد الإلكتروني للموظف (اختياري)</label>
+                <input type="email" dir="ltr" maxLength={254} value={emEmail} onChange={e => setEmEmail(e.target.value)} placeholder="employee@example.com" className="px-3 py-2 text-xs border rounded-lg" />
+                {!editingEmpId && <label className="text-xs flex gap-2"><input type="checkbox" checked={emWelcome} onChange={e => setEmWelcome(e.target.checked)} />إرسال رسالة ترحيب بعد حفظ الموظف (يتطلب إعداد Resend)</label>}
+              </div>
               <fieldset className="border rounded-xl p-3 flex flex-col gap-2">
                 <legend className="text-xs font-bold">مواقع البصمة المسموحة</legend>
                 <label className="text-xs flex gap-2 items-center">

@@ -2,6 +2,8 @@ import { getEmployeeLocations } from '../../lib/attendanceLocations';
 import { Plus, MessageCircle } from 'lucide-react';
 
 interface EmployeesViewProps {
+  onSendWelcome: (id: string) => void;
+  welcomeBusy: boolean;
   employees: any[];
   departments: any[];
   appSettings?: any;
@@ -11,7 +13,7 @@ interface EmployeesViewProps {
   onOpenWhatsApp: (empId: string) => void;
 }
 
-export default function EmployeesView({ employees, departments, appSettings, onAddNew, onEdit, onDelete, onOpenWhatsApp }: EmployeesViewProps) {
+export default function EmployeesView({ onSendWelcome, welcomeBusy, employees, departments, appSettings, onAddNew, onEdit, onDelete, onOpenWhatsApp }: EmployeesViewProps) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex justify-between items-center mb-2">
@@ -50,6 +52,7 @@ export default function EmployeesView({ employees, departments, appSettings, onA
 
               <div className="flex flex-col gap-1 text-[10px] text-slate-500 font-medium">
                 <div>
+                  البريد: <strong>{emp.email || 'غير مسجل'}</strong><br />
                   الجوال/واتساب: <strong className="font-extrabold text-slate-700">{emp.phone || 'غير مسجل'}</strong>
                 </div>
                 <div>
@@ -65,7 +68,8 @@ export default function EmployeesView({ employees, departments, appSettings, onA
                 </div>
               </div>
 
-              <div className="flex gap-1.5 justify-end mt-2 pt-2 border-t text-[10px]">
+              <div className="flex flex-wrap gap-1.5 justify-end mt-2 pt-2 border-t text-[10px]">
+                {emp.email && <button disabled={welcomeBusy} onClick={() => onSendWelcome(emp.id)} className="px-2.5 py-1 text-teal-700 disabled:opacity-50">{welcomeBusy ? 'جارٍ إرسال البريد…' : 'رسالة الترحيب / إعادة المحاولة'}</button>}
                 <button
                   onClick={() => onOpenWhatsApp(emp.id)}
                   className="flex items-center gap-1 px-2.5 py-1 text-sky-600 hover:bg-sky-50 rounded font-bold"
