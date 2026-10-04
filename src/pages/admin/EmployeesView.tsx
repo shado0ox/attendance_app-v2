@@ -1,95 +1,41 @@
+import { useMemo, useState } from 'react';
+import { Plus, Search } from 'lucide-react';
 import { getEmployeeLocations } from '../../lib/attendanceLocations';
-import { Plus, MessageCircle } from 'lucide-react';
-
+import { filterEmployees, validEmployeeEmail } from '../../lib/employeeDirectory';
+import DepartmentBadge from '../../components/DepartmentBadge';
 interface EmployeesViewProps {
-  onSendWelcome: (id: string) => void;
-  welcomeBusy: boolean;
-  employees: any[];
-  departments: any[];
-  appSettings?: any;
-  onAddNew: () => void;
-  onEdit: (emp: any) => void;
-  onDelete: (empId: string) => void;
-  onOpenWhatsApp: (empId: string) => void;
+  employees: any[]; departments: any[]; appSettings?: any;
+  onAddNew: () => void; onEdit: (emp: any) => void; onDelete: (id: string) => void;
+  onOpenWhatsApp: (id: string) => void; onSendWelcome: (id: string) => void; welcomeBusy: boolean;
+  onAssignDepartment: (ids: string[], department: string) => Promise<boolean>;
 }
-
-export default function EmployeesView({ onSendWelcome, welcomeBusy, employees, departments, appSettings, onAddNew, onEdit, onDelete, onOpenWhatsApp }: EmployeesViewProps) {
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex justify-between items-center mb-2">
-        <h3 className="text-sm font-extrabold text-slate-800">قائمة بطاقات وموظفو الدوام</h3>
-        <button
-          onClick={onAddNew}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold text-xs shadow-sm transition-all"
-        >
-          <Plus size={14} />
-          <span>إضافة موظف جديد</span>
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {employees.map((emp) => {
-          const empDept = departments.find((d) => d.id === emp.dept);
-          return (
-            <div
-              key={emp.id}
-              className="p-5 bg-white border border-sky-100 rounded-xl shadow-sm flex flex-col gap-3 relative overflow-hidden text-right"
-              dir="rtl"
-            >
-              <div className="absolute top-0 right-0 w-2.5 h-full" style={{ backgroundColor: emp.color }}></div>
-              <div className="flex items-center gap-3">
-                <div
-                  className="flex items-center justify-center w-10 h-10 text-sm font-black text-white rounded-full shadow-sm"
-                  style={{ backgroundColor: emp.color }}
-                >
-                  {emp.name.charAt(0)}
-                </div>
-                <div>
-                  <h4 className="font-extrabold text-slate-800 text-xs text-right">{emp.name}</h4>
-                  <p className="text-[10px] text-slate-400 mt-0.5 text-right">{empDept ? empDept.name : 'بدون فرع'}</p>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-1 text-[10px] text-slate-500 font-medium">
-                <div>
-                  البريد: <strong>{emp.email || 'غير مسجل'}</strong><br />
-                  الجوال/واتساب: <strong className="font-extrabold text-slate-700">{emp.phone || 'غير مسجل'}</strong>
-                </div>
-                <div>
-                  مواقع البصمة: <strong className="font-extrabold text-sky-700">{emp.restrictAttendanceLocations
-                    ? (getEmployeeLocations(appSettings, emp).map(site => site.name).join('، ') || 'لا توجد مواقع مفعّلة مسموحة')
-                    : 'كل مواقع الشركة المفعّلة'}</strong>
-                </div>
-                <div>
-                  حساب البوابة: <strong className="font-extrabold text-slate-700">{emp.username || 'غير مسجل'}</strong>
-                </div>
-                <div>
-                  الرمز السري: <strong className="font-extrabold text-emerald-600">{emp.password || '123456'}</strong>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5 justify-end mt-2 pt-2 border-t text-[10px]">
-                {emp.email && <button disabled={welcomeBusy} onClick={() => onSendWelcome(emp.id)} className="px-2.5 py-1 text-teal-700 disabled:opacity-50">{welcomeBusy ? 'جارٍ إرسال البريد…' : 'رسالة الترحيب / إعادة المحاولة'}</button>}
-                <button
-                  onClick={() => onOpenWhatsApp(emp.id)}
-                  className="flex items-center gap-1 px-2.5 py-1 text-sky-600 hover:bg-sky-50 rounded font-bold"
-                >
-                  <MessageCircle size={12} />
-                  <span>إرسال الجدول</span>
-                </button>
-
-                <button onClick={() => onEdit(emp)} className="px-2.5 py-1 hover:bg-slate-50 text-slate-500 rounded font-bold">
-                  تعديل
-                </button>
-
-                <button onClick={() => onDelete(emp.id)} className="px-2.5 py-1 hover:bg-rose-50 text-rose-500 rounded font-bold">
-                  حذف
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+export default function EmployeesView({ employees, departments, appSettings, onAddNew, onEdit, onDelete, onOpenWhatsApp, onSendWelcome, welcomeBusy, onAssignDepartment }: EmployeesViewProps) {
+  const [query, setQuery] = useState('');
+  const [department, setDepartment] = useState('all');
+  const [missingEmail, setMissingEmail] = useState(false);
+  const [sort, setSort] = useState('name');
+  const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [target, setTarget] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [revealed, setRevealed] = useState<string[]>([]);
+  const filtered = useMemo(() => filterEmployees(employees, departments, query, department, missingEmail).sort((a, b) => String(sort === 'department' ? departments.find(d => d.id === a.dept)?.name || '' : a.name).localeCompare(String(sort === 'department' ? departments.find(d => d.id === b.dept)?.name || '' : b.name), 'ar') || String(a.name).localeCompare(String(b.name), 'ar')), [employees, departments, query, department, missingEmail, sort]);
+  const pages = Math.max(1, Math.ceil(filtered.length / 20));
+  const currentPage = Math.min(page, pages);
+  const visible = filtered.slice((currentPage - 1) * 20, currentPage * 20);
+  const selectedVisible = filtered.filter(e => selected.includes(e.id)).map(e => e.id);
+  const reset = () => { setPage(1); setSelected([]); };
+  const assign = async () => {
+    if (!target || !selectedVisible.length || !window.confirm(`نقل ${selectedVisible.length} موظف إلى ${departments.find(d => d.id === target)?.name}؟`)) return;
+    setBusy(true);
+    try { if (await onAssignDepartment(selectedVisible, target)) { setSelected([]); setTarget(''); } } finally { setBusy(false); }
+  };
+  return <div className="flex flex-col gap-4" dir="rtl">
+    <div className="flex flex-wrap justify-between gap-3 items-center"><div><h3 className="font-extrabold text-slate-800">شؤون الموظفين</h3><p className="text-xs text-slate-500 mt-1">البحث وإدارة الأقسام وبيانات التواصل</p></div><button onClick={onAddNew} className="flex gap-2 items-center px-4 py-2 bg-sky-600 text-white rounded-lg text-xs font-bold"><Plus size={16} />إضافة موظف</button></div>
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{[['إجمالي الموظفين', employees.length], ['الأقسام', departments.length], ['بريد غير مكتمل', employees.filter(e => !validEmployeeEmail(e.email)).length], ['بدون قسم', employees.filter(e => !departments.some(d => d.id === e.dept)).length]].map(([label, count]) => <div key={label} className="bg-white border rounded-xl p-3"><div className="text-xs text-slate-500">{label}</div><strong className="text-xl text-slate-800">{count}</strong></div>)}</div>
+    <div className="flex flex-wrap gap-3 bg-white border rounded-xl p-3 items-center"><label className="flex items-center border rounded-lg px-2 gap-2 flex-1 min-w-48"><Search size={16} /><input aria-label="بحث الموظفين" className="p-2 text-xs w-full outline-none" placeholder="الاسم، المستخدم، الجوال أو البريد" value={query} onChange={e => { setQuery(e.target.value); reset(); }} /></label><select aria-label="فلتر القسم" className="border p-2 rounded-lg text-xs" value={department} onChange={e => { setDepartment(e.target.value); reset(); }}><option value="all">كل الأقسام</option><option value="unassigned">بدون قسم</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name} ({employees.filter(e => e.dept === d.id).length})</option>)}</select><select aria-label="ترتيب الموظفين" className="border p-2 rounded-lg text-xs" value={sort} onChange={e => { setSort(e.target.value); setPage(1); }}><option value="name">ترتيب بالاسم</option><option value="department">ترتيب بالقسم</option></select><label className="text-xs flex gap-2"><input type="checkbox" checked={missingEmail} onChange={e => { setMissingEmail(e.target.checked); reset(); }} />بريد غير مكتمل</label></div>
+    {selectedVisible.length > 0 && <div className="flex flex-wrap items-center gap-3 p-3 bg-sky-50 border rounded-xl text-xs"><strong>{selectedVisible.length} موظف محدد</strong><select aria-label="القسم الجديد" className="border p-2 rounded" value={target} onChange={e => setTarget(e.target.value)}><option value="">اختر القسم الجديد</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select><button disabled={busy || !target} onClick={assign} className="bg-sky-600 text-white rounded px-3 py-2 disabled:opacity-50">{busy ? 'جارٍ الحفظ…' : 'نقل المحددين'}</button><button onClick={() => setSelected([])}>إلغاء التحديد</button><span className="text-slate-500">الجداول السابقة تظل محفوظة.</span></div>}
+    <div className="bg-white border rounded-xl overflow-x-auto"><table className="w-full min-w-[850px] text-xs text-right"><thead className="bg-slate-50 text-slate-600"><tr><th className="p-3"><input aria-label="تحديد موظفي الصفحة" type="checkbox" checked={visible.length > 0 && visible.every(e => selected.includes(e.id))} onChange={e => setSelected(ids => e.target.checked ? [...new Set([...ids, ...visible.map(e => e.id)])] : ids.filter(id => !visible.some(e => e.id === id)))} /></th>{['الموظف / الحساب', 'القسم', 'بيانات التواصل', 'مواقع البصمة', 'الإجراءات'].map(label => <th key={label} className="p-3">{label}</th>)}</tr></thead><tbody>{visible.map(emp => <tr key={emp.id} className="border-t hover:bg-sky-50/40"><td className="p-3"><input aria-label={`تحديد ${emp.name}`} type="checkbox" checked={selected.includes(emp.id)} onChange={e => setSelected(ids => e.target.checked ? [...ids, emp.id] : ids.filter(id => id !== emp.id))} /></td><td className="p-3"><strong>{emp.name}</strong><div className="text-slate-500 mt-1">{emp.username || 'حساب غير مكتمل'}</div><button className="text-[10px] text-slate-500 mt-1" onClick={() => setRevealed(ids => ids.includes(emp.id) ? ids.filter(id => id !== emp.id) : [...ids, emp.id])}>{revealed.includes(emp.id) ? `إخفاء الرمز: ${emp.password || '123456'}` : 'إظهار رمز الدخول'}</button></td><td className="p-3"><DepartmentBadge department={departments.find(d => d.id === emp.dept)} /></td><td className="p-3"><div dir="ltr" className="text-right">{emp.phone || 'جوال غير مسجل'}</div><div dir="ltr" className={`text-right mt-1 ${validEmployeeEmail(emp.email) ? 'text-slate-500' : 'text-amber-700'}`}>{emp.email || 'بانتظار إضافة البريد'}</div></td><td className="p-3 max-w-48 text-slate-500">{emp.restrictAttendanceLocations ? getEmployeeLocations(appSettings, emp).map(site => site.name).join('، ') || 'لا توجد مواقع مسموحة مفعّلة' : 'كل مواقع الشركة المفعّلة'}</td><td className="p-3"><div className="flex flex-wrap gap-2 max-w-56"><button onClick={() => onEdit(emp)} className="text-sky-700">تعديل</button><button onClick={() => onOpenWhatsApp(emp.id)} className="text-teal-700">إرسال الجدول</button>{validEmployeeEmail(emp.email) && <button disabled={welcomeBusy} onClick={() => onSendWelcome(emp.id)} className="text-sky-700 disabled:opacity-50">{welcomeBusy ? 'جارٍ الإرسال…' : 'رسالة الترحيب'}</button>}<button onClick={() => onDelete(emp.id)} className="text-rose-600">حذف</button></div></td></tr>)}</tbody></table>{!filtered.length && <p className="p-8 text-center text-slate-500 text-sm">لا يوجد موظفون مطابقون. غيّر البحث أو الفلاتر.</p>}</div>
+    <div className="flex justify-between items-center text-xs"><span>{filtered.length} موظف · صفحة {currentPage} من {pages}</span><div className="flex gap-3"><button disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)} className="border rounded px-3 py-2 disabled:opacity-40">السابق</button><button disabled={currentPage >= pages} onClick={() => setPage(currentPage + 1)} className="border rounded px-3 py-2 disabled:opacity-40">التالي</button></div></div>
+  </div>;
 }

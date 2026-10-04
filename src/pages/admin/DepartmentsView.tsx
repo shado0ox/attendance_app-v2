@@ -1,3 +1,4 @@
+import DepartmentBadge from '../../components/DepartmentBadge';
 import { Plus } from 'lucide-react';
 
 interface DepartmentsViewProps {
@@ -29,7 +30,7 @@ export default function DepartmentsView({ departments, employees, onAddNew, onEd
             <div key={dept.id} className="p-5 bg-white border border-sky-100 rounded-xl shadow-sm flex flex-col gap-4">
               <div className="flex justify-between items-start">
                 <div>
-                  <h4 className="font-extrabold text-slate-800 text-sm">{dept.name}</h4>
+                  <h4 className="font-extrabold text-slate-800 text-sm"><DepartmentBadge department={dept} /></h4>
                   <span className="inline-block mt-1 px-2.5 py-0.5 bg-sky-50 text-sky-700 text-[10px] font-extrabold rounded-full">
                     📋 {deptEmps.length} موظف نشط
                   </span>

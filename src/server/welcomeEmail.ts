@@ -1,4 +1,5 @@
-export const validEmployeeEmail = (value: unknown): value is string => typeof value === 'string' && value.length <= 254 && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value);
+import { validEmployeeEmail } from '../lib/employeeDirectory';
+export { validEmployeeEmail } from '../lib/employeeDirectory';
 const escape = (value: string) => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
 export function welcomePayload(employee: { name: string; email: string; username?: string }, company: string, env: NodeJS.ProcessEnv = process.env) {
