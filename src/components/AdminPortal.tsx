@@ -17,6 +17,7 @@ import { jsPDF } from 'jspdf';
 import AdminSidebar from './AdminSidebar';
 import DashboardView from '../pages/admin/DashboardView';
 import AttendanceView from '../pages/admin/AttendanceView';
+import AttendanceExceptionsView from '../pages/admin/AttendanceExceptionsView';
 import ScheduleView from '../pages/admin/ScheduleView';
 import AlertsView from '../pages/admin/AlertsView';
 import EmployeesView from '../pages/admin/EmployeesView';
@@ -1013,6 +1014,7 @@ export default function AdminPortal({
                 {activeView === 'dashboard' && 'لوحة التحكم المباشرة'}
                 {activeView === 'schedule' && 'جدول وشيفتات الدوام'}
                 {activeView === 'attendance' && 'كشف حضور وانصراف الموظفين'}
+                {activeView === 'exceptions' && 'استثناءات الحضور للمراجعة'}
                 {activeView === 'alerts' && 'تنبيهات غياب التغطية'}
                 {activeView === 'employees' && 'إدارة الموظفين والبطاقات'}
                 {activeView === 'shifttypes' && 'نوع ومدة الشيفت'}
@@ -1141,6 +1143,8 @@ export default function AdminPortal({
               }}
             />
           )}
+
+          {activeView === 'exceptions' && hasPermission('canViewReports') && <div key={companyId}><AttendanceExceptionsView companyId={companyId} employees={employees} departments={departments} onOpenDay={(empId, date) => { setAttFilterFrom(date); setAttFilterTo(date); setAttFilterEmp(empId); setAttFilterDept(''); setAttFilterStatus(''); navigate('/admin/attendance'); }} /></div>}
 
           {/* View: Department Coverage Alerts */}
           {activeView === 'alerts' && (

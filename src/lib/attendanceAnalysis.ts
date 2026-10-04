@@ -40,25 +40,27 @@ export function analyzeAttendance(days: any[], mainData: any, query: { from: str
   return [...grouped.values()].map(day => {
     const assigned = schedule[day.date]?.[day.empId];
     const shift: any = shifts.get(String(assigned?.shiftType));
-    const analysis: any = { status: 'غير مجدول', absent: false, needsReview: false, lateMinutes: null, earlyMinutes: null, overtimeMinutes: null, scheduledMinutes: null, graceMinutes: grace };
+    const analysis: any = { reason: 'unassigned', status: 'غير مجدول', absent: false, needsReview: false, lateMinutes: null, earlyMinutes: null, overtimeMinutes: null, scheduledMinutes: null, graceMinutes: grace };
     const hasPunch = !!day.first || !!day.last || day.ids.length > 0;
     if (leaveKeys.has(`${day.empId}|${day.date}`) || (assigned?.shiftType === 'A' && /إجازة معتمدة/.test(assigned.note || ''))) {
-      analysis.status = hasPunch ? 'إجازة مع بصمة — للمراجعة' : 'إجازة معتمدة'; analysis.needsReview = hasPunch;
-    } else if (['A', 'OFF'].includes(assigned?.shiftType)) analysis.status = hasPunch ? 'بصمة في يوم راحة — للمراجعة' : 'راحة';
+      analysis.reason = 'leave'; analysis.status = hasPunch ? 'إجازة مع بصمة — للمراجعة' : 'إجازة معتمدة'; analysis.needsReview = hasPunch;
+    } else if (['A', 'OFF'].includes(assigned?.shiftType)) { analysis.reason = 'rest'; analysis.status = hasPunch ? 'بصمة في يوم راحة — للمراجعة' : 'راحة'; }
     else if (assigned?.shiftType) {
       const window = shiftWindow(day.date, shift);
-      if (!window) { analysis.status = 'تعريف الدوام ناقص أو متداخل — للمراجعة'; analysis.needsReview = true; }
+      if (!window) { analysis.reason = 'shift_invalid'; analysis.status = 'تعريف الدوام ناقص أو متداخل — للمراجعة'; analysis.needsReview = true; }
       else {
+        analysis.reason = 'scheduled';
         analysis.scheduledMinutes = window.minutes; analysis.start = window.start; analysis.end = window.end;
         if (!hasPunch) {
+          analysis.reason = 'awaiting';
           analysis.absent = now >= window.end;
           analysis.status = analysis.absent ? 'غياب' : now < window.start ? 'لم يبدأ الدوام' : 'الدوام جارٍ — بدون بصمة';
-        } else if (day.minutes !== null && (day.first.time < window.start - 86400000 || day.last.time > window.end + 86400000)) { analysis.status = 'تاريخ البصمة لا يوافق الدوام — للمراجعة'; analysis.needsReview = true; }
-        else if (day.minutes === null) { analysis.status = 'بصمة ناقصة أو غير صالحة — للمراجعة'; analysis.needsReview = true; }
+        } else if (day.minutes !== null && (day.first.time < window.start - 86400000 || day.last.time > window.end + 86400000)) { analysis.reason = 'punch_date'; analysis.status = 'تاريخ البصمة لا يوافق الدوام — للمراجعة'; analysis.needsReview = true; }
+        else if (day.minutes === null) { analysis.reason = 'missing'; analysis.status = 'بصمة ناقصة أو غير صالحة — للمراجعة'; analysis.needsReview = true; }
         else {
           analysis.lateMinutes = Math.max(0, Math.round((day.first.time - window.start) / 60000) - grace);
           analysis.earlyMinutes = Math.max(0, Math.round((window.end - day.last.time) / 60000));
-          if (window.double) { analysis.status = 'فترتان — راجع بصمات كل فترة'; analysis.needsReview = true; }
+          if (window.double) { analysis.reason = 'double'; analysis.status = 'فترتان — راجع بصمات كل فترة'; analysis.needsReview = true; }
           else { analysis.overtimeMinutes = Math.max(0, Math.round((day.last.time - window.end) / 60000)); analysis.status = 'محلل حسب الجدول'; }
         }
       }

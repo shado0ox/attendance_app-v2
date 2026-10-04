@@ -141,6 +141,8 @@ export default function AdminSidebar({
               />
             )}
 
+            {hasPermission('canViewReports') && <NavItem to="/admin/exceptions" active={activeView === 'exceptions'} icon={<ClipboardCheck size={15} />} label="استثناءات الحضور" onNavigate={closeMobileSidebar} />}
+
             <NavItem
               to="/admin/alerts"
               active={activeView === 'alerts'}
