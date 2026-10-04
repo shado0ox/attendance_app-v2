@@ -378,7 +378,8 @@ export default function App() {
   // Serialize full snapshots; polling must never replace an in-flight or failed edit.
   const saveMainData = (): Promise<boolean> => {
     const targetCompany = companyId;
-    const payload = { ...dataRef.current, settings: settingsRef.current, updatedAt: Date.now() };
+    const { _schedulePublication: serverPublication, scheduleNotice: employeeNotice, ...editableData } = dataRef.current;
+    const payload = { ...editableData, settings: settingsRef.current, updatedAt: Date.now() };
     const saveRevision = ++revision.current;
     unsaved.current = true;
     pendingSaves.current++;
