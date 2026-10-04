@@ -1,3 +1,4 @@
+import { welcomePayload, deliverWelcome } from './src/server/welcomeEmail';
 import { autoFix } from './src/lib/autoPunch';
 import { analyzeAttendance } from './src/lib/attendanceAnalysis';
 import { parseAttendanceQuery, attendanceReportPage } from './src/lib/attendanceQuery';
@@ -968,6 +969,38 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
 // 3. Registration Requests (Tenant Aware)
 // Submitting a request stays public (it's the sign-up form itself); reading the list
 // (which includes the applicant's chosen password) and approving/rejecting are admin-only.
+// Only stored employee addresses can receive welcome mail; durable claim prevents concurrent sends.
+app.post('/api/employees/:id/welcome-email', requireAuth(['admin', 'superadmin']), async (req, res) => {
+  const companyId = String(req.query.companyId || 'default');
+  const key = 'welcomeEmail_' + crypto.createHash('sha256').update(JSON.stringify([companyId, req.params.id])).digest('hex');
+  let claimed: any;
+  try {
+    const data = await db.select().from(schema.systemData).where(eq(schema.systemData.key, companyId === 'default' ? 'mainData' : 'mainData_' + companyId)).limit(1);
+    const employee = (data[0]?.value as any)?.employees?.find((e: any) => e.id === req.params.id);
+    if (!employee) return res.status(404).json({ error: 'الموظف غير موجود' });
+    const companies = await db.select().from(schema.companies).where(eq(schema.companies.id, companyId)).limit(1);
+    const rows = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
+    const previous: any = rows[0]?.value;
+    if (previous?.status === 'sent') return res.json({ message: 'سبق قبول رسالة الترحيب بواسطة خدمة البريد', status: 'sent' });
+    // Never replay an ambiguous send beyond the provider's 24-hour idempotency window.
+    if (previous && Date.now() - previous.startedAt > 23 * 3600000) return res.status(409).json({ error: 'يلزم مراجعة سجل Resend قبل إعادة الإرسال؛ انتهت نافذة منع التكرار' });
+    if (previous?.status === 'sending' && Date.now() - previous.claimedAt < 60000) return res.status(409).json({ error: 'الإرسال جارٍ بالفعل، انتظر ثم حاول مجددًا' });
+    const payload = previous?.payload || welcomePayload(employee, companies[0]?.name || 'الشركة');
+    if (!process.env.RESEND_API_KEY) return res.status(503).json({ error: 'لم يتم إعداد مفتاح Resend على السيرفر' });
+    claimed = { status: 'sending', payload, startedAt: previous?.startedAt || Date.now(), claimedAt: Date.now(), claim: crypto.randomUUID() };
+    const saved = rows.length
+      ? await db.update(schema.systemData).set({ value: claimed, updatedAt: new Date() }).where(and(eq(schema.systemData.key, key), eq(schema.systemData.value, previous))).returning()
+      : await db.insert(schema.systemData).values({ key, value: claimed }).onConflictDoNothing().returning();
+    if (!saved.length) return res.status(409).json({ error: 'هناك طلب إرسال آخر، حاول لاحقًا' });
+    const providerId = await deliverWelcome(payload, key);
+    await db.update(schema.systemData).set({ value: { ...claimed, status: 'sent', providerId }, updatedAt: new Date() }).where(and(eq(schema.systemData.key, key), eq(schema.systemData.value, claimed)));
+    return res.json({ status: 'sent', message: 'تم قبول رسالة الترحيب بواسطة خدمة البريد؛ وصولها يُراجع من لوحة Resend' });
+  } catch (error: any) {
+    if (claimed) await db.update(schema.systemData).set({ value: { ...claimed, status: 'failed' }, updatedAt: new Date() }).where(and(eq(schema.systemData.key, key), eq(schema.systemData.value, claimed))).catch(() => {});
+    return res.status(503).json({ error: error?.name === 'TimeoutError' || error?.name === 'TypeError' ? 'تعذر تأكيد الإرسال؛ يمكنك إعادة المحاولة' : (/^(بريد الموظف|يلزم ضبط|رابط البرنامج|خدمة البريد|رفضت خدمة البريد|لم تؤكد)/.test(error?.message || '') ? error.message : 'تعذر إرسال رسالة الترحيب؛ راجع إعدادات السيرفر') });
+  }
+});
+
 app.get('/api/registration-requests', requireAuth(['admin', 'superadmin']), async (req, res) => {
   const companyId = (req.query.companyId as string) || 'default';
   try {
