@@ -339,6 +339,7 @@ export default function SettingsView({
                     <div className="font-extrabold text-xs text-slate-800">{item.name}</div>
                     <div className="text-[10px] text-slate-400 mt-0.5">{item.email || 'بدون بريد فرعي'}</div>
                     <div className="flex flex-wrap gap-1.5 mt-2.5">
+                      {item.departmentIds && <span className="text-sky-700">أقسام محددة: {item.departmentIds.length} · </span>}
                       {Object.entries(item.permissions || {})
                         .filter(([, val]) => val === true)
                         .map(([key]) => (

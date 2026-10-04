@@ -1,3 +1,4 @@
+import { fullAdminAccess, parseAdminAccess, scopedMainData, mergeAdminData, ownsEmployee, ownsDay, allowedAdminRoute, type AdminAccess } from './src/lib/adminAccess';
 import { normalizedEmail, employeeEmailVerified, preserveEmailVerification } from './src/lib/emailVerification';
 import { emailVerificationKey, emailVerificationQuotaKey, verificationStatus, verificationRateLimit, newVerificationState, verificationCodeHash, matchesVerificationCode, verificationAttempts, verificationPayload } from './src/server/emailVerification';
 import { parseEmployeeProfileQuery, employeeProfileData, employeeProfileSchedule } from './src/lib/employeeProfile';
@@ -116,6 +117,24 @@ interface AuthTokenPayload {
 }
 
 const signToken = (payload: AuthTokenPayload) => jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' });
+const adminAccessKey = (companyId: string, id: unknown) => 'adminAccess:' + companyId + ':' + id;
+async function resolveAdminAccess(auth: AuthTokenPayload): Promise<AdminAccess> {
+  if (auth.role !== 'admin' || auth.id === undefined) return fullAdminAccess();
+  if (!Number.isInteger(Number(auth.id)) || Number(auth.id) <= 0) throw new Error('حساب المسؤول غير متاح');
+  const admins = await db.select().from(schema.admins).where(and(eq(schema.admins.id, Number(auth.id)), eq(schema.admins.companyId, auth.companyId))).limit(1);
+  if (!admins[0]) throw new Error('حساب المسؤول غير متاح');
+  const rows = await db.select().from(schema.systemData).where(eq(schema.systemData.key, adminAccessKey(auth.companyId, auth.id))).limit(1);
+  // Preserve existing accounts until the company explicitly configures their access.
+  return rows[0]?.value as AdminAccess || fullAdminAccess();
+}
+const requestAccess = (req: Request): AdminAccess => (req as any).adminAccess || fullAdminAccess();
+async function visibleRows(req: Request, rows: any[], companyId: string) {
+  const access = requestAccess(req);
+  if (access.departmentIds === null) return rows;
+  const data = await getMainDataByCompanyId(companyId);
+  return rows.filter(row => ownsDay(access, data, row));
+}
+
 
 // Requires a valid bearer token with one of `roles`. When `matchCompany` is true (default),
 // the token's companyId must match the request's companyId (superadmin is always exempt).
@@ -146,6 +165,14 @@ function requireAuth(roles: AuthTokenPayload['role'][], matchCompany: boolean = 
         if (!isActiveEmployee(employee)) return res.status(403).json({ error: 'حساب الموظف غير نشط. تواصل مع الإدارة.', code: 'EMPLOYEE_INACTIVE' });
       } catch { return res.status(503).json({ error: 'تعذر التحقق من حالة الحساب' }); }
     }
+    if (payload.role === 'admin') {
+      try {
+        const access = await resolveAdminAccess(payload);
+        (req as any).adminAccess = access;
+        if (payload.id !== undefined && req.query.mode === 'all' && ['/api/attendance-report', '/api/attendance-exceptions'].includes(req.path) && !access.permissions.canPrint) return res.status(403).json({ error: 'ليس لديك صلاحية التصدير' });
+        if (payload.id !== undefined && !allowedAdminRoute(access, req.method, req.path)) return res.status(403).json({ error: 'ليس لديك صلاحية لهذا الإجراء أو أنه خاص بإدارة الشركة' });
+      } catch { return res.status(403).json({ error: 'تعذر التحقق من صلاحيات المسؤول' }); }
+    }
     (req as any).auth = payload;
     next();
   };
@@ -160,6 +187,7 @@ function requireOwnedRow(table: any) {
       const rows = await db.select().from(table).where(eq(table.id, id)).limit(1);
       const auth = (req as any).auth as AuthTokenPayload;
       if (!rows[0] || (auth.role !== 'superadmin' && rows[0].companyId !== auth.companyId)) return res.status(404).json({ error: 'السجل غير موجود أو غير مسموح' });
+      if (!(await visibleRows(req, rows, rows[0].companyId || 'default')).length) return res.status(404).json({ error: 'السجل خارج نطاق أقسامك' });
       (req as any).ownedRow = rows[0]; next();
     } catch { return res.status(500).json({ error: 'تعذر التحقق من صلاحية السجل' }); }
   };
@@ -490,7 +518,7 @@ app.post('/api/auth/admin-login', async (req, res) => {
           });
           if (ok) {
             const token = signToken({ role: 'admin', companyId, name: `مدير ${company.name}`, username: company.adminUsername });
-            return res.json({ token, role: 'admin', name: `مدير ${company.name}`, companyId, isMaster: true });
+            return res.json({ token, role: 'admin', name: `مدير ${company.name}`, companyId, isMaster: true, ...fullAdminAccess() });
           }
           return res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
         }
@@ -520,7 +548,7 @@ app.post('/api/auth/admin-login', async (req, res) => {
 
     const { password: _pw, ...safeAdmin } = foundAdmin;
     const token = signToken({ role: 'admin', companyId, id: foundAdmin.id, name: foundAdmin.name, username: foundAdmin.username });
-    return res.json({ token, role: 'admin', ...safeAdmin, companyId });
+    return res.json({ token, role: 'admin', ...safeAdmin, companyId, ...await resolveAdminAccess({ role: 'admin', companyId, id: foundAdmin.id }) });
   } catch (error: any) {
     console.error('Error during admin login:', error);
     return res.status(500).json({ error: 'حدث خطأ أثناء تسجيل الدخول', details: error?.message || String(error) });
@@ -874,9 +902,11 @@ app.get('/api/main-data', async (req, res) => {
   // Employee PIN codes / the superadmin password are only included for a caller who is
   // logged in as that same company's admin/superadmin (or as superadmin generally).
   if (auth && auth.role !== 'superadmin' && auth.companyId !== companyId) return res.status(403).json({ error: 'بيانات شركة أخرى غير متاحة' });
+  let access = fullAdminAccess();
+  if (auth?.role === 'admin') { try { access = await resolveAdminAccess(auth); } catch { return res.status(403).json({ error: 'حساب المسؤول غير متاح' }); } }
   const visibleMainData = (value: any) => {
     if (!auth) return { departments: [], employees: [], shiftTypes: [], schedule: {}, settings: { companyName: value?.settings?.companyName, logoDataUrl: value?.settings?.logoDataUrl } };
-    if (auth.role !== 'employee') return sanitizeMainData(value, true);
+    if (auth.role !== 'employee') return { ...scopedMainData(sanitizeMainData(value, true), access), _adminAccess: access };
     return employeeMainData(value, auth);
   };
   const canSeeSecrets = !!auth && (auth.role === 'superadmin' || (auth.role === 'admin' && auth.companyId === companyId));
@@ -920,7 +950,8 @@ app.get('/api/main-data', async (req, res) => {
 // this stops one logged-in employee token from rewriting another employee's data,
 // the schedule, or the whole company's settings.
 app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), async (req, res) => {
-  const { _baseVersion, _version, _schedulePublication: ignoredPublication, scheduleNotice: ignoredNotice, ...payload } = req.body || {};
+  const { _baseVersion, _version, _adminAccess: ignoredAccess, _schedulePublication: ignoredPublication, scheduleNotice: ignoredNotice, ...rawPayload } = req.body || {};
+  let payload = rawPayload;
   const companyId = (req.query.companyId as string) || 'default';
   const key = companyId === 'default' ? 'mainData' : 'mainData_' + companyId;
   const auth = (req as any).auth as AuthTokenPayload;
@@ -934,7 +965,7 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
       const result = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
 
       if (result.length === 0) {
-        if (auth.role === 'employee') return { status: 404, body: { error: 'بيانات الشركة غير موجودة' } };
+        if (auth.role === 'employee' || (auth.role === 'admin' && auth.id !== undefined)) return { status: 404, body: { error: 'بيانات الشركة غير موجودة' } };
         const initialValue = { ...payload, employees: preserveEmailVerification([], saveEmploymentHistory([], payload.employees)) };
         const inserted = await tx.insert(schema.systemData).values({
           key,
@@ -948,6 +979,9 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
       const currentValue = result[0].value;
       if (auth.role !== 'employee' && _baseVersion !== mainDataVersion(currentValue)) {
         return { status: 409, body: { error: 'تغيرت البيانات في جلسة أخرى. لم يتم استبدالها. أعد تحميل آخر نسخة ثم أعد تطبيق تعديلك.', code: 'DATA_CONFLICT' } };
+      }
+      if (auth.role === 'admin' && auth.id !== undefined) {
+        try { payload = mergeAdminData(currentValue, payload, requestAccess(req)); } catch (error: any) { return { status: 403, body: { error: error.message } }; }
       }
       if (auth.role !== 'employee' && (currentValue as any).employees?.some((e: any) => !payload.employees.some((next: any) => String(next.id) === String(e.id)))) return { status: 400, body: { error: 'لا تحذف الموظفين نهائيًا؛ استخدم الأرشفة للحفاظ على سجلاتهم.' } };
       if (auth.role !== 'employee' && payload.employees.some((e: any) => { const old = (currentValue as any).employees?.find((previous: any) => String(previous.id) === String(e.id)); return old && employeeStatus(old) !== employeeStatus(e) && (typeof e.statusReason !== 'string' || !e.statusReason.trim() || e.statusReason.length > 500); })) return { status: 400, body: { error: 'أدخل سبب تغيير الحالة، بحد أقصى 500 حرف' } };
@@ -973,7 +1007,7 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
         .returning();
       if (!updated.length) return { status: 409, body: { error: 'حفظ مستخدم آخر تعديلًا أثناء طلبك. أعد تحميل البيانات قبل المحاولة.', code: 'DATA_CONFLICT' } };
       for (const change of employeeChanges((currentValue as any).employees || [], valueToSave.employees)) await audit(tx, auth, companyId, change.action, change.id, { ...change, actorName: auth.name || auth.username || 'المسؤول' });
-      return { status: 200, body: { ...(auth.role === 'employee' ? employeeMainData(updated[0].value, auth) : sanitizeMainData(updated[0].value, true)), _version: mainDataVersion(updated[0].value) } };
+      return { status: 200, body: { ...(auth.role === 'employee' ? employeeMainData(updated[0].value, auth) : { ...scopedMainData(sanitizeMainData(updated[0].value, true), requestAccess(req)), _adminAccess: requestAccess(req) }), _version: mainDataVersion(updated[0].value) } };
     });
     return res.status(outcome.status).json(outcome.body);
   } catch (error: any) {
@@ -1298,12 +1332,13 @@ app.get('/api/attendance-report', requireAuth(['admin', 'superadmin']), async (r
   try { query = parseAttendanceQuery(req.query); } catch (error: any) { return res.status(400).json({ error: error.message }); }
   const companyId = String(req.query.companyId || 'default');
   try {
-    const records = await db.select().from(schema.attendance).where(and(
+    let records = await db.select().from(schema.attendance).where(and(
       eq(schema.attendance.companyId, companyId),
       sql`${schema.attendance.date} >= ${query.from}`, sql`${schema.attendance.date} <= ${query.to}`,
       query.empId ? eq(schema.attendance.empId, query.empId) : undefined,
       query.dept && !query.analysis ? eq(schema.attendance.dept, query.dept) : undefined,
     )).orderBy(desc(schema.attendance.id));
+    records = await visibleRows(req, records, companyId);
     const mainData = await getMainDataByCompanyId(companyId);
     let reportDays = buildAttendanceDays(records, mainData?.settings);
     if (query.analysis) {
@@ -1311,7 +1346,7 @@ app.get('/api/attendance-report', requireAuth(['admin', 'superadmin']), async (r
       reportDays = analyzeAttendance(reportDays, effectiveScheduleData(mainData), query, leaves);
     }
     const days = reportDays.map(day => ({ ...day, departmentName: mainData?.departments?.find((dept: any) => dept.id === day.dept)?.name || day.dept }));
-    return res.json({ ...attendanceReportPage(days, query), companyName: mainData?.settings?.companyName || companyId, from: query.from, to: query.to });
+    return res.json({ ...attendanceReportPage(days.filter(day => ownsDay(requestAccess(req), mainData, day)), query), companyName: mainData?.settings?.companyName || companyId, from: query.from, to: query.to });
   } catch (error) { console.error('Attendance report query failed', error); return res.status(500).json({ error: 'تعذر تحميل كشف الحضور' }); }
 });
 
@@ -1322,15 +1357,16 @@ app.get('/api/attendance-exceptions', requireAuth(['admin', 'superadmin']), asyn
   const companyId = String(req.query.companyId || 'default');
   res.set('Cache-Control', 'private, no-store');
   try {
-    const records = await db.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, companyId), sql`${schema.attendance.date} >= ${query.from}`, sql`${schema.attendance.date} <= ${query.to}`, query.empId ? eq(schema.attendance.empId, query.empId) : undefined)).orderBy(desc(schema.attendance.id));
+    let records = await db.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, companyId), sql`${schema.attendance.date} >= ${query.from}`, sql`${schema.attendance.date} <= ${query.to}`, query.empId ? eq(schema.attendance.empId, query.empId) : undefined)).orderBy(desc(schema.attendance.id));
+    records = await visibleRows(req, records, companyId);
     const requests = await db.select().from(schema.requests).where(and(eq(schema.requests.companyId, companyId), sql`${schema.requests.date} >= ${query.from}`, sql`${schema.requests.date} <= ${query.to}`, query.empId ? eq(schema.requests.empId, query.empId) : undefined));
     const data = await getMainDataByCompanyId(companyId), published = effectiveScheduleData(data);
     const now = Date.now();
     const days = analyzeAttendance(buildAttendanceDays(records, data?.settings), published, query, requests.filter(r => r.type === 'leave' && r.status === 'approved'), now);
-    const report = exceptionReportPage(days, query, now);
+    const report = exceptionReportPage(days.filter(day => ownsDay(requestAccess(req), data, day)), query, now);
     const byDay = new Map<string, any[]>(), pending = new Map<string, any[]>();
     for (const row of records) { const key = `${row.empId}|${row.date}`; byDay.set(key, [...(byDay.get(key) || []), row]); }
-    for (const request of requests) if (request.type === 'attendance_adjustment' && request.status === 'pending') { const key = `${request.empId}|${request.date}`; pending.set(key, [...(pending.get(key) || []), { id: request.id, notes: request.notes, checkInTime: request.checkInTime, checkOutTime: request.checkOutTime, period: (request.details as any)?.period === 2 ? 2 : 1, checkInNextDay: (request.details as any)?.checkInNextDay === true, checkOutNextDay: (request.details as any)?.checkOutNextDay === true }]); }
+    for (const request of requests) if (ownsDay(requestAccess(req), data, request) && request.type === 'attendance_adjustment' && request.status === 'pending') { const key = `${request.empId}|${request.date}`; pending.set(key, [...(pending.get(key) || []), { id: request.id, notes: request.notes, checkInTime: request.checkInTime, checkOutTime: request.checkOutTime, period: (request.details as any)?.period === 2 ? 2 : 1, checkInNextDay: (request.details as any)?.checkInNextDay === true, checkOutNextDay: (request.details as any)?.checkOutNextDay === true }]); }
     return res.json({ ...report, items: report.items.map(day => {
       const key = `${day.empId}|${day.date}`, assigned = published?.schedule?.[day.date]?.[day.empId];
       const shift = published?.shiftTypes?.find((s: any) => s.id === assigned?.shiftType);
@@ -1350,7 +1386,7 @@ app.get('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), asy
       .from(schema.attendance)
       .where(and(eq(schema.attendance.companyId, companyId), (req as any).auth.role === 'employee' ? eq(schema.attendance.empId, String((req as any).auth.id)) : (req.query.empId ? eq(schema.attendance.empId, String(req.query.empId)) : undefined), req.query.from ? sql`${schema.attendance.date} >= ${req.query.from}` : undefined, req.query.to ? sql`${schema.attendance.date} <= ${req.query.to}` : undefined))
       .orderBy(desc(schema.attendance.createdAt));
-    return res.json(result);
+    return res.json(await visibleRows(req, result, companyId));
   } catch (error: any) {
     console.error('Error getting attendance logs from PostgreSQL:', error);
     return res.status(500).json({
@@ -1558,7 +1594,7 @@ app.get('/api/requests', requireAuth(['employee', 'admin', 'superadmin']), async
       .from(schema.requests)
       .where(and(eq(schema.requests.companyId, companyId), (req as any).auth.role === 'employee' ? eq(schema.requests.empId, String((req as any).auth.id)) : undefined))
       .orderBy(desc(schema.requests.createdAt));
-    return res.json(result);
+    return res.json(await visibleRows(req, result, companyId));
   } catch (error: any) {
     console.error('Error getting requests from PostgreSQL:', error);
     return res.status(500).json({
@@ -1633,12 +1669,15 @@ app.put('/api/requests/:id', requireAuth(['admin', 'superadmin'], false), requir
       await lockAttendance(tx, companyId);
       const rows = await tx.select().from(schema.requests).where(eq(schema.requests.id, id)).limit(1).for('update');
       const request = rows[0];
-      if (!request) throw attendanceError(404, 'الطلب غير موجود');
+      const mainRows = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, getMainDataKey(companyId))).limit(1).for('update');
+      const requestData: any = mainRows[0]?.value;
+      if (!request || !ownsDay(requestAccess(req), requestData, request)) throw attendanceError(404, 'الطلب غير موجود أو خارج أقسامك');
       if (request.status === status) return request;
       if (request.status !== 'pending') throw attendanceError(409, 'تمت مراجعة الطلب بالفعل؛ لا يمكن تغيير قراره');
       if (status === 'approved' && request.type === 'attendance_adjustment') {
         await assertMonthOpen(tx, companyId, request.date);
         const records = await tx.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, companyId), eq(schema.attendance.empId, request.empId), eq(schema.attendance.date, request.date))).orderBy(schema.attendance.id);
+        if (records.some(row => !ownsDay(requestAccess(req), requestData, row))) throw attendanceError(403, 'البصمة الأصلية خارج نطاق أقسامك');
         const details = request.details as any;
         if (!details?.baseline) throw attendanceError(409, 'هذا طلب قديم بلا نسخة أصلية؛ اطلب من الموظف إعادة تقديمه');
         if (mainDataVersion(records) !== details.baseline) throw attendanceError(409, 'البصمة تغيرت بعد تقديم الطلب؛ ارفضه واطلب نسخة جديدة للمراجعة');
@@ -1649,6 +1688,23 @@ app.put('/api/requests/:id', requireAuth(['admin', 'superadmin'], false), requir
         values.note = [records[0]?.note, `تصحيح طلب #${id}: ${request.notes}`].filter(Boolean).join(' | ');
         const saved = records.length ? await tx.update(schema.attendance).set(values).where(eq(schema.attendance.id, records[0].id)).returning() : await tx.insert(schema.attendance).values({ ...values, empId: request.empId, empName: request.empName, dept: request.dept, date: request.date, companyId, status: 'present' }).returning();
         await audit(tx, auth, companyId, 'attendance.correction.approve', saved[0].id, { requestId: id, empId: request.empId, date: request.date, before: records[0] || null, after: saved[0], reason: request.notes, reviewReason, reviewedBy });
+      }
+      if (status === 'approved' && ['leave', 'shift_change', 'swap'].includes(request.type)) {
+        if (!requestData) throw attendanceError(404, 'بيانات الشركة غير موجودة');
+        if (!validAttendanceDate(request.date)) throw attendanceError(409, 'تاريخ الطلب غير صالح');
+        if (request.type === 'shift_change' && !requestData.shiftTypes?.some((shift: any) => shift.id === request.targetShift)) throw attendanceError(409, 'الشيفت المطلوب غير متاح؛ راجع الطلب');
+        if (request.type === 'swap' && (!request.swapWithEmpId || request.swapWithEmpId === request.empId || !requestData.employees?.some((e: any) => String(e.id) === request.swapWithEmpId))) throw attendanceError(409, 'موظف التبديل غير متاح');
+        const schedule = structuredClone(requestData.schedule || {}), day = schedule[request.date] || {};
+        if (request.type === 'leave') day[request.empId] = { shiftType: 'A', note: 'إجازة معتمدة' };
+        if (request.type === 'shift_change') day[request.empId] = { shiftType: request.targetShift, note: 'تعديل شيفت معتمد' };
+        if (request.type === 'swap') {
+          const first = day[request.empId]?.shiftType || 'A', second = day[request.swapWithEmpId!]?.shiftType || 'A';
+          day[request.empId] = { shiftType: second, note: `بديل لـ ${request.swapWithEmpName || request.swapWithEmpId}` };
+          day[request.swapWithEmpId!] = { shiftType: first, note: `بديل لـ ${request.empName}` };
+        }
+        schedule[request.date] = day;
+        await tx.update(schema.systemData).set({ value: { ...requestData, schedule }, updatedAt: new Date() }).where(eq(schema.systemData.key, getMainDataKey(companyId)));
+        await audit(tx, auth, companyId, 'schedule.request.apply', request.id, { type: request.type, date: request.date, empId: request.empId, actorName: auth.name || auth.username });
       }
       const updated = await tx.update(schema.requests).set({ status, reviewedBy: auth.name || auth.username || 'المسؤول', reviewedAt: new Date(), reviewReason }).where(eq(schema.requests.id, id)).returning();
       await audit(tx, auth, companyId, 'request.' + status, id, { empId: request.empId, type: request.type, reason: reviewReason, actorName: auth.name || auth.username || 'المسؤول' });
@@ -1668,7 +1724,7 @@ app.get('/api/admins', requireAuth(['admin', 'superadmin']), async (req, res) =>
       .orderBy(desc(schema.admins.createdAt));
     // Password hashes never need to reach the client — the admin UI only ever needs
     // to know an admin exists, not their (hashed) credential.
-    const safeResult = result.map(({ password, ...rest }) => rest);
+    const safeResult = await Promise.all(result.map(async ({ password, ...rest }) => ({ ...rest, ...await resolveAdminAccess({ role: 'admin', companyId, id: rest.id }) })));
     return res.json(safeResult);
   } catch (error: any) {
     console.error('Error getting admins from PostgreSQL:', error);
@@ -1680,53 +1736,44 @@ app.get('/api/admins', requireAuth(['admin', 'superadmin']), async (req, res) =>
 });
 
 app.post('/api/admins', requireAuth(['admin', 'superadmin']), async (req, res) => {
-  const { id, name, username, password, companyId } = req.body;
-  const activeCompanyId = companyId || 'default';
-
+  const { id, name, username, password } = req.body;
+  const companyId = String(req.body.companyId || 'default'), auth = (req as any).auth as AuthTokenPayload;
+  if (typeof name !== 'string' || !name.trim() || typeof username !== 'string' || !username.trim() || (id !== undefined && (!Number.isInteger(Number(id)) || Number(id) <= 0))) return res.status(400).json({ error: 'بيانات المسؤول غير صحيحة' });
   try {
-    if (id) {
-      const existing = await db.select().from(schema.admins).where(eq(schema.admins.id, Number(id))).limit(1);
-      const auth = (req as any).auth as AuthTokenPayload;
-      if (!existing[0] || (auth.role !== 'superadmin' && existing[0].companyId !== auth.companyId)) return res.status(404).json({ error: 'حساب المسؤول غير متاح' });
-      const updateSet: Record<string, any> = { name, username };
-      // Leaving the password field blank on an edit keeps the existing credential —
-      // the form no longer prefills the old password, so "unchanged" means "not sent".
-      if (password && password.trim()) {
-        updateSet.password = hashPassword(password.trim());
+    const data = await getMainDataByCompanyId(companyId);
+    const access = parseAdminAccess(req.body, data?.departments || []);
+    const actorAccess = requestAccess(req);
+    if (auth.role === 'admin' && auth.id !== undefined && Object.keys(access.permissions).some(p => access.permissions[p] && !actorAccess.permissions[p])) return res.status(403).json({ error: 'لا يمكنك منح صلاحية لا تملكها' });
+    const result = await db.transaction(async tx => {
+      let saved: any;
+      if (id) {
+        const rows = await tx.select().from(schema.admins).where(and(eq(schema.admins.id, Number(id)), eq(schema.admins.companyId, companyId))).limit(1).for('update');
+        if (!rows[0]) throw attendanceError(404, 'حساب المسؤول غير متاح');
+        const values: any = { name: name.trim(), username: username.trim().toLowerCase() };
+        if (typeof password === 'string' && password.trim()) values.password = hashPassword(password.trim());
+        [saved] = await tx.update(schema.admins).set(values).where(eq(schema.admins.id, Number(id))).returning();
+      } else {
+        if (typeof password !== 'string' || !password.trim()) throw attendanceError(400, 'كلمة المرور مطلوبة');
+        [saved] = await tx.insert(schema.admins).values({ name: name.trim(), username: username.trim().toLowerCase(), password: hashPassword(password.trim()), companyId }).returning();
       }
-      const updated = await db.update(schema.admins)
-        .set(updateSet)
-        .where(eq(schema.admins.id, parseInt(id)))
-        .returning();
-      const { password: _pw, ...safe } = updated[0];
-      return res.json(safe);
-    } else {
-      if (!password || !password.trim()) {
-        return res.status(400).json({ error: 'كلمة المرور مطلوبة عند إنشاء مسؤول جديد' });
-      }
-      const inserted = await db.insert(schema.admins).values({
-        name,
-        username,
-        password: hashPassword(password.trim()),
-        companyId: activeCompanyId
-      }).returning();
-      const { password: _pw, ...safe } = inserted[0];
-      return res.json(safe);
-    }
-  } catch (error: any) {
-    console.error('Error creating/updating admin in PostgreSQL:', error);
-    return res.status(500).json({
-      error: 'فشل حفظ بيانات المسؤول في قاعدة البيانات',
-      details: error?.message || String(error)
+      await tx.insert(schema.systemData).values({ key: adminAccessKey(companyId, saved.id), value: access }).onConflictDoUpdate({ target: schema.systemData.key, set: { value: access, updatedAt: new Date() } });
+      await audit(tx, auth, companyId, 'admin.access.update', saved.id, { departmentIds: access.departmentIds, permissions: access.permissions, actorName: auth.name || auth.username });
+      const { password: secret, ...safe } = saved;
+      return { ...safe, ...access };
     });
-  }
+    return res.json(result);
+  } catch (error: any) { return res.status(error.status || 400).json({ error: error.status ? error.message : 'تعذر حفظ المسؤول: ' + error.message }); }
 });
 
 app.delete('/api/admins/:id', requireAuth(['admin', 'superadmin'], false), requireOwnedRow(schema.admins), async (req, res) => {
   const id = parseInt(req.params.id);
 
   try {
-    await db.delete(schema.admins).where(eq(schema.admins.id, id));
+    await db.transaction(async tx => {
+      await tx.delete(schema.admins).where(eq(schema.admins.id, id));
+      await tx.delete(schema.systemData).where(eq(schema.systemData.key, adminAccessKey((req as any).ownedRow.companyId || 'default', id)));
+      await audit(tx, (req as any).auth, (req as any).ownedRow.companyId || 'default', 'admin.delete', id, { name: (req as any).ownedRow.name });
+    });
     return res.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting admin from PostgreSQL:', error);
@@ -1746,9 +1793,10 @@ app.get('/api/employees/:id/profile', requireAuth(['admin', 'superadmin']), asyn
   try {
     const mainData = await getMainDataByCompanyId(companyId);
     const employee = mainData?.employees?.find((e: any) => String(e.id) === req.params.id);
-    if (!employee) return res.status(404).json({ error: 'الموظف غير موجود في هذه الشركة' });
+    if (!employee || !ownsEmployee(requestAccess(req), mainData, employee.id)) return res.status(404).json({ error: 'الموظف غير موجود أو خارج أقسامك' });
+    if (requestAccess(req).departmentIds !== null && ['history', 'requests', 'overview'].includes(query.section)) return res.status(403).json({ error: 'ملف الموظف الكامل لإدارة الشركة؛ راجع يوم الحضور أو الطلب من القائمة' });
     if (query.section === 'overview') return res.json({ employee: employeeProfileData(employee, mainData.departments || []) });
-    if (query.section === 'schedule') return res.json(employeeProfileSchedule(mainData, employee, query));
+    if (query.section === 'schedule') { const report = employeeProfileSchedule(scopedMainData(mainData, requestAccess(req)), employee, query); return res.json({ ...report, items: report.items.filter(day => ownsDay(requestAccess(req), mainData, { empId: employee.id, date: day.date })) }); }
     if (query.section === 'history') {
       const items = await db.select().from(schema.auditLog).where(and(eq(schema.auditLog.companyId, companyId), eq(schema.auditLog.entityId, String(employee.id)), sql`${schema.auditLog.action} LIKE 'employee.%'`)).orderBy(desc(schema.auditLog.createdAt), desc(schema.auditLog.id)).limit(100);
       return res.json({ items });
@@ -1767,11 +1815,12 @@ app.get('/api/employees/:id/profile', requireAuth(['admin', 'superadmin']), asyn
       }), ...counts, page, pageCount });
     }
     const scope = and(eq(schema.attendance.companyId, companyId), eq(schema.attendance.empId, String(employee.id)), sql`${schema.attendance.date} >= ${query.from}`, sql`${schema.attendance.date} <= ${query.to}`);
-    const records = await db.select().from(schema.attendance).where(scope).orderBy(desc(schema.attendance.id));
+    let records = await db.select().from(schema.attendance).where(scope).orderBy(desc(schema.attendance.id));
+    records = await visibleRows(req, records, companyId);
     const leaves = await db.select().from(schema.requests).where(and(eq(schema.requests.companyId, companyId), eq(schema.requests.empId, String(employee.id)), eq(schema.requests.type, 'leave'), eq(schema.requests.status, 'approved'), sql`${schema.requests.date} >= ${query.from}`, sql`${schema.requests.date} <= ${query.to}`));
     const analysisQuery = parseAttendanceQuery({ from: query.from, to: query.to, empId: String(employee.id), analysis: '1', mode: 'all' });
     const days = analyzeAttendance(buildAttendanceDays(records, mainData.settings), effectiveScheduleData(mainData), analysisQuery, leaves);
-    const report = attendanceReportPage(days, analysisQuery);
+    const report = attendanceReportPage(days.filter(day => ownsDay(requestAccess(req), mainData, day)), analysisQuery);
     // Keep actual attendance locations, but avoid exposing raw coordinates or unrelated metadata.
     return res.json({ ...report, items: report.items.map(day => ({ date: day.date, departmentName: mainData.departments?.find((d: any) => d.id === day.dept)?.name || day.dept || 'بدون قسم', first: day.first, last: day.last, minutes: day.minutes, reportStatus: day.reportStatus, analysis: day.analysis, note: day.note || '' })) });
   } catch (error) { console.error('Employee profile query failed', error); return res.status(500).json({ error: 'تعذر تحميل ملف الموظف' }); }
@@ -1781,6 +1830,7 @@ app.get('/api/employee-audit', requireAuth(['admin', 'superadmin']), async (req,
   const companyId = String(req.query.companyId || 'default');
   const empId = String(req.query.empId || '');
   if (!empId) return res.status(400).json({ error: 'اختر موظفًا' });
+  if (requestAccess(req).departmentIds !== null) return res.status(403).json({ error: 'سجل الموظف الكامل لإدارة الشركة' });
   try {
     const rows = await db.select().from(schema.auditLog).where(and(eq(schema.auditLog.companyId, companyId), eq(schema.auditLog.entityId, empId), sql`${schema.auditLog.action} LIKE 'employee.%'`)).orderBy(desc(schema.auditLog.createdAt), desc(schema.auditLog.id)).limit(100);
     res.set('Cache-Control', 'private, no-store');
