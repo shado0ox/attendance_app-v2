@@ -12,7 +12,7 @@ const secret = 'ci-verification-only-secret', companyId = 'verification-ci', id 
 const pool = new pg.Pool({ host: process.env.SQL_HOST, port: Number(process.env.SQL_PORT || 5432), user: process.env.SQL_USER, password: process.env.SQL_PASSWORD, database: process.env.SQL_DB_NAME });
 const child = spawn(process.execPath, ['--import', './tests/mockResend.mjs', 'dist/server.cjs'], { env: { ...process.env, NODE_ENV: 'production', JWT_SECRET: secret, RESEND_API_KEY: 'mock-resend-key', RESEND_FROM: 'Attendance <attendance@example.com>', ATTENDANCE_TEST_EMAIL_CAPTURE: capture }, stdio: 'inherit' });
 const origin = 'http://127.0.0.1:3011', key = emailVerificationKey(companyId, id), quotaKey = emailVerificationQuotaKey(companyId);
-const headers = (role: string, empId = id) => ({ Authorization: 'Bearer ' + jwt.sign({ role, id: empId, name: 'Verification employee', companyId }, secret, { expiresIn: '1h' }), 'Content-Type': 'application/json' });
+const headers = (role: string, empId = id) => ({ Authorization: 'Bearer ' + jwt.sign({ role, ...(role === 'employee' ? { id: empId } : {}), name: 'Verification employee', companyId }, secret, { expiresIn: '1h' }), 'Content-Type': 'application/json' });
 const employeeHeaders = headers('employee'), adminHeaders = headers('admin');
 const verificationUrl = origin + '/api/employee-profile/email-verification';
 const read = () => fetch(verificationUrl + '?companyId=' + companyId, { headers: employeeHeaders });

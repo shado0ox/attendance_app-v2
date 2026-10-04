@@ -737,25 +737,8 @@ export default function AdminPortal({
         throw new Error(result.error || 'فشل تحديث حالة الطلب في قاعدة البيانات');
       }
 
-      // Apply changes inline to schedule on approval
-      if (decision === 'approved' && matchedReq.type !== 'attendance_adjustment') {
-        const updatedSch = { ...schedule };
-        if (!updatedSch[matchedReq.date]) updatedSch[matchedReq.date] = {};
-
-        if (matchedReq.type === 'leave') {
-          updatedSch[matchedReq.date][matchedReq.empId] = { shiftType: 'A', note: 'إجازة معتمدة' };
-        } else if (matchedReq.type === 'shift_change') {
-          updatedSch[matchedReq.date][matchedReq.empId] = { shiftType: matchedReq.targetShift, note: 'تعديل شيفت معتمد' };
-        } else if (matchedReq.type === 'swap') {
-          const originalShift1 = schedule[matchedReq.date]?.[matchedReq.empId] || { shiftType: 'A' };
-          const originalShift2 = schedule[matchedReq.date]?.[matchedReq.swapWithEmpId] || { shiftType: 'A' };
-
-          updatedSch[matchedReq.date][matchedReq.empId] = { shiftType: originalShift2.shiftType, note: `بديل لـ ${matchedReq.swapWithEmpName}` };
-          updatedSch[matchedReq.date][matchedReq.swapWithEmpId] = { shiftType: originalShift1.shiftType, note: `بديل لـ ${matchedReq.empName}` };
-        }
-
-        onUpdateAppData({ ...appData, schedule: updatedSch });
-      }
+      // The server commits the request decision and draft schedule together.
+      if (decision === 'approved' && matchedReq.type !== 'attendance_adjustment') await onRefreshData();
 
       alert('تم تحديث حالة الطلب بنجاح.');
       loadRequests();

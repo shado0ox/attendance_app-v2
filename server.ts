@@ -120,6 +120,7 @@ const signToken = (payload: AuthTokenPayload) => jwt.sign(payload, JWT_SECRET, {
 const adminAccessKey = (companyId: string, id: unknown) => 'adminAccess:' + companyId + ':' + id;
 async function resolveAdminAccess(auth: AuthTokenPayload): Promise<AdminAccess> {
   if (auth.role !== 'admin' || auth.id === undefined) return fullAdminAccess();
+  if (!Number.isInteger(Number(auth.id)) || Number(auth.id) <= 0) throw new Error('حساب المسؤول غير متاح');
   const admins = await db.select().from(schema.admins).where(and(eq(schema.admins.id, Number(auth.id)), eq(schema.admins.companyId, auth.companyId))).limit(1);
   if (!admins[0]) throw new Error('حساب المسؤول غير متاح');
   const rows = await db.select().from(schema.systemData).where(eq(schema.systemData.key, adminAccessKey(auth.companyId, auth.id))).limit(1);
@@ -1668,13 +1669,15 @@ app.put('/api/requests/:id', requireAuth(['admin', 'superadmin'], false), requir
       await lockAttendance(tx, companyId);
       const rows = await tx.select().from(schema.requests).where(eq(schema.requests.id, id)).limit(1).for('update');
       const request = rows[0];
-      if (!request || !ownsDay(requestAccess(req), await getMainDataByCompanyId(companyId), request)) throw attendanceError(404, 'الطلب غير موجود أو خارج أقسامك');
+      const mainRows = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, getMainDataKey(companyId))).limit(1).for('update');
+      const requestData: any = mainRows[0]?.value;
+      if (!request || !ownsDay(requestAccess(req), requestData, request)) throw attendanceError(404, 'الطلب غير موجود أو خارج أقسامك');
       if (request.status === status) return request;
       if (request.status !== 'pending') throw attendanceError(409, 'تمت مراجعة الطلب بالفعل؛ لا يمكن تغيير قراره');
       if (status === 'approved' && request.type === 'attendance_adjustment') {
         await assertMonthOpen(tx, companyId, request.date);
         const records = await tx.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, companyId), eq(schema.attendance.empId, request.empId), eq(schema.attendance.date, request.date))).orderBy(schema.attendance.id);
-        if ((await visibleRows(req, records, companyId)).length !== records.length) throw attendanceError(403, 'البصمة الأصلية خارج نطاق أقسامك');
+        if (records.some(row => !ownsDay(requestAccess(req), requestData, row))) throw attendanceError(403, 'البصمة الأصلية خارج نطاق أقسامك');
         const details = request.details as any;
         if (!details?.baseline) throw attendanceError(409, 'هذا طلب قديم بلا نسخة أصلية؛ اطلب من الموظف إعادة تقديمه');
         if (mainDataVersion(records) !== details.baseline) throw attendanceError(409, 'البصمة تغيرت بعد تقديم الطلب؛ ارفضه واطلب نسخة جديدة للمراجعة');
@@ -1685,6 +1688,23 @@ app.put('/api/requests/:id', requireAuth(['admin', 'superadmin'], false), requir
         values.note = [records[0]?.note, `تصحيح طلب #${id}: ${request.notes}`].filter(Boolean).join(' | ');
         const saved = records.length ? await tx.update(schema.attendance).set(values).where(eq(schema.attendance.id, records[0].id)).returning() : await tx.insert(schema.attendance).values({ ...values, empId: request.empId, empName: request.empName, dept: request.dept, date: request.date, companyId, status: 'present' }).returning();
         await audit(tx, auth, companyId, 'attendance.correction.approve', saved[0].id, { requestId: id, empId: request.empId, date: request.date, before: records[0] || null, after: saved[0], reason: request.notes, reviewReason, reviewedBy });
+      }
+      if (status === 'approved' && ['leave', 'shift_change', 'swap'].includes(request.type)) {
+        if (!requestData) throw attendanceError(404, 'بيانات الشركة غير موجودة');
+        if (!validAttendanceDate(request.date)) throw attendanceError(409, 'تاريخ الطلب غير صالح');
+        if (request.type === 'shift_change' && !requestData.shiftTypes?.some((shift: any) => shift.id === request.targetShift)) throw attendanceError(409, 'الشيفت المطلوب غير متاح؛ راجع الطلب');
+        if (request.type === 'swap' && (!request.swapWithEmpId || request.swapWithEmpId === request.empId || !requestData.employees?.some((e: any) => String(e.id) === request.swapWithEmpId))) throw attendanceError(409, 'موظف التبديل غير متاح');
+        const schedule = structuredClone(requestData.schedule || {}), day = schedule[request.date] || {};
+        if (request.type === 'leave') day[request.empId] = { shiftType: 'A', note: 'إجازة معتمدة' };
+        if (request.type === 'shift_change') day[request.empId] = { shiftType: request.targetShift, note: 'تعديل شيفت معتمد' };
+        if (request.type === 'swap') {
+          const first = day[request.empId]?.shiftType || 'A', second = day[request.swapWithEmpId!]?.shiftType || 'A';
+          day[request.empId] = { shiftType: second, note: `بديل لـ ${request.swapWithEmpName || request.swapWithEmpId}` };
+          day[request.swapWithEmpId!] = { shiftType: first, note: `بديل لـ ${request.empName}` };
+        }
+        schedule[request.date] = day;
+        await tx.update(schema.systemData).set({ value: { ...requestData, schedule }, updatedAt: new Date() }).where(eq(schema.systemData.key, getMainDataKey(companyId)));
+        await audit(tx, auth, companyId, 'schedule.request.apply', request.id, { type: request.type, date: request.date, empId: request.empId, actorName: auth.name || auth.username });
       }
       const updated = await tx.update(schema.requests).set({ status, reviewedBy: auth.name || auth.username || 'المسؤول', reviewedAt: new Date(), reviewReason }).where(eq(schema.requests.id, id)).returning();
       await audit(tx, auth, companyId, 'request.' + status, id, { empId: request.empId, type: request.type, reason: reviewReason, actorName: auth.name || auth.username || 'المسؤول' });
