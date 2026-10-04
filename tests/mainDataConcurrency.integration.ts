@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
+import jwt from 'jsonwebtoken';
 import { mainDataVersion } from '../src/lib/mainDataVersion';
 
 const pool = new pg.Pool({ host: process.env.SQL_HOST, port: Number(process.env.SQL_PORT || 5432), user: process.env.SQL_USER, password: process.env.SQL_PASSWORD, database: process.env.SQL_DB_NAME });
@@ -290,7 +291,10 @@ try {
   const profileRead = (section: string, extra = '', requestHeaders = headers) => fetch(profileUrl + '&section=' + section + extra, { headers: requestHeaders });
   assert.equal((await fetch(profileUrl)).status, 401);
   assert.equal((await profileRead('overview', '', employeeHeaders)).status, 403);
-  assert.equal((await fetch(profileUrl.replace('companyId=default', 'companyId=another-company'), { headers })).status, 403);
+  const tenantAdminHeaders = { ...headers, Authorization: 'Bearer ' + jwt.sign({ role: 'admin', companyId: 'default', id: 'tenant-admin-ci', name: 'Tenant admin' }, 'ci-integration-only-secret', { expiresIn: '1h' }) };
+  assert.equal((await fetch(profileUrl, { headers: tenantAdminHeaders })).status, 200);
+  assert.equal((await fetch(profileUrl.replace('companyId=default', 'companyId=another-company'), { headers: tenantAdminHeaders })).status, 403);
+  assert.equal((await fetch(profileUrl.replace('companyId=default', 'companyId=another-company'), { headers })).status, 404, 'superadmin may select another company, but employee membership is still required');
   assert.equal((await fetch(profileUrl.replace('employee-ci', 'unknown-ci'), { headers })).status, 404);
   assert.equal((await profileRead('private')).status, 400);
   assert.equal((await profileRead('requests', '&page=0')).status, 400);
