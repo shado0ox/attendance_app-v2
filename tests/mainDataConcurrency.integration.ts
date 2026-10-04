@@ -287,6 +287,7 @@ try {
   const preservedEmployment = await employmentSave(employmentData);
   assert.equal(preservedEmployment.status, 200);
   assert.deepEqual((await preservedEmployment.json() as any).employees.find((e: any) => e.id === 'dated-ci').employmentHistory, datedEmployee.employmentHistory);
+  assert.equal((await emailSave({ email: 'profile@example.com' })).status, 200);
   const profileUrl = origin + '/api/employees/employee-ci/profile?companyId=default&month=2025-03';
   const profileRead = (section: string, extra = '', requestHeaders = headers) => fetch(profileUrl + '&section=' + section + extra, { headers: requestHeaders });
   assert.equal((await fetch(profileUrl)).status, 401);
@@ -303,7 +304,7 @@ try {
   assert.equal(overviewResponse.headers.get('cache-control'), 'private, no-store');
   const overviewProfile = await overviewResponse.json() as any;
   assert.equal(overviewProfile.employee.id, 'employee-ci');
-  assert.equal(overviewProfile.employee.email, 'employee@example.com');
+  assert.equal(overviewProfile.employee.email, 'profile@example.com');
   assert.equal(overviewProfile.employee.password, undefined);
   assert.equal(overviewProfile.employee.webauthnCredentials, undefined);
   const attendanceProfile = await (await profileRead('attendance')).json() as any;
