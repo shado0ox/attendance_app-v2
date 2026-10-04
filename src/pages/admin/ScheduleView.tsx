@@ -1,3 +1,4 @@
+import { isActiveEmployee, employeeStatus, statusLabels } from '../../lib/employeeLifecycle';
 import { useState } from 'react';
 import { printSchedule } from '../../lib/schedulePrint';
 import SchedulePlanner from './SchedulePlanner';
@@ -110,7 +111,7 @@ export default function ScheduleView({
         <button type="button" onClick={() => setPlannerOpen(v => !v)} className="self-start px-4 py-2 bg-sky-100 text-sky-800 rounded-lg text-xs font-bold">
           {plannerOpen ? 'إغلاق أداة الاقتراح' : 'اقتراح توزيع الشيفتات والراحات'}
         </button>
-        {plannerOpen && <div key={selectedDept + scheduleMonth}><SchedulePlanner department={department} employees={employees} shiftTypes={shiftTypes} schedule={schedule} month={scheduleMonth} onApply={onApplySchedule}/></div>}
+        {plannerOpen && <div key={selectedDept + scheduleMonth}><SchedulePlanner department={department} employees={employees.filter(isActiveEmployee)} shiftTypes={shiftTypes} schedule={schedule} month={scheduleMonth} onApply={onApplySchedule}/></div>}
       </>}
       {/* Dynamic schedule table grid */}
       <div className="overflow-auto max-h-[72vh] rounded-xl border border-sky-100 shadow-2xs relative">
@@ -122,6 +123,7 @@ export default function ScheduleView({
               {deptEmployees.map((emp) => (
                 <th key={emp.id} className="p-3 font-extrabold text-center border-r border-sky-100 bg-sky-50">
                   {emp.name}
+                  {employeeStatus(emp) !== 'active' && <span className="block text-[10px] text-amber-700">{statusLabels[employeeStatus(emp)]}</span>}
                 </th>
               ))}
             </tr>

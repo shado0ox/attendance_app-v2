@@ -90,7 +90,7 @@ try {
   assert.equal(savedRows.rows[0].count,1);
   assert.equal((await punch({id:attendance.id,checkOut:'17:00',checkOutLat:24,checkOutLng:46})).status,403);
   assert.equal((await punch({id:attendance.id,checkOut:'17:00',checkOutLat:26,checkOutLng:50})).status,200);
-  const events = await pool.query('SELECT count(*)::int AS count FROM shift_app.audit_log WHERE actor_id=$1',['employee-ci']);
+  const events = await pool.query("SELECT count(*)::int AS count FROM shift_app.audit_log WHERE actor_id=$1 AND action LIKE 'punch.%'",['employee-ci']);
   assert.equal(events.rows[0].count,2);
   const month = '2025-01';
   const adminRecord = (body: any) => fetch(origin + '/api/attendance', { method: 'POST', headers, body: JSON.stringify({ companyId: 'default', ...body }) });
@@ -190,6 +190,31 @@ try {
   assert.equal(clearedResponse.status,200);
   const clearedEmployee = await (await fetch(origin + '/api/main-data?companyId=default', {headers:employeeHeaders})).json() as any;
   assert.deepEqual(clearedEmployee.schedule,{});
+  const changeStatus = async (status: string) => {
+    const data = await (await fetch(origin + '/api/main-data?companyId=default', { headers })).json() as any;
+    return fetch(origin + '/api/main-data?companyId=default', { method: 'POST', headers, body: JSON.stringify({ ...data, employees: data.employees.map((e: any) => e.id === 'employee-ci' ? { ...e, status, statusReason: 'CI lifecycle test' } : e), _baseVersion: data._version }) });
+  };
+  assert.equal((await changeStatus('invalid')).status, 400);
+  for (const status of ['suspended', 'archived']) {
+    assert.equal((await changeStatus(status)).status, 200);
+    assert.equal((await fetch(origin + '/api/auth/employee-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyId: 'default', username: 'branch-user', password: 'employee-password' }) })).status, 403);
+    assert.equal((await fetch(origin + '/api/main-data?companyId=default', { headers: employeeHeaders })).status, 403);
+    assert.equal((await punch({ checkIn: '08:00', checkInLat: 26, checkInLng: 50 })).status, 403);
+    assert.equal((await emailSave({ email: 'blocked@example.com' })).status, 403);
+    assert.equal((await fetch(origin + '/api/auth/webauthn-challenge', { method: 'POST', headers, body: JSON.stringify({ companyId: 'default', empId: 'employee-ci' }) })).status, 403);
+  }
+  const afterArchive = await (await fetch(origin + '/api/main-data?companyId=default', { headers })).json() as any;
+  assert.ok(afterArchive.employees.some((e: any) => e.id === 'employee-ci'));
+  assert.equal((await fetch(origin + '/api/main-data?companyId=default', { method: 'POST', headers, body: JSON.stringify({ ...afterArchive, employees: afterArchive.employees.filter((e: any) => e.id !== 'employee-ci'), _baseVersion: afterArchive._version }) })).status, 400);
+  assert.equal((await changeStatus('active')).status, 200);
+  assert.equal((await fetch(origin + '/api/main-data?companyId=default', { headers: employeeHeaders })).status, 200);
+  const staffLog = await (await fetch(origin + '/api/employee-audit?companyId=default&empId=employee-ci', { headers })).json() as any;
+  assert.deepEqual(staffLog.filter((e: any) => e.action === 'employee.status').map((e: any) => e.details.changes.status.after), ['active', 'archived', 'suspended']);
+  assert.ok(staffLog.every((e: any) => e.entityId === 'employee-ci' && e.companyId === 'default'));
+  assert.ok(!JSON.stringify(staffLog).includes('employee-password'));
+  assert.equal((await fetch(origin + '/api/employee-audit?companyId=default&empId=employee-ci', { headers: employeeHeaders })).status, 403);
+  assert.equal((await pool.query('SELECT count(*)::int AS count FROM shift_app.attendance WHERE emp_id=$1', ['employee-ci'])).rows[0].count, 1);
+  console.log('PASS: inactive accounts cannot login/read/punch/change email or request WebAuthn; archival retains history, restoration works, audit is scoped and secrets are excluded.');
   console.log('PASS: employee reads reflect manager edits and explicit empty schedules without HTTP cache reuse.');
   console.log('PASS: schedule analysis, approved leave, rest, overnight absence, grace and potential overtime through HTTP.');
   console.log('PASS: scoped report period/employee/department, whole-day paging, complete export, totals and employee permissions.');

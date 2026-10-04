@@ -1,3 +1,4 @@
+import { employeeStatus, isActiveEmployee, type EmployeeStatus } from '../lib/employeeLifecycle';
 import DepartmentBadge from './DepartmentBadge';
 import { coverageAlerts } from '../lib/schedulePlanning';
 import { attendanceToday } from '../lib/attendanceQuery';
@@ -431,7 +432,7 @@ export default function AdminPortal({
   };
 
   const getShiftGaps = () => coverageAlerts(
-    departments, employees, shiftTypes || [], schedule,
+    departments, employees.filter(isActiveEmployee), shiftTypes || [], schedule,
     getDaysInSelectedMonth().map(d => d.dateStr)
   ).filter(a => !(appSettings.deletedAlerts || []).includes(a.id));
 
@@ -471,7 +472,7 @@ export default function AdminPortal({
     const presentIds = [...new Set(todayCheckedIn.map(r => r.empId))];
 
     // Who is scheduled today?
-    const scheduledEmpIds = employees.filter(emp => {
+    const scheduledEmpIds = employees.filter(isActiveEmployee).filter(emp => {
       const daySchedule = schedule[todayStrFull]?.[emp.id];
       return daySchedule && daySchedule.shiftType && daySchedule.shiftType !== 'OFF';
     }).map(emp => emp.id);
@@ -480,7 +481,7 @@ export default function AdminPortal({
     // Absent: scheduled but didn't check in today. Or fallback to total inactive minus present if no schedule exists today.
     const absentCount = scheduledEmpIds.length > 0 
       ? scheduledEmpIds.filter(id => !presentIds.includes(id)).length
-      : Math.max(0, employees.length - presentCount);
+      : Math.max(0, employees.filter(isActiveEmployee).length - presentCount);
 
     return {
       presentCount,
@@ -566,12 +567,17 @@ export default function AdminPortal({
     if (shouldWelcome) await sendWelcome(newEmp.id);
   };
 
-  const handleDeleteEmployee = (id: string) => {
-    requestConfirm('هل تريد حذف الموظف المحدد؟', () => {
-      const updated = employees.filter((e) => e.id !== id);
-      onUpdateAppData({ ...appData, employees: updated });
+  const handleEmployeeStatus = (id: string, status: EmployeeStatus) => {
+    const employee = employees.find(e => e.id === id);
+    if (!employee || employeeStatus(employee) === status) return;
+    const action = status === 'archived' ? 'أرشفة' : status === 'suspended' ? 'إيقاف' : 'تفعيل / استعادة';
+    const reason = window.prompt(`سبب ${action} ${employee.name} (مطلوب):`);
+    if (!reason?.trim()) return;
+    requestConfirm(`${action} ${employee.name}؟ ستظل سجلات الحضور والجدول محفوظة.${status !== 'active' ? ' سيتم منع الدخول والبصمة من الحساب.' : ''}`, () => {
+      void onUpdateAppData({ ...appData, employees: employees.map(e => e.id === id ? { ...e, status, statusReason: reason.trim(), statusChangedAt: new Date().toISOString() } : e) });
     });
   };
+  const handleDeleteEmployee = (id: string) => handleEmployeeStatus(id, 'archived');
 
   const handleAddDept = async () => {
     if (!dmName.trim()) return;
@@ -1180,6 +1186,8 @@ export default function AdminPortal({
           {/* View: Employees CRUD */}
           {activeView === 'employees' && (
             <EmployeesView
+              companyId={companyId}
+              onStatusChange={handleEmployeeStatus}
               appSettings={appSettings}
               employees={employees}
               departments={departments}
