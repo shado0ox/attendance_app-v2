@@ -1,3 +1,4 @@
+import { employeeAtDate, isActiveEmployee } from './employeeLifecycle';
 export type Period = 'morning' | 'evening';
 export type Schedule = Record<string, Record<string, { shiftType: string; note?: string; [key: string]: any }>>;
 
@@ -23,7 +24,7 @@ export function requirements(dept: any, date: string, morning = dept.needsMornin
 export function coverageAlerts(departments: any[], employees: any[], shifts: any[], schedule: Schedule, dates: string[]) {
   const alerts: any[] = [];
   for (const date of dates) for (const dept of departments) {
-    const staff = employees.filter(e => e.dept === dept.id);
+    const staff = employees.filter(e => isActiveEmployee(employeeAtDate(e, date)) && employeeAtDate(e, date).dept === dept.id);
     const count = coverage(staff, shifts, schedule, date);
     const needed = requirements(dept, date);
     for (const p of ['morning', 'evening'] as Period[]) if (count[p] < needed[p]) {
@@ -109,7 +110,7 @@ export function proposeSchedule(dept: any, employees: any[], shifts: any[], base
   if (!staff.length) throw new Error('اختر موظفاً واحداً على الأقل من القسم');
   const selected = shifts.filter(s => o.shiftIds.includes(s.id) && shiftPeriods(s).length && span(s, dates[0]));
   if (!selected.length && (o.morning || o.evening)) throw new Error('اختر شيفتات ذات مواعيد صحيحة؛ الشيفت المزدوج يحتاج مواعيد الفترتين');
-  const departmentStaff = employees.filter(e => e.dept === dept.id);
+  const departmentStaff = employees.filter(e => e.dept === dept.id && isActiveEmployee(e));
   const schedule: Schedule = { ...base };
   for (const date of dates) schedule[date] = { ...base[date] };
   const changes: { date: string; employeeId: string; shiftType: string; note: string }[] = [];

@@ -1,6 +1,6 @@
 import { correctionValues, validCorrectionTime, CorrectionValidationError } from './src/lib/attendanceCorrection';
 import { scheduleContent, effectiveScheduleData, employeeScheduleContent } from './src/lib/schedulePublication';
-import { employeeStatus, isActiveEmployee, employeeChanges } from './src/lib/employeeLifecycle';
+import { employeeStatus, isActiveEmployee, employeeChanges, saveEmploymentHistory, employeeAtDate } from './src/lib/employeeLifecycle';
 import { validEmployeeEmail } from './src/lib/employeeDirectory';
 import { welcomePayload, deliverWelcome } from './src/server/welcomeEmail';
 import { autoFix } from './src/lib/autoPunch';
@@ -931,13 +931,13 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
 
       if (result.length === 0) {
         if (auth.role === 'employee') return { status: 404, body: { error: 'بيانات الشركة غير موجودة' } };
-        const initialValue = payload;
+        const initialValue = { ...payload, employees: saveEmploymentHistory([], payload.employees) };
         const inserted = await tx.insert(schema.systemData).values({
           key,
           value: initialValue,
         }).onConflictDoNothing().returning();
         if (!inserted.length) return { status: 409, body: { error: 'تم إنشاء بيانات الشركة من جلسة أخرى. أعد تحميل البيانات قبل الحفظ.', code: 'DATA_CONFLICT' } };
-        for (const change of employeeChanges([], payload.employees)) await audit(tx, auth, companyId, change.action, change.id, { ...change, actorName: auth.name || auth.username || 'المسؤول' });
+        for (const change of employeeChanges([], initialValue.employees)) await audit(tx, auth, companyId, change.action, change.id, { ...change, actorName: auth.name || auth.username || 'المسؤول' });
         return { status: 200, body: { ...sanitizeMainData(inserted[0].value, true), _version: mainDataVersion(inserted[0].value) } };
       }
 
@@ -947,6 +947,10 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
       }
       if (auth.role !== 'employee' && (currentValue as any).employees?.some((e: any) => !payload.employees.some((next: any) => String(next.id) === String(e.id)))) return { status: 400, body: { error: 'لا تحذف الموظفين نهائيًا؛ استخدم الأرشفة للحفاظ على سجلاتهم.' } };
       if (auth.role !== 'employee' && payload.employees.some((e: any) => { const old = (currentValue as any).employees?.find((previous: any) => String(previous.id) === String(e.id)); return old && employeeStatus(old) !== employeeStatus(e) && (typeof e.statusReason !== 'string' || !e.statusReason.trim() || e.statusReason.length > 500); })) return { status: 400, body: { error: 'أدخل سبب تغيير الحالة، بحد أقصى 500 حرف' } };
+      if (auth.role !== 'employee') {
+        try { payload.employees = saveEmploymentHistory((currentValue as any).employees || [], payload.employees); }
+        catch (error: any) { return { status: 400, body: { error: error.message } }; }
+      }
       let valueToSave: any = { ...payload, _schedulePublication: (currentValue as any)._schedulePublication || { ...scheduleContent(currentValue), publishedAt: null, legacy: true } };
       if (auth.role === 'employee') {
         // Only allow this employee to change their own password; everything else is
@@ -1471,7 +1475,7 @@ app.post('/api/requests', requireAuth(['employee', 'admin', 'superadmin']), asyn
         if (records.length > 1) throw attendanceError(409, 'اليوم يحتوي عدة سجلات؛ اطلب مراجعة إدارية مباشرة');
         const proposed = correctionValues({ date, checkInTime, checkOutTime, details }, records[0]);
         if (Object.entries(proposed).some(([field, value]) => /Ts[2]?$/.test(field) && Number(value) > Date.now())) throw attendanceError(400, 'لا يمكن طلب بصمة في وقت مستقبلي');
-        const inserted = await tx.insert(schema.requests).values({ empId: String(empId), empName: employee.name, dept: employee.dept || '', date, type, notes: reason, status: 'pending', companyId: requestCompany, checkInTime: checkInTime || null, checkOutTime: checkOutTime || null, details: { ...details, baseline: mainDataVersion(records), original: records[0] || null } }).returning();
+        const inserted = await tx.insert(schema.requests).values({ empId: String(empId), empName: employee.name, dept: records[0]?.dept || employeeAtDate(employee, date).dept || '', date, type, notes: reason, status: 'pending', companyId: requestCompany, checkInTime: checkInTime || null, checkOutTime: checkOutTime || null, details: { ...details, baseline: mainDataVersion(records), original: records[0] || null } }).returning();
         await audit(tx, auth, requestCompany, 'attendance.correction.request', inserted[0].id, { empId, date, reason, requested: { checkInTime, checkOutTime, ...details } });
         return inserted[0];
       });

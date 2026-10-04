@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-const labels: Record<string, string> = { name: 'الاسم', dept: 'القسم', phone: 'الجوال', email: 'البريد', username: 'اسم المستخدم', status: 'الحالة', password: 'رمز الدخول', restrictAttendanceLocations: 'تقييد المواقع', allowedAttendanceLocationIds: 'المواقع المسموحة', color: 'اللون', statusReason: 'سبب تغيير الحالة' };
+const labels: Record<string, string> = { employmentEffectiveDate: 'تاريخ سريان التغيير', name: 'الاسم', dept: 'القسم', phone: 'الجوال', email: 'البريد', username: 'اسم المستخدم', status: 'الحالة', password: 'رمز الدخول', restrictAttendanceLocations: 'تقييد المواقع', allowedAttendanceLocationIds: 'المواقع المسموحة', color: 'اللون', statusReason: 'سبب تغيير الحالة' };
 const actions: Record<string, string> = { 'employee.create': 'إضافة موظف', 'employee.update': 'تعديل البيانات', 'employee.status': 'تغيير الحالة', 'employee.email': 'تسجيل البريد بواسطة الموظف' };
 export default function EmployeeHistory({ employee, companyId, departments, onClose }: { employee: any; companyId: string; departments: any[]; onClose: () => void }) {
   const [rows, setRows] = useState<any[]>([]);

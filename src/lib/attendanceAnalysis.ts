@@ -1,3 +1,4 @@
+import { employeeAtDate, isActiveEmployee } from './employeeLifecycle';
 import { validAttendanceDate } from './attendanceMonths';
 const clock = (value: unknown) => {
   if (typeof value !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
@@ -28,8 +29,8 @@ export function analyzeAttendance(days: any[], mainData: any, query: { from: str
   for (const [date, assignments] of Object.entries(schedule)) {
     if (!validAttendanceDate(date) || date < query.from || date > query.to || !assignments || typeof assignments !== 'object') continue;
     for (const [empId, assigned] of Object.entries(assignments)) {
-      const emp: any = employees.get(empId);
-      if (!emp || !(assigned as any)?.shiftType || (query.empId && query.empId !== empId) || (query.dept && query.dept !== emp.dept)) continue;
+      const emp: any = employeeAtDate(employees.get(empId), date);
+      if (!isActiveEmployee(emp) || !(assigned as any)?.shiftType || (query.empId && query.empId !== empId) || (query.dept && query.dept !== emp.dept)) continue;
       const key = `${empId}|${date}`;
       if (!grouped.has(key)) grouped.set(key, { id: key, ids: [], empId, empName: emp.name, dept: emp.dept || '', date, minutes: null, ignored: 0, note: (assigned as any).note || '', reportStatus: 'بدون بصمة' });
     }
