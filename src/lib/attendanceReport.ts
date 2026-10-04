@@ -50,13 +50,14 @@ export function buildAttendanceDays(records: any[], settings: any) {
     const outs = unique.filter(e => e.kind === 'out').sort((a,b) => a.time-b.time);
     const first = ins[0], last = outs.at(-1);
     let status = 'مكتمل';
+    let punchIssue: string | null = null;
     let minutes: number | null = null;
-    if (invalid) status = 'بيانات غير صالحة — للمراجعة';
-    else if (!first) status = 'حضور ناقص';
-    else if (!last || ins.at(-1)!.time > last.time) status = 'انصراف ناقص';
-    else if (last.time <= first.time || last.time-first.time > 86400000) status = 'مدة غير منطقية — للمراجعة';
+    if (invalid) { punchIssue = 'invalid'; status = 'بيانات غير صالحة — للمراجعة'; }
+    else if (!first) { punchIssue = 'missing_in'; status = 'حضور ناقص'; }
+    else if (!last || ins.at(-1)!.time > last.time) { punchIssue = 'missing_out'; status = 'انصراف ناقص'; }
+    else if (last.time <= first.time || last.time-first.time > 86400000) { punchIssue = 'duration'; status = 'مدة غير منطقية — للمراجعة'; }
     else minutes = Math.round((last.time-first.time)/60000);
-    return { ...rows[0], ids: rows.map(r => r.id), first, last, minutes, reportStatus: status, ignored: Math.max(0, events.length - (first ? 1 : 0) - (last ? 1 : 0)) };
+    return { ...rows[0], ids: rows.map(r => r.id), first, last, lastIn: ins.at(-1), minutes, punchIssue, reportStatus: status, ignored: Math.max(0, events.length - (first ? 1 : 0) - (last ? 1 : 0)) };
   }).sort((a,b) => b.date.localeCompare(a.date) || String(a.empName).localeCompare(String(b.empName), 'ar'));
 }
 export const formatMinutes = (minutes: number | null) => minutes === null ? '—' : `${Math.floor(minutes / 60)} س ${minutes % 60} د`;

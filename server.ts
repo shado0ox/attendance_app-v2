@@ -8,6 +8,7 @@ import { validEmployeeEmail } from './src/lib/employeeDirectory';
 import { welcomePayload, deliverWelcome } from './src/server/welcomeEmail';
 import { autoFix } from './src/lib/autoPunch';
 import { analyzeAttendance } from './src/lib/attendanceAnalysis';
+import { parseExceptionQuery, exceptionReportPage } from './src/lib/attendanceExceptions';
 import { parseAttendanceQuery, attendanceReportPage } from './src/lib/attendanceQuery';
 import { buildAttendanceDays } from './src/lib/attendanceReport';
 import { validMonth, validAttendanceDate, riyadhMonth } from './src/lib/attendanceMonths';
@@ -1312,6 +1313,32 @@ app.get('/api/attendance-report', requireAuth(['admin', 'superadmin']), async (r
     const days = reportDays.map(day => ({ ...day, departmentName: mainData?.departments?.find((dept: any) => dept.id === day.dept)?.name || day.dept }));
     return res.json({ ...attendanceReportPage(days, query), companyName: mainData?.settings?.companyName || companyId, from: query.from, to: query.to });
   } catch (error) { console.error('Attendance report query failed', error); return res.status(500).json({ error: 'تعذر تحميل كشف الحضور' }); }
+});
+
+// Read-only review queue: use published shifts and preserve historical punch departments.
+app.get('/api/attendance-exceptions', requireAuth(['admin', 'superadmin']), async (req, res) => {
+  let query: ReturnType<typeof parseExceptionQuery>;
+  try { query = parseExceptionQuery(req.query); } catch (error: any) { return res.status(400).json({ error: error.message }); }
+  const companyId = String(req.query.companyId || 'default');
+  res.set('Cache-Control', 'private, no-store');
+  try {
+    const records = await db.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, companyId), sql`${schema.attendance.date} >= ${query.from}`, sql`${schema.attendance.date} <= ${query.to}`, query.empId ? eq(schema.attendance.empId, query.empId) : undefined)).orderBy(desc(schema.attendance.id));
+    const requests = await db.select().from(schema.requests).where(and(eq(schema.requests.companyId, companyId), sql`${schema.requests.date} >= ${query.from}`, sql`${schema.requests.date} <= ${query.to}`, query.empId ? eq(schema.requests.empId, query.empId) : undefined));
+    const data = await getMainDataByCompanyId(companyId), published = effectiveScheduleData(data);
+    const now = Date.now();
+    const days = analyzeAttendance(buildAttendanceDays(records, data?.settings), published, query, requests.filter(r => r.type === 'leave' && r.status === 'approved'), now);
+    const report = exceptionReportPage(days, query, now);
+    const byDay = new Map<string, any[]>(), pending = new Map<string, any[]>();
+    for (const row of records) { const key = `${row.empId}|${row.date}`; byDay.set(key, [...(byDay.get(key) || []), row]); }
+    for (const request of requests) if (request.type === 'attendance_adjustment' && request.status === 'pending') { const key = `${request.empId}|${request.date}`; pending.set(key, [...(pending.get(key) || []), { id: request.id, notes: request.notes, checkInTime: request.checkInTime, checkOutTime: request.checkOutTime, period: (request.details as any)?.period === 2 ? 2 : 1, checkInNextDay: (request.details as any)?.checkInNextDay === true, checkOutNextDay: (request.details as any)?.checkOutNextDay === true }]); }
+    return res.json({ ...report, items: report.items.map(day => {
+      const key = `${day.empId}|${day.date}`, assigned = published?.schedule?.[day.date]?.[day.empId];
+      const shift = published?.shiftTypes?.find((s: any) => s.id === assigned?.shiftType);
+      return { id: key, empId: day.empId, empName: day.empName, date: day.date, dept: day.dept, departmentName: data?.departments?.find((d: any) => d.id === day.dept)?.name || day.dept || 'بدون قسم', first: day.first, last: day.last, minutes: day.minutes, note: day.note || '', ignored: day.ignored, analysis: day.analysis, exceptions: day.exceptions,
+        shiftName: ['A','OFF'].includes(assigned?.shiftType) ? 'راحة / إجازة' : shift?.name || 'غير مجدول', shiftNote: assigned?.note || '', pendingCorrections: pending.get(key) || [],
+        records: (byDay.get(key) || []).map(row => ({ id: row.id, source: row.source, note: row.note, checkIn: row.checkIn, checkOut: row.checkOut, checkIn2: row.checkIn2, checkOut2: row.checkOut2, checkInLocation: row.checkInLocation, checkOutLocation: row.checkOutLocation, checkInLocation2: row.checkInLocation2, checkOutLocation2: row.checkOutLocation2 })) };
+    }), companyName: data?.settings?.companyName || companyId, from: query.from, to: query.to, generatedAt: new Date(now).toISOString() });
+  } catch { return res.status(500).json({ error: 'تعذر تحميل استثناءات الحضور' }); }
 });
 
 // 4. Attendance Endpoints (Tenant Aware)
