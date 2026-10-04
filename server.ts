@@ -1,3 +1,4 @@
+import { validEmployeeEmail } from './src/lib/employeeDirectory';
 import { welcomePayload, deliverWelcome } from './src/server/welcomeEmail';
 import { autoFix } from './src/lib/autoPunch';
 import { analyzeAttendance } from './src/lib/attendanceAnalysis';
@@ -969,6 +970,27 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
 // 3. Registration Requests (Tenant Aware)
 // Submitting a request stays public (it's the sign-up form itself); reading the list
 // (which includes the applicant's chosen password) and approving/rejecting are admin-only.
+// Narrow employee profile update: token identity only, locked row preserves admin changes.
+app.patch('/api/employee-profile/email', requireAuth(['employee']), async (req, res) => {
+  const auth = (req as any).auth as AuthTokenPayload;
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+  if (!validEmployeeEmail(email)) return res.status(400).json({ error: 'أدخل بريدًا إلكترونيًا صحيحًا' });
+  try {
+    const result = await db.transaction(async tx => {
+      const key = auth.companyId === 'default' ? 'mainData' : 'mainData_' + auth.companyId;
+      const rows = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1).for('update');
+      const data: any = rows[0]?.value;
+      if (!data?.employees?.some((e: any) => String(e.id) === String(auth.id))) return null;
+      if (data.employees.find((e: any) => String(e.id) === String(auth.id)).email === email) return true;
+      const value = { ...data, employees: data.employees.map((e: any) => String(e.id) === String(auth.id) ? { ...e, email } : e) };
+      await tx.update(schema.systemData).set({ value, updatedAt: new Date() }).where(eq(schema.systemData.key, key));
+      return true;
+    });
+    if (!result) return res.status(404).json({ error: 'حساب الموظف غير موجود' });
+    return res.json({ email });
+  } catch { return res.status(500).json({ error: 'تعذر حفظ البريد، حاول مرة أخرى' }); }
+});
+
 // Only stored employee addresses can receive welcome mail; durable claim prevents concurrent sends.
 app.post('/api/employees/:id/welcome-email', requireAuth(['admin', 'superadmin']), async (req, res) => {
   const companyId = String(req.query.companyId || 'default');

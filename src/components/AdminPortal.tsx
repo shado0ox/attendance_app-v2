@@ -1,3 +1,4 @@
+import DepartmentBadge from './DepartmentBadge';
 import { coverageAlerts } from '../lib/schedulePlanning';
 import { attendanceToday } from '../lib/attendanceQuery';
 import { getApprovedLocations } from '../lib/attendanceLocations';
@@ -173,6 +174,26 @@ export default function AdminPortal({
   const [deptModalOpen, setDeptModalOpen] = useState(false);
   const [editingDeptId, setEditingDeptId] = useState<string | null>(null);
   const [dmName, setDmName] = useState('');
+  const [dmLogo, setDmLogo] = useState('');
+  const [dmColor, setDmColor] = useState('#01696f');
+  const [logoBusy, setLogoBusy] = useState(false);
+  const uploadDepartmentLogo = async (file?: File) => {
+    if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 2 * 1024 * 1024) { alert('اختر PNG أو JPEG أو WebP بحجم لا يتجاوز 2 ميجابايت'); return; }
+    setLogoBusy(true);
+    const url = URL.createObjectURL(file);
+    try {
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 128;
+      const ratio = Math.min(128 / image.width, 128 / image.height);
+      canvas.getContext('2d')!.drawImage(image, (128 - image.width * ratio) / 2, (128 - image.height * ratio) / 2, image.width * ratio, image.height * ratio);
+      setDmLogo(canvas.toDataURL('image/png'));
+    } catch { alert('تعذر قراءة الصورة'); }
+    finally { URL.revokeObjectURL(url); setLogoBusy(false); }
+  };
   const [dmMorning, setDmMorning] = useState(true);
   const [dmEvening, setDmEvening] = useState(true);
   const [dmFriday, setDmFriday] = useState<'off' | 'partial' | 'normal'>('off');
@@ -557,6 +578,8 @@ export default function AdminPortal({
     const newDept = {
       id: editingDeptId || 'dept' + Date.now(),
       name: dmName.trim(),
+      logoDataUrl: dmLogo,
+      color: dmColor,
       needsMorning: dmMorning,
       needsEvening: dmEvening,
       friday: dmFriday
@@ -564,7 +587,7 @@ export default function AdminPortal({
 
     let updatedDepts = [...departments];
     if (editingDeptId) {
-      updatedDepts = updatedDepts.map((d) => (d.id === editingDeptId ? newDept : d));
+      updatedDepts = updatedDepts.map((d) => (d.id === editingDeptId ? { ...d, ...newDept } : d));
     } else {
       updatedDepts.push(newDept);
     }
@@ -1191,6 +1214,10 @@ export default function AdminPortal({
               onOpenWhatsApp={handleOpenWaModal}
               onSendWelcome={sendWelcome}
               welcomeBusy={welcomeBusy}
+              onAssignDepartment={async (ids, department) => {
+                if (!departments.some(d => d.id === department)) return false;
+                return onUpdateAppData({ ...appData, employees: employees.map(e => ids.includes(e.id) ? { ...e, dept: department } : e) });
+              }}
             />
           )}
 
@@ -1202,6 +1229,8 @@ export default function AdminPortal({
               onAddNew={() => {
                 setEditingDeptId(null);
                 setDmName('');
+                setDmLogo('');
+                setDmColor('#01696f');
                 setDmMorning(true);
                 setDmEvening(true);
                 setDmFriday('off');
@@ -1210,12 +1239,15 @@ export default function AdminPortal({
               onEdit={(dept) => {
                 setEditingDeptId(dept.id);
                 setDmName(dept.name);
+                setDmLogo(dept.logoDataUrl || '');
+                setDmColor(dept.color || '#01696f');
                 setDmMorning(dept.needsMorning);
                 setDmEvening(dept.needsEvening);
                 setDmFriday(dept.friday || 'off');
                 setDeptModalOpen(true);
               }}
               onDelete={(deptId) => {
+                if (employees.some(e => e.dept === deptId)) { alert('انقل موظفي هذا القسم إلى قسم آخر قبل حذفه.'); return; }
                 requestConfirm('هل تريد حذف هذا القسم بالكامل؟', () => {
                   const updated = departments.filter((d) => d.id !== deptId);
                   onUpdateAppData({ ...appData, departments: updated });
@@ -2000,6 +2032,13 @@ export default function AdminPortal({
               </div>
 
               <div className="flex flex-col gap-2">
+                <div className="border rounded-xl p-3 flex flex-col gap-3">
+                  <DepartmentBadge department={{ name: dmName || 'القسم', color: dmColor, logoDataUrl: dmLogo }} />
+                  <label className="text-xs flex gap-2 items-center">لون القسم <input type="color" value={dmColor} onChange={e => setDmColor(e.target.value)} /></label>
+                  <label className="text-xs">شعار خاص (اختياري)<input type="file" accept="image/png,image/jpeg,image/webp" disabled={logoBusy} onChange={e => { void uploadDepartmentLogo(e.target.files?.[0]); e.target.value = ''; }} className="block mt-2 w-full text-xs" /></label>
+                  {logoBusy && <span className="text-xs">جارٍ تجهيز الشعار…</span>}
+                  {dmLogo && <button onClick={() => setDmLogo('')} className="text-xs text-rose-600 self-start">إزالة الشعار واستخدام الشعار التلقائي</button>}
+                </div>
                 <label className="text-xs font-bold text-slate-600">نظام الرقابة وتامين التغطية</label>
                 <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
                   <input
@@ -2043,6 +2082,7 @@ export default function AdminPortal({
                   إلغاء
                 </button>
                 <button
+                  disabled={logoBusy}
                   onClick={handleAddDept}
                   className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold"
                 >

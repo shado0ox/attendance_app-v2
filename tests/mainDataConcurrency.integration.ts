@@ -43,6 +43,23 @@ try {
   assert.equal(employeeLogin.status,200);
   const employee = await employeeLogin.json() as any;
   const employeeHeaders = { Authorization:'Bearer ' + employee.token, 'Content-Type':'application/json' };
+  const beforeEmailProfile = await (await fetch(origin + '/api/main-data?companyId=default', { headers })).json() as any;
+  const emailUrl = origin + '/api/employee-profile/email?companyId=default';
+  const emailSave = (body: any, requestHeaders = employeeHeaders, url = emailUrl) => fetch(url, { method: 'PATCH', headers: requestHeaders, body: JSON.stringify(body) });
+  assert.equal((await emailSave({ email: 'employee@example.com' }, headers)).status, 403);
+  assert.equal((await emailSave({ email: 'bad' })).status, 400);
+  assert.equal((await emailSave({ email: 'employee@example.com' }, employeeHeaders, emailUrl.replace('default', 'another-company'))).status, 403);
+  assert.equal((await emailSave({ email: ' employee@example.com ', empId: 'another-employee', password: 'bad-password', schedule: {} })).status, 200);
+  const savedProfile = (await pool.query('SELECT value FROM shift_app.system_data WHERE key=$1', ['mainData'])).rows[0].value;
+  assert.equal(savedProfile.employees[0].email, 'employee@example.com');
+  assert.equal(savedProfile.employees[0].password, 'employee-password');
+  assert.equal(savedProfile.employees[0].allowedAttendanceLocationIds[0], 'east');
+  assert.equal(savedProfile.settings.companyName, 'Fresh');
+  const emailRead = await (await fetch(origin + '/api/main-data?companyId=default', { headers: employeeHeaders })).json() as any;
+  assert.equal(emailRead.employees[0].email, 'employee@example.com');
+  // Profile writes change the version, so a stale administrator cannot overwrite them.
+  assert.equal((await save('Stale after profile update', beforeEmailProfile._version)).status, 409);
+  console.log('PASS: employee email updates use token identity, validate tenant/email, preserve password and settings, and invalidate stale admin saves.');
   const welcomeUrl = origin + '/api/employees/employee-ci/welcome-email?companyId=default';
   assert.equal((await fetch(welcomeUrl, { method: 'POST' })).status, 401);
   assert.equal((await fetch(welcomeUrl, { method: 'POST', headers: employeeHeaders })).status, 403);
