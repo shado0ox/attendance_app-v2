@@ -258,6 +258,10 @@ export default function App() {
         receivedData = true;
         setDataSyncedAt(Date.now());
         setDataSyncError('');
+        if (data._adminAccess && session.role === 'admin') setSession(previous => {
+          const info = { ...previous.info, ...data._adminAccess };
+          const next = { ...previous, info }; localStorage.setItem('app_session', JSON.stringify(next)); return next;
+        });
         if (data._version) serverVersions.current[companyId] = data._version;
         conflictCompanies.current.delete(companyId);
         setSaveConflict(false);
@@ -282,12 +286,16 @@ export default function App() {
         if (cancelled || fetchRevision !== revision.current || unsaved.current) return false;
         setDataSyncError('تعذر تحديث الجدول من السيرفر؛ البيانات المعروضة قد تكون قديمة.');
         if (receivedData) return false;
-        const cached = localStorage.getItem(cacheKey(companyId));
+        const cached = session.role === 'admin' ? null : localStorage.getItem(cacheKey(companyId));
         if (cached) {
           try {
             console.log('[Cache Fallback] Loading application data from local storage cache.');
             const data = JSON.parse(cached);
-            if (data._version) serverVersions.current[companyId] = data._version;
+            if (data._adminAccess && session.role === 'admin') setSession(previous => {
+          const info = { ...previous.info, ...data._adminAccess };
+          const next = { ...previous, info }; localStorage.setItem('app_session', JSON.stringify(next)); return next;
+        });
+        if (data._version) serverVersions.current[companyId] = data._version;
             dataRef.current = { departments: data.departments || [], employees: data.employees || [], shiftTypes: data.shiftTypes || defaultShiftTypes, schedule: data.schedule || {}, scheduleNotice: data.scheduleNotice, _schedulePublication: data._schedulePublication };
             if (data.settings) settingsRef.current = data.settings;
             setAppData({
@@ -338,7 +346,7 @@ export default function App() {
     const mainDataInterval = setInterval(fetchMainData, 60000);
 
     let regRequestsInterval: ReturnType<typeof setInterval> | undefined;
-    if (session.role === 'admin' || session.role === 'superadmin') {
+    if (session.role === 'superadmin' || (session.role === 'admin' && session.info?.departmentIds == null && session.info?.permissions?.canManageEmployees)) {
       fetchRegRequests();
       regRequestsInterval = setInterval(fetchRegRequests, 60000);
     }

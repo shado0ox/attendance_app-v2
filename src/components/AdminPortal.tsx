@@ -125,6 +125,8 @@ export default function AdminPortal({
   const [admUsername, setAdmUsername] = useState('');
   const [admEmail, setAdmEmail] = useState('');
   const [admPwd, setAdmPwd] = useState('');
+  const [admDepartmentIds, setAdmDepartmentIds] = useState<string[] | null>(null);
+  const departmentScoped = Array.isArray(admin.departmentIds);
   const [admPerms, setAdmPerms] = useState({
     canEditSchedule: false,
     canManageEmployees: false,
@@ -673,6 +675,7 @@ export default function AdminPortal({
       email: admEmail.trim() || `${admUsername.trim().toLowerCase()}@company.com`,
       role: 'admin',
       permissions: admPerms,
+      departmentIds: admDepartmentIds,
       companyId: companyId || 'default'
     };
     if (admPwd.trim()) {
@@ -691,7 +694,7 @@ export default function AdminPortal({
       });
 
       if (!response.ok) {
-        throw new Error('فشل الحفظ على الخادم');
+        const error = await response.json(); throw new Error(error.error || 'فشل الحفظ على الخادم');
       }
 
       if (editingAdmId) {
@@ -1081,6 +1084,7 @@ export default function AdminPortal({
           {activeView === 'schedule' && (
             <ScheduleView
               companyId={companyId}
+              canPublish={!departmentScoped}
               onPublished={onRefreshData}
               publishedSchedule={publishedData.schedule}
               publishedShiftTypes={publishedData.shiftTypes}
@@ -1116,6 +1120,8 @@ export default function AdminPortal({
           {/* View: Attendance Records list */}
           {activeView === 'attendance' && (
             <AttendanceView
+              canExport={hasPermission('canPrint')}
+              departmentScoped={departmentScoped}
               companyId={companyId}
               employees={employees}
               departments={departments}
@@ -1144,7 +1150,7 @@ export default function AdminPortal({
             />
           )}
 
-          {activeView === 'exceptions' && hasPermission('canViewReports') && <div key={companyId}><AttendanceExceptionsView companyId={companyId} employees={employees} departments={departments} onOpenDay={(empId, date) => { setAttFilterFrom(date); setAttFilterTo(date); setAttFilterEmp(empId); setAttFilterDept(''); setAttFilterStatus(''); navigate('/admin/attendance'); }} /></div>}
+          {activeView === 'exceptions' && hasPermission('canViewReports') && <div key={companyId}><AttendanceExceptionsView canExport={hasPermission('canPrint')} companyId={companyId} employees={employees} departments={departments} onOpenDay={(empId, date) => { setAttFilterFrom(date); setAttFilterTo(date); setAttFilterEmp(empId); setAttFilterDept(''); setAttFilterStatus(''); navigate('/admin/attendance'); }} /></div>}
 
           {/* View: Department Coverage Alerts */}
           {activeView === 'alerts' && (
@@ -1306,6 +1312,7 @@ export default function AdminPortal({
               subAdminsLoading={subAdminsLoading}
               onAddSubAdmin={() => {
                 setEditingAdmId(null);
+                setAdmDepartmentIds(null);
                 setAdmName('');
                 setAdmUsername('');
                 setAdmEmail('');
@@ -1323,6 +1330,7 @@ export default function AdminPortal({
               }}
               onEditSubAdmin={(item) => {
                 setEditingAdmId(item.id);
+                setAdmDepartmentIds(item.departmentIds ?? null);
                 setAdmName(item.name || '');
                 setAdmUsername(item.username || '');
                 setAdmEmail(item.email || '');
@@ -1382,6 +1390,7 @@ export default function AdminPortal({
                           email: `${(it.username || it.name.replace(/\s+/g, '_')).toLowerCase()}@company.com`,
                           password: it.password,
                           role: 'admin',
+                          departmentIds: null,
                           companyId: companyId || 'default',
                           permissions: {
                             canEditSchedule: true,
@@ -1650,11 +1659,19 @@ export default function AdminPortal({
                 />
               </div>
 
+              <div className="border rounded-xl p-3 space-y-2 text-xs">
+                <label className="flex gap-2 items-center"><input type="checkbox" checked={admDepartmentIds === null} onChange={e => {
+                  setAdmDepartmentIds(e.target.checked ? null : []);
+                  if (!e.target.checked) setAdmPerms(p => ({ ...p, canManageEmployees: false, canManageDepts: false, canManageSettings: false }));
+                }} /> الوصول إلى كل أقسام الشركة</label>
+                {admDepartmentIds !== null && <><p className="text-slate-500">مدير القسم يرى موظفي أقسامه الحالية وسجلاتهم داخلها، ويعدل المسودة ويراجع الطلبات حسب الصلاحيات. النشر العام واعتماد الشهر وإدارة الحسابات لإدارة الشركة.</p><div className="flex flex-wrap gap-3">{departments.map((d: any) => <label key={d.id} className="flex gap-2"><input type="checkbox" checked={admDepartmentIds.includes(d.id)} onChange={e => setAdmDepartmentIds(e.target.checked ? [...admDepartmentIds, d.id] : admDepartmentIds.filter(id => id !== d.id))} />{d.name}</label>)}</div></>}
+              </div>
               <div className="flex flex-col gap-2">
                 <div className="flex justify-between items-center bg-sky-50 p-2.5 rounded-lg border border-sky-100 mb-1">
                   <span className="text-[11px] text-sky-950 font-black">🌟 تعيين كامل الصلاحيات للمسؤول</span>
                   <input
                     type="checkbox"
+                    disabled={admDepartmentIds !== null}
                     checked={Object.values(admPerms).every(v => v === true)}
                     onChange={(e) => {
                       const updatedValue = e.target.checked;
@@ -1686,6 +1703,7 @@ export default function AdminPortal({
                     <span className="text-[11px] text-slate-700 font-bold">{labelName}</span>
                     <input
                       type="checkbox"
+                      disabled={admDepartmentIds !== null && ['canManageEmployees', 'canManageDepts', 'canManageSettings'].includes(key)}
                       checked={(admPerms as any)[key]}
                       onChange={(e) => setAdmPerms({ ...admPerms, [key]: e.target.checked })}
                       className="rounded text-sky-600 cursor-pointer"

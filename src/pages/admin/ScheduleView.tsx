@@ -8,6 +8,7 @@ import { ChevronRight, ChevronLeft } from 'lucide-react';
 interface ScheduleViewProps {
   publishedSchedule: any;
   publishedShiftTypes: any[];
+  canPublish?: boolean;
   companyId: string;
   onPublished: () => Promise<boolean>;
   companyName: string;
@@ -29,7 +30,7 @@ interface ScheduleViewProps {
 }
 
 export default function ScheduleView({
-  companyId, onPublished, publishedSchedule, publishedShiftTypes,
+  canPublish = true, companyId, onPublished, publishedSchedule, publishedShiftTypes,
   companyName,
   logoDataUrl,
   onApplySchedule,
@@ -57,7 +58,8 @@ export default function ScheduleView({
 
   return (
     <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-5">
-      {hasPermission('canEditSchedule') && <SchedulePublication companyId={companyId} schedule={schedule} shiftTypes={shiftTypes} onPublished={onPublished} />}
+      {!canPublish && <p className="text-xs text-slate-500 p-3">تعديلاتك تُحفظ كمسودة؛ إدارة الشركة تنشر الجدول للموظفين بعد المراجعة.</p>}
+      {canPublish && hasPermission('canEditSchedule') && <SchedulePublication companyId={companyId} schedule={schedule} shiftTypes={shiftTypes} onPublished={onPublished} />}
       {/* Department filtering tabs */}
       <div className="flex justify-between items-center flex-wrap gap-4 border-b pb-3">
         <div className="flex p-0.5 bg-slate-100 rounded-xl flex-wrap">

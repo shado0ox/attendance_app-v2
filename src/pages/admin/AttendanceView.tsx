@@ -5,6 +5,8 @@ import { formatMinutes, formatPunch, csvCell } from '../../lib/attendanceReport'
 import { UserCheck, UserX, Users, Search, Download, Trash2, Printer } from 'lucide-react';
 
 interface AttendanceViewProps {
+  canExport?: boolean;
+  departmentScoped?: boolean;
   companyId: string;
   employees: any[];
   departments: any[];
@@ -25,6 +27,8 @@ interface AttendanceViewProps {
 }
 
 export default function AttendanceView({
+  canExport = true,
+  departmentScoped = false,
   companyId,
   employees,
   departments,
@@ -157,7 +161,7 @@ export default function AttendanceView({
         </div>
       </div>
 
-      <AttendanceMonthPanel companyId={companyId} employeeId={attFilterEmp} requestConfirm={requestConfirm} />
+      {!departmentScoped && <AttendanceMonthPanel companyId={companyId} employeeId={attFilterEmp} requestConfirm={requestConfirm} />}
 
       {/* Reports Query Filter */}
       <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
@@ -243,11 +247,11 @@ export default function AttendanceView({
             <button
               onClick={exportCsv}
               className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg text-sky-700 font-bold transition-all disabled:opacity-50 max-w-full"
-              title="تصدير النتائج المفلترة فقط" disabled={loading || exporting || pending || !report?.total}
+              title="تصدير النتائج المفلترة فقط" disabled={!canExport || loading || exporting || pending || !report?.total}
             >
               <Download size={15} /><span className="text-xs">تصدير {attFilterEmp ? 'الموظف المختار' : 'النتائج'}</span>
             </button>
-            <button onClick={printReport} disabled={loading || exporting || pending || !report?.total} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-sky-200 rounded-lg text-sky-700 disabled:opacity-50 max-w-full"><Printer size={15} /><span className="text-xs">طباعة / PDF {attFilterEmp ? 'للموظف المختار' : 'للنتائج'}</span></button>
+            <button onClick={printReport} disabled={!canExport || loading || exporting || pending || !report?.total} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-sky-200 rounded-lg text-sky-700 disabled:opacity-50 max-w-full"><Printer size={15} /><span className="text-xs">طباعة / PDF {attFilterEmp ? 'للموظف المختار' : 'للنتائج'}</span></button>
         </div>
         {pending && <p className="text-xs text-amber-700">تغيرت الفلاتر؛ اضغط بحث / تحديث لتطبيقها قبل التصدير.</p>}
         {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
@@ -327,8 +331,8 @@ export default function AttendanceView({
                             finally { setRefresh(value => value + 1); loadAttendance(); }
                           });
                         }}
-                        disabled={loading || exporting || !rec.ids.length} className="p-1 hover:bg-rose-50 text-rose-500 rounded transition-all"
-                        title="حذف السجل"
+                        disabled={departmentScoped || loading || exporting || !rec.ids.length} className="p-1 hover:bg-rose-50 text-rose-500 rounded transition-all"
+                        title={departmentScoped ? "الحذف لإدارة الشركة" : "حذف السجل"}
                       >
                         <Trash2 size={13} />
                       </button>
