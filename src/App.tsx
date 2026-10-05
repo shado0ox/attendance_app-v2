@@ -219,10 +219,9 @@ export default function App() {
   };
 
   useEffect(() => {
+    if(!session.role){setCompaniesList([]);return;}
     fetchCompanies();
-    const interval = setInterval(fetchCompanies, 300000);
-    return () => clearInterval(interval);
-  }, []);
+  }, [session.role]);
 
   useEffect(() => {
     let cancelled = false;
@@ -602,10 +601,6 @@ export default function App() {
                 appSettings={appSettings}
                 onAdminLogin={handleAdminLoginSuccess}
                 onEmployeeLogin={handleEmployeeLoginSuccess}
-                employees={appData.employees}
-                companyId={companyId}
-                setCompanyId={setCompanyId}
-                companiesList={companiesList}
                 sessionExpiredMessage={sessionExpiredMessage}
                 onDismissSessionExpiredMessage={() => setSessionExpiredMessage('')}
               />
@@ -658,6 +653,7 @@ export default function App() {
                 onUpdateSettings={handleUpdateSettings}
                 onUpdateAppData={handleUpdateAppData}
                 onRefreshData={() => refreshMainData.current()}
+                onSelectCompany={id=>{if(unsaved.current || pendingSaves.current){setSaveError('احفظ التعديلات الحالية قبل الانتقال لشركة أخرى');return;}setCompanyId(id);}}
                 registrationRequests={registrationRequests}
                 companyId={companyId}
                 companiesList={companiesList}

@@ -1,14 +1,10 @@
 import { useState, useEffect } from 'react';
-import { User, Shield, UserPlus, LogIn, Loader, Fingerprint, ScanFace, ChevronDown, AlertCircle, ShieldCheck } from 'lucide-react';
+import { User, Shield, UserPlus, LogIn, Loader, Fingerprint, ScanFace, AlertCircle, ShieldCheck } from 'lucide-react';
 
 interface LoginScreenProps {
   appSettings: any;
   onAdminLogin: (admin: any) => void;
   onEmployeeLogin: (employee: any) => void;
-  employees: any[];
-  companyId: string;
-  setCompanyId: (id: string) => void;
-  companiesList: any[];
   sessionExpiredMessage?: string;
   onDismissSessionExpiredMessage?: () => void;
 }
@@ -36,10 +32,6 @@ export default function LoginScreen({
   appSettings,
   onAdminLogin,
   onEmployeeLogin,
-  employees,
-  companyId,
-  setCompanyId,
-  companiesList,
   sessionExpiredMessage,
   onDismissSessionExpiredMessage
 }: LoginScreenProps) {
@@ -48,7 +40,6 @@ export default function LoginScreen({
   // Admin login state
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
-  const [adminCompanyCode, setAdminCompanyCode] = useState('');
   const [adminError, setAdminError] = useState('');
   const [adminLoading, setAdminLoading] = useState(false);
 
@@ -66,6 +57,7 @@ export default function LoginScreen({
   const [webAuthnSupported, setWebAuthnSupported] = useState(false);
 
   // Registration state — employees only (admins added via Admin portal)
+  const [regCompanyCode, setRegCompanyCode] = useState('101');
   const [regName, setRegName] = useState('');
   const [regUsername, setRegUsername] = useState('');
   const [regPhone, setRegPhone] = useState('');
@@ -96,8 +88,6 @@ export default function LoginScreen({
         body: JSON.stringify({
           username: adminUsername.trim(),
           password: adminPassword.trim(),
-          companyId,
-          companyCode: adminCompanyCode.trim(),
         }),
       });
       const data = await response.json();
@@ -120,7 +110,7 @@ export default function LoginScreen({
       const response = await fetch('/api/auth/employee-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: empUsername.trim(), password: empPassword.trim(), companyId }),
+        body: JSON.stringify({ username: empUsername.trim(), password: empPassword.trim() }),
       });
       const data = await response.json();
       if (!response.ok) { setEmpError(data?.error || 'فشل تسجيل الدخول'); return; }
@@ -139,17 +129,6 @@ export default function LoginScreen({
       return;
     }
 
-    const matchedEmp = employees.find(
-      (e: any) =>
-        (e.username || '').toLowerCase() === empUsername.trim().toLowerCase() ||
-        (e.phone || '').trim() === empUsername.trim()
-    );
-
-    if (!matchedEmp) {
-      setEmpError('اسم الموظف غير مسجل في النظام');
-      return;
-    }
-
     if (!webAuthnSupported) {
       setEmpError('جهازك أو متصفحك لا يدعم التحقق البيومتري (WebAuthn). استخدم كلمة المرور بدلاً من ذلك.');
       return;
@@ -164,7 +143,7 @@ export default function LoginScreen({
       const challengeRes = await fetch('/api/auth/webauthn-challenge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ empId: matchedEmp.id, companyId }),
+        body: JSON.stringify({ username: empUsername.trim() }),
       });
 
       if (!challengeRes.ok) {
@@ -178,7 +157,7 @@ export default function LoginScreen({
         throw new Error(err.error || 'فشل الحصول على رمز التحقق من الخادم');
       }
 
-      const { challenge, credentialIds } = await challengeRes.json();
+      const { challenge, credentialIds, empId: resolvedEmpId, companyId: resolvedCompanyId } = await challengeRes.json();
 
       setBiometricStatus(
         biometricType === 'face'
@@ -210,8 +189,8 @@ export default function LoginScreen({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          empId: matchedEmp.id,
-          companyId,
+          empId: resolvedEmpId,
+          companyId: resolvedCompanyId,
           credentialId: arrayBufferToBase64url(assertion.rawId),
           clientDataJSON: arrayBufferToBase64url(response.clientDataJSON),
           authenticatorData: arrayBufferToBase64url(response.authenticatorData),
@@ -256,11 +235,6 @@ export default function LoginScreen({
     if (regPassword.length < 6) { setRegError('كلمة المرور يجب أن تكون 6 أحرف على الأقل'); return; }
     if (regPassword !== regConfirmPassword) { setRegError('كلمتا المرور غير متطابقتين'); return; }
 
-    const exists = employees.some(
-      (e: any) => (e.username || '').toLowerCase() === regUsername.trim().toLowerCase()
-    );
-    if (exists) { setRegError('اسم المستخدم مستخدم مسبقاً'); return; }
-
     setRegLoading(true);
     try {
       const payload = {
@@ -270,7 +244,7 @@ export default function LoginScreen({
         phone: regPhone.trim(),
         password: regPassword,
         status: 'pending',
-        companyId: companyId || 'default',
+        companyCode: regCompanyCode.trim(),
       };
 
       const response = await fetch('/api/registration-requests', {
@@ -294,9 +268,8 @@ export default function LoginScreen({
     }
   };
 
-  const selectedCompanyObj = companiesList.find(c => c.id === companyId);
-  const companyName = selectedCompanyObj ? selectedCompanyObj.name : (appSettings?.companyName || 'نظام الدوام');
-  const logoUrl = selectedCompanyObj ? (selectedCompanyObj.logoUrl || '') : (appSettings?.logoDataUrl || '');
+  const companyName = 'نظام الحضور والدوام';
+  const logoUrl = '';
 
   return (
     <div id="login-screen" className="flex flex-col items-center justify-center min-h-screen px-4 bg-sky-50 bg-opacity-70">
@@ -317,40 +290,6 @@ export default function LoginScreen({
               >
                 ×
               </button>
-            )}
-          </div>
-        )}
-
-        {/* Workspace selector */}
-        {companiesList.length > 0 && (
-          <div className="mb-6 p-3.5 bg-slate-50 border border-slate-100 rounded-xl" dir="rtl">
-            <label className="block text-[11px] font-extrabold text-slate-500 mb-1.5 text-right flex items-center gap-1.5">
-              <span>🏢 مساحة عمل الشركة / الفرع</span>
-            </label>
-            <div className="relative">
-              <select
-                value={companyId}
-                onChange={(e) => setCompanyId(e.target.value)}
-                className="w-full pl-8 pr-3 py-2 text-xs font-bold bg-white border border-sky-100 rounded-lg text-slate-700 outline-none appearance-none cursor-pointer focus:border-sky-500 shadow-sm"
-              >
-                <option value="default">المساحة الرئيسية (الافتراضية)</option>
-                {companiesList.map((comp: any) => (
-                  <option key={comp.id} value={comp.id}>
-                    {comp.name} {comp.subscriptionStatus !== 'active' ? '⚠️ (الاشتراك منتهي)' : '✓'}
-                  </option>
-                ))}
-              </select>
-              <div className="absolute inset-y-0 left-2.5 flex items-center pointer-events-none text-slate-400">
-                <ChevronDown size={14} />
-              </div>
-            </div>
-            {selectedCompanyObj && (
-              <div className="mt-2 text-[10px] text-slate-400 text-right flex flex-col gap-0.5 border-t pt-1.5 border-dashed border-slate-200">
-                <span>الاشتراك الشهري: <span className="font-bold text-slate-600">{selectedCompanyObj.monthlyFee || '100'} ريال / شهر</span></span>
-                {selectedCompanyObj.subscriptionExpiresAt && (
-                  <span>تاريخ انتهاء الصلاحية: <span className="font-bold text-slate-600">{new Date(selectedCompanyObj.subscriptionExpiresAt).toLocaleDateString('ar-EG')}</span></span>
-                )}
-              </div>
             )}
           </div>
         )}
@@ -405,12 +344,12 @@ export default function LoginScreen({
           <div className="flex flex-col gap-4">
 
             <div className="flex flex-col gap-1.5 text-right" dir="rtl">
-              <label className="text-xs font-bold text-slate-600 pr-1">اسم المستخدم للموظف</label>
+              <label className="text-xs font-bold text-slate-600 pr-1">اسم المستخدم أو البريد الإلكتروني</label>
               <input
                 type="text"
                 value={empUsername}
                 onChange={(e) => setEmpUsername(e.target.value)}
-                placeholder="أدخل اسم المستخدم بالكامل"
+                placeholder="أدخل اسم المستخدم أو بريدك المسجل"
                 className="w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none placeholder-slate-300 text-right font-medium"
               />
             </div>
@@ -601,6 +540,7 @@ export default function LoginScreen({
         {activeTab === 'reg' && (
           <div className="flex flex-col gap-3.5 max-h-[480px] overflow-y-auto pr-1">
 
+            <div className="flex flex-col gap-1"><label className="text-xs font-bold text-slate-600">رمز الشركة لطلب حساب جديد فقط</label><input inputMode="numeric" value={regCompanyCode} onChange={e=>setRegCompanyCode(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg" /><p className="text-[10px] text-slate-500">احصل عليه من الإدارة؛ الدخول لحساب قائم لا يحتاج رمز الشركة.</p></div>
             {/* Info banner: employees only */}
             <div className="p-3 bg-sky-50 border border-sky-100 rounded-xl text-[11px] text-sky-700 font-bold flex items-start gap-2" dir="rtl">
               <AlertCircle size={14} className="shrink-0 mt-0.5" />

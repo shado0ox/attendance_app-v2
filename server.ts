@@ -1,3 +1,4 @@
+import { identityValue, employeeIdentities, adminIdentity, masterIdentity, identityLock, allIdentities, assertUnique, resolveIdentity, migrateCompanyCodes, nextCompanyCode } from './src/server/companyIdentity';
 import { backupHealth, buildInfo, mailHealthRows, readHealthFile, recordOperationalError, welcomeStateKey } from './src/server/systemHealth';
 import { runBackup, verifyBackupRestore, startBackupScheduler } from './src/server/backup';
 import { parseNotificationQuery, notificationPage, updateNotificationRead } from './src/lib/adminNotifications';
@@ -475,131 +476,43 @@ function employeeMainData(value: any, auth: AuthTokenPayload) {
 // including passwords, were fetched by the client and compared there). These endpoints
 // move every password comparison to the server, so raw passwords never need to leave the DB.
 
-app.post('/api/auth/admin-login', async (req, res) => {
-  const { username, password, companyId: rawCompanyId, companyCode } = req.body || {};
-  const companyId = rawCompanyId || 'default';
-  if (!username || !password) {
-    return res.status(400).json({ error: 'الرجاء إدخال اسم المستخدم وكلمة المرور' });
-  }
-  const normalizedUsername = String(username).trim().toLowerCase();
-
-  try {
-    // 1. Root/superadmin login (only valid for the 'default' workspace)
-    if (companyId === 'default' && normalizedUsername === 'admin') {
-      const key = 'mainData';
-      const result = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
-      const mainDataValue = result[0]?.value as any;
-      const settings = mainDataValue?.settings || {};
-      const storedPassword = settings.password || '5198';
-      const ok = verifyPassword(password, storedPassword, (hash) => {
-        db.update(schema.systemData)
-          .set({ value: { ...mainDataValue, settings: { ...settings, password: hash } }, updatedAt: new Date() })
-          .where(and(eq(schema.systemData.key, key), eq(schema.systemData.value, mainDataValue)))
-          .catch((e) => console.error('Failed to upgrade superadmin password hash:', e));
-      });
-      if (ok) {
-        const token = signToken({ role: 'superadmin', companyId: 'default', name: 'المدير العام' });
-        return res.json({ token, role: 'superadmin', name: 'المدير العام', companyId: 'default' });
-      }
-      return res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+const loginError = { error: 'اسم المستخدم أو البريد أو كلمة المرور غير صحيحة؛ راجع الإدارة إذا كانت بيانات الدخول مكررة' };
+async function companyCanLogin(companyId:string) {
+  if(companyId==='default')return true;
+  const rows=await db.select().from(schema.companies).where(eq(schema.companies.id,companyId)).limit(1);const company=rows[0];
+  return !!company && !['suspended','expired'].includes(company.subscriptionStatus || '') && (!company.subscriptionExpiresAt || new Date(company.subscriptionExpiresAt)>=new Date());
+}
+app.post('/api/auth/admin-login', async (req,res)=>{
+  const {username,password,companyCode}=req.body || {};if(typeof username!=='string'||typeof password!=='string'||!username.trim()||!password)return res.status(400).json({error:'أدخل اسم المستخدم أو البريد وكلمة المرور'});
+  try{
+    const account=identityValue(username)==='admin'?{kind:'root' as const,companyId:'default',id:undefined}:resolveIdentity(await allIdentities(db),username,'admin');if(!account)return res.status(401).json(loginError);
+    const companyId=account.companyId;
+    const companyRows=account.kind==='master'?await db.select().from(schema.companies).where(eq(schema.companies.id,companyId)).limit(1):[];
+    const company=companyRows[0];
+    if(companyCode && identityValue(companyCode)!==(companyId==='default'?'101':(company || (await db.select().from(schema.companies).where(eq(schema.companies.id,companyId)).limit(1))[0])?.companyCode))return res.status(401).json(loginError);
+    if(account.kind==='root'){
+      const rows=await db.select().from(schema.systemData).where(eq(schema.systemData.key,'mainData')).limit(1);const value:any=rows[0]?.value,settings=value?.settings || {};
+      if(!verifyPassword(password,settings.password || '5198',(hash)=>{db.update(schema.systemData).set({value:{...value,settings:{...settings,password:hash}},updatedAt:new Date()}).where(and(eq(schema.systemData.key,'mainData'),eq(schema.systemData.value,value))).catch(()=>{});}))return res.status(401).json(loginError);
+      return res.json({token:signToken({role:'superadmin',companyId,name:'المدير العام'}),role:'superadmin',companyId,companyCode:'101',name:'المدير العام'});
     }
-
-    // 2. Company "master admin" login (companyCode + adminUsername/adminPassword on the companies table)
-    if (companyId !== 'default') {
-      const companyRows = await db.select().from(schema.companies).where(eq(schema.companies.id, companyId)).limit(1);
-      const company = companyRows[0];
-      if (company) {
-        const expectedCode = company.companyCode || '0';
-        if ((companyCode || '').trim() !== expectedCode) {
-          return res.status(401).json({ error: 'رمز الشركة غير صحيح' });
-        }
-        const isExpired = company.subscriptionStatus !== 'active' &&
-          company.subscriptionExpiresAt && new Date(company.subscriptionExpiresAt) < new Date();
-        if (isExpired || company.subscriptionStatus === 'suspended') {
-          return res.status(403).json({ error: 'عذراً، اشتراك هذه الشركة منتهي أو معطل حالياً. يرجى مراجعة الإدارة.' });
-        }
-        if (company.adminUsername && normalizedUsername === String(company.adminUsername).toLowerCase()) {
-          const ok = verifyPassword(password, company.adminPassword, (hash) => {
-            db.update(schema.companies).set({ adminPassword: hash }).where(eq(schema.companies.id, companyId))
-              .catch((e) => console.error('Failed to upgrade company admin password hash:', e));
-          });
-          if (ok) {
-            const token = signToken({ role: 'admin', companyId, name: `مدير ${company.name}`, username: company.adminUsername });
-            return res.json({ token, role: 'admin', name: `مدير ${company.name}`, companyId, isMaster: true, ...fullAdminAccess() });
-          }
-          return res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
-        }
-      }
-    }
-
-    // 3. Sub-admin login (admins table, scoped to companyId)
-    const admins = await db.select().from(schema.admins).where(eq(schema.admins.companyId, companyId));
-    const foundAdmin = admins.find((adm: any) => {
-      const usernameMatch = adm.username && adm.username.toLowerCase() === normalizedUsername;
-      const nameMatch = adm.name && adm.name.toLowerCase() === normalizedUsername;
-      return usernameMatch || nameMatch;
-    });
-
-    if (!foundAdmin) {
-      return res.status(401).json({ error: 'اسم المستخدم أو رمز الدخول غير صحيح' });
-    }
-
-    const ok = verifyPassword(password, foundAdmin.password, (hash) => {
-      db.update(schema.admins).set({ password: hash }).where(eq(schema.admins.id, foundAdmin.id))
-        .catch((e) => console.error('Failed to upgrade admin password hash:', e));
-    });
-
-    if (!ok) {
-      return res.status(401).json({ error: 'اسم المستخدم أو رمز الدخول غير صحيح' });
-    }
-
-    const { password: _pw, ...safeAdmin } = foundAdmin;
-    const token = signToken({ role: 'admin', companyId, id: foundAdmin.id, name: foundAdmin.name, username: foundAdmin.username });
-    return res.json({ token, role: 'admin', ...safeAdmin, companyId, ...await resolveAdminAccess({ role: 'admin', companyId, id: foundAdmin.id }) });
-  } catch (error: any) {
-    console.error('Error during admin login:', error);
-    return res.status(500).json({ error: 'حدث خطأ أثناء تسجيل الدخول', details: error?.message || String(error) });
-  }
+    const adminRows=account.kind==='admin'?await db.select().from(schema.admins).where(eq(schema.admins.id,Number(account.id))).limit(1):[];const admin=adminRows[0];
+    const stored=company?.adminPassword || admin?.password;if(!stored || !verifyPassword(password,stored,(hash)=>{if(company)db.update(schema.companies).set({adminPassword:hash}).where(eq(schema.companies.id,companyId)).catch(()=>{});else db.update(schema.admins).set({password:hash}).where(eq(schema.admins.id,admin.id)).catch(()=>{});}))return res.status(401).json(loginError);
+    if(!await companyCanLogin(companyId))return res.status(403).json({error:'اشتراك الشركة منتهي أو معطل؛ راجع الإدارة'});
+    if(company)return res.json({token:signToken({role:'admin',companyId,name:'مدير '+company.name,username:company.adminUsername}),role:'admin',companyId,companyCode:company.companyCode,name:'مدير '+company.name,isMaster:true,...fullAdminAccess()});
+    const {password:ignored,...safe}=admin;return res.json({token:signToken({role:'admin',companyId,id:admin.id,name:admin.name,username:admin.username}),role:'admin',...safe,companyId,...await resolveAdminAccess({role:'admin',companyId,id:admin.id})});
+  }catch{return res.status(503).json({error:'تعذر تسجيل الدخول؛ حاول لاحقًا'});}
 });
-
-app.post('/api/auth/employee-login', async (req, res) => {
-  const { username, password, companyId: rawCompanyId } = req.body || {};
-  const companyId = rawCompanyId || 'default';
-  if (!username || !password) {
-    return res.status(400).json({ error: 'أدخل اسم المستخدم وكلمة المرور' });
-  }
-  const key = companyId === 'default' ? 'mainData' : 'mainData_' + companyId;
-  const normalized = String(username).trim().toLowerCase();
-
-  try {
-    const result = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
-    const employees: any[] = (result[0]?.value as any)?.employees || [];
-
-    const matchedEmp = employees.find((e: any) =>
-      (e.username || '').toLowerCase() === normalized ||
-      (e.name || '').toLowerCase() === normalized ||
-      (e.phone || '').trim() === String(username).trim()
-    );
-
-    if (!matchedEmp) {
-      return res.status(401).json({ error: 'هذا الموظف غير مسجل في قائمة الموظفين النشطة' });
-    }
-
-    if (!isActiveEmployee(matchedEmp)) return res.status(403).json({ error: 'حساب الموظف غير نشط. تواصل مع الإدارة.' });
-    const targetPassword = matchedEmp.password || '123456';
-    // Employee PIN codes are intentionally kept as plain values (admins can view/share
-    // them from the dashboard), so we compare directly rather than via bcrypt.
-    if (String(password).trim() !== String(targetPassword).trim()) {
-      return res.status(401).json({ error: 'كلمة المرور غير صحيحة. (الرمز الافتراضي هو 123456)' });
-    }
-
-    const { password: _pw, ...safeEmp } = matchedEmp;
-    const token = signToken({ role: 'employee', companyId, id: matchedEmp.id, name: matchedEmp.name, username: matchedEmp.username });
-    return res.json({ token, ...safeEmp, companyId });
-  } catch (error: any) {
-    console.error('Error during employee login:', error);
-    return res.status(500).json({ error: 'حدث خطأ أثناء تسجيل الدخول', details: error?.message || String(error) });
-  }
+app.post('/api/auth/employee-login',async(req,res)=>{
+ const {username,password}=req.body || {};if(typeof username!=='string'||typeof password!=='string'||!username.trim()||!password)return res.status(400).json({error:'أدخل اسم المستخدم أو البريد وكلمة المرور'});
+ try{
+  const account=resolveIdentity(await allIdentities(db),username,'employee');if(!account)return res.status(401).json(loginError);
+  const companyId=account.companyId,data=await getMainDataByCompanyId(companyId),employee=data?.employees?.find((e:any)=>String(e.id)===account.id);
+  if(!employee || String(password).trim()!==String(employee.password || '123456').trim())return res.status(401).json(loginError);
+  if(!isActiveEmployee(employee))return res.status(403).json({error:'حساب الموظف غير نشط؛ راجع الإدارة'});
+  if(!await companyCanLogin(companyId))return res.status(403).json({error:'اشتراك الشركة منتهي أو معطل؛ راجع الإدارة'});
+  const {password:ignored,webauthnCredentials:hidden,...safe}=employee;
+  return res.json({token:signToken({role:'employee',companyId,id:employee.id,name:employee.name,username:employee.username}),...safe,companyId});
+ }catch{return res.status(503).json({error:'تعذر تسجيل الدخول؛ حاول لاحقًا'});}
 });
 
 // --- WEBAUTHN ENDPOINTS ---
@@ -725,8 +638,9 @@ app.post('/api/auth/webauthn-register-verify', requireAuth(['employee', 'admin',
 });
 
 app.post('/api/auth/webauthn-challenge', async (req, res) => {
-  const { empId, companyId: rawCompanyId } = req.body || {};
-  const companyId = rawCompanyId || 'default';
+  let { empId, companyId: rawCompanyId } = req.body || {};
+  let companyId = rawCompanyId || 'default';
+  if(req.body?.username){try{const account=resolveIdentity(await allIdentities(db),req.body.username,'employee');if(!account)return res.status(401).json(loginError);empId=account.id;companyId=account.companyId;}catch{return res.status(503).json({error:'تعذر التحقق من الحساب'});}}
 
   if (!empId) {
     return res.status(400).json({ error: 'empId مطلوب' });
@@ -757,9 +671,11 @@ app.post('/api/auth/webauthn-challenge', async (req, res) => {
       })),
    });
 
+    if(!await companyCanLogin(companyId))return res.status(403).json({error:'اشتراك الشركة منتهي أو معطل'});
     setStoredChallenge(companyId, employee.id, 'authentication', options.challenge);
 
     return res.json({
+      companyId,empId:employee.id,
       challenge: options.challenge,
       credentialIds: creds.map((c) => c.id),
     });
@@ -787,6 +703,7 @@ app.post('/api/auth/webauthn-verify', async (req, res) => {
   }
 
   try {
+    if(!await companyCanLogin(companyId))return res.status(403).json({error:'اشتراك الشركة منتهي أو معطل'});
     const expectedChallenge = consumeStoredChallenge(companyId, empId, 'authentication');
     if (!expectedChallenge) {
       return res.status(400).json({ error: 'انتهت صلاحية challenge أو لم يتم إنشاؤه' });
@@ -841,7 +758,7 @@ app.post('/api/auth/webauthn-verify', async (req, res) => {
 
     await saveEmployeeCredentials(companyId, String(empId), creds);
 
-    const { password: _pw, ...safeEmp } = employee;
+    const { password: _pw, webauthnCredentials:hidden, ...safeEmp } = employee;
     const token = signToken({
       role: 'employee',
       companyId,
@@ -966,13 +883,16 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
     return res.status(400).json({ error: 'بيانات الحفظ ناقصة أو غير صحيحة. لم يتم تعديل البيانات المسجلة.' });
   }
 
+  if(new Set(payload.employees.map((e:any)=>String(e?.id))).size!==payload.employees.length || payload.employees.some((e:any)=>!e || !e.id))return res.status(400).json({error:'معرّفات الموظفين غير صحيحة أو مكررة'});
   if (auth.role !== 'employee' && payload.employees.some((e: any) => e.status !== undefined && !['active', 'suspended', 'archived'].includes(e.status))) return res.status(400).json({ error: 'حالة الموظف غير صحيحة' });
   try {
     const outcome = await db.transaction(async tx => {
+      await identityLock(tx);
       const result = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
 
       if (result.length === 0) {
         if (auth.role === 'employee' || (auth.role === 'admin' && auth.id !== undefined)) return { status: 404, body: { error: 'بيانات الشركة غير موجودة' } };
+        await assertUnique(tx,employeeIdentities(companyId,payload.employees));
         const initialValue = { ...payload, employees: preserveEmailVerification([], saveEmploymentHistory([], payload.employees)) };
         const inserted = await tx.insert(schema.systemData).values({
           key,
@@ -1008,6 +928,7 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
         valueToSave = { ...current, employees: nextEmployees, updatedAt: Date.now() };
       }
 
+      await assertUnique(tx,employeeIdentities(companyId,valueToSave.employees),employeeIdentities(companyId,(currentValue as any).employees || []));
       const updated = await tx.update(schema.systemData)
         .set({ value: valueToSave, updatedAt: new Date() })
         .where(and(eq(schema.systemData.key, key), eq(schema.systemData.value, currentValue)))
@@ -1018,6 +939,7 @@ app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), asy
     });
     return res.status(outcome.status).json(outcome.body);
   } catch (error: any) {
+    if(error.status===409)return res.status(409).json({error:error.message,code:error.code});
     console.error('Error saving main-data to PostgreSQL:', error);
     return res.status(500).json({
       error: 'خطأ في حفظ البيانات في قاعدة بيانات PostgreSQL',
@@ -1067,6 +989,7 @@ app.patch('/api/employee-profile/email', requireAuth(['employee']), async (req, 
   if (!validEmployeeEmail(email)) return res.status(400).json({ error: 'أدخل بريدًا إلكترونيًا صحيحًا' });
   try {
     const result = await db.transaction(async tx => {
+      await identityLock(tx);
       const key = auth.companyId === 'default' ? 'mainData' : 'mainData_' + auth.companyId;
       const rows = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1).for('update');
       const data: any = rows[0]?.value;
@@ -1074,6 +997,7 @@ app.patch('/api/employee-profile/email', requireAuth(['employee']), async (req, 
       const employee = data.employees.find((e: any) => String(e.id) === String(auth.id));
       if (!isActiveEmployee(employee)) return null;
       if (employee.email === email) return true;
+      await assertUnique(tx,employeeIdentities(auth.companyId,[{...employee,email}]),employeeIdentities(auth.companyId,[employee]));
       const value = { ...data, employees: data.employees.map((e: any) => String(e.id) === String(auth.id) ? preserveEmailVerification([e], [{ ...e, email }])[0] : e) };
       await tx.update(schema.systemData).set({ value, updatedAt: new Date() }).where(eq(schema.systemData.key, key));
       await audit(tx, auth, auth.companyId, 'employee.email', auth.id, { name: data.employees.find((e: any) => String(e.id) === String(auth.id)).name, actorName: auth.name || 'الموظف', changes: { email: { before: data.employees.find((e: any) => String(e.id) === String(auth.id)).email || null, after: email } } });
@@ -1081,7 +1005,7 @@ app.patch('/api/employee-profile/email', requireAuth(['employee']), async (req, 
     });
     if (!result) return res.status(404).json({ error: 'حساب الموظف غير موجود' });
     return res.json({ email });
-  } catch { return res.status(500).json({ error: 'تعذر حفظ البريد، حاول مرة أخرى' }); }
+  } catch(error:any) { return res.status(error.status || 500).json({ error: error.status?error.message:'تعذر حفظ البريد، حاول مرة أخرى' }); }
 });
 
 // OTP metadata is separate from main-data and never returned to clients.
@@ -1225,45 +1149,35 @@ app.get('/api/registration-requests', requireAuth(['admin', 'superadmin']), asyn
   }
 });
 
-app.post('/api/registration-requests', async (req, res) => {
-  const { name, type, username, phone, password, status, companyId } = req.body;
-
-  try {
-    const inserted = await db.insert(schema.registrationRequests).values({
-      name,
-      type,
-      username: username || '',
-      phone,
-      password,
-      status: status || 'pending',
-      companyId: companyId || 'default'
-    }).returning();
-    return res.json(inserted[0]);
-  } catch (error: any) {
-    console.error('Error creating registration request in PostgreSQL:', error);
-    return res.status(500).json({
-      error: 'فشل إرسال طلب التسجيل في قاعدة البيانات PostgreSQL: ' + (error?.message || String(error))
-    });
-  }
+app.post('/api/registration-requests',async(req,res)=>{
+ const {name,username,phone,password,companyCode}=req.body || {};
+ if(typeof name!=='string'||!name.trim()||typeof username!=='string'||!username.trim()||typeof password!=='string'||password.length<6||typeof phone!=='string'||!phone.trim())return res.status(400).json({error:'أكمل بيانات طلب الحساب'});
+ try{
+  const result=await db.transaction(async tx=>{await identityLock(tx);const code=identityValue(companyCode);let companyId='default';
+   if(code!=='101'){const companies=await tx.select().from(schema.companies).where(eq(schema.companies.companyCode,code)).limit(1);if(!companies[0])throw attendanceError(400,'رمز الشركة غير صحيح');companyId=companies[0].id;}
+   if(!await companyCanLogin(companyId))throw attendanceError(403,'اشتراك الشركة منتهي أو معطل');
+   await assertUnique(tx,[{owner:'registration:new',companyId,kind:'employee',username:identityValue(username),email:''}]);
+   const pending=await tx.select().from(schema.registrationRequests).where(eq(schema.registrationRequests.status,'pending'));if(pending.some(r=>identityValue(r.username)===identityValue(username)))throw attendanceError(409,'اسم المستخدم مستخدم في طلب حساب قيد المراجعة');
+   return (await tx.insert(schema.registrationRequests).values({name:name.trim(),type:'employee',username:identityValue(username),phone:phone.trim(),password,status:'pending',companyId}).returning())[0];
+  });return res.json({id:result.id,status:result.status,companyId:result.companyId});
+ }catch(error:any){return res.status(error.status || 503).json({error:error.status?error.message:'تعذر إرسال طلب الحساب'});}
 });
 
-app.put('/api/registration-requests/:id', requireAuth(['admin', 'superadmin'], false), requireOwnedRow(schema.registrationRequests), async (req, res) => {
-  const id = parseInt(req.params.id);
-  const { status } = req.body;
-
-  try {
-    const updated = await db.update(schema.registrationRequests)
-      .set({ status })
-      .where(eq(schema.registrationRequests.id, id))
-      .returning();
-    return res.json(updated[0]);
-  } catch (error: any) {
-    console.error('Error updating registration request in PostgreSQL:', error);
-    return res.status(500).json({
-      error: 'فشل تحديث حالة طلب التسجيل في قاعدة البيانات',
-      details: error?.message || String(error)
-    });
-  }
+app.put('/api/registration-requests/:id',requireAuth(['admin','superadmin'],false),requireOwnedRow(schema.registrationRequests),async(req,res)=>{
+ const id=Number(req.params.id),status=req.body?.status,auth=(req as any).auth as AuthTokenPayload;
+ if(!['approved','rejected'].includes(status))return res.status(400).json({error:'قرار الطلب غير صحيح'});
+ try{
+  const result=await db.transaction(async tx=>{await identityLock(tx);const [request]=await tx.select().from(schema.registrationRequests).where(eq(schema.registrationRequests.id,id)).limit(1).for('update');if(!request)throw attendanceError(404,'الطلب غير موجود');if(request.status!=='pending')throw attendanceError(409,'سبق اتخاذ قرار في الطلب');
+   if(status==='approved'){
+    if(request.type!=='employee')throw attendanceError(400,'أنشئ حساب المسؤول من إدارة الصلاحيات؛ هذا الطلب القديم لا يُقبل كموظف');
+    const companyId=request.companyId || 'default',key=getMainDataKey(companyId);const [row]=await tx.select().from(schema.systemData).where(eq(schema.systemData.key,key)).limit(1).for('update');const data:any=row?.value;if(!data)throw attendanceError(404,'بيانات الشركة غير موجودة');
+    const employee={id:'e'+crypto.randomUUID(),name:request.name,username:identityValue(request.username),phone:request.phone,password:request.password,dept:data.departments?.[0]?.id || '',color:'#01696f'};
+    await assertUnique(tx,employeeIdentities(companyId,[employee]));
+    await tx.update(schema.systemData).set({value:{...data,employees:[...(data.employees || []),employee]},updatedAt:new Date()}).where(eq(schema.systemData.key,key));await audit(tx,auth,companyId,'employee.create',employee.id,{name:employee.name,source:'registration',requestId:id});
+   }
+   return (await tx.update(schema.registrationRequests).set({status}).where(eq(schema.registrationRequests.id,id)).returning())[0];
+  });const {password:hidden,...safe}=result;return res.json(safe);
+ }catch(error:any){return res.status(error.status || 503).json({error:error.status?error.message:'تعذر اتخاذ القرار؛ لم يتم اعتماد الحساب'});}
 });
 
 app.delete('/api/registration-requests/:id', requireAuth(['admin', 'superadmin'], false), requireOwnedRow(schema.registrationRequests), async (req, res) => {
@@ -1812,25 +1726,29 @@ app.get('/api/admins', requireAuth(['admin', 'superadmin']), async (req, res) =>
 });
 
 app.post('/api/admins', requireAuth(['admin', 'superadmin']), async (req, res) => {
-  const { id, name, username, password } = req.body;
+  const { id, name, username, password, email } = req.body;
   const companyId = String(req.body.companyId || 'default'), auth = (req as any).auth as AuthTokenPayload;
   if (typeof name !== 'string' || !name.trim() || typeof username !== 'string' || !username.trim() || (id !== undefined && (!Number.isInteger(Number(id)) || Number(id) <= 0))) return res.status(400).json({ error: 'بيانات المسؤول غير صحيحة' });
+  if(email && !validEmployeeEmail(email))return res.status(400).json({error:'بريد المسؤول غير صحيح'});
   try {
     const data = await getMainDataByCompanyId(companyId);
     const access = parseAdminAccess(req.body, data?.departments || []);
     const actorAccess = requestAccess(req);
     if (auth.role === 'admin' && auth.id !== undefined && Object.keys(access.permissions).some(p => access.permissions[p] && !actorAccess.permissions[p])) return res.status(403).json({ error: 'لا يمكنك منح صلاحية لا تملكها' });
     const result = await db.transaction(async tx => {
+      await identityLock(tx);
       let saved: any;
       if (id) {
         const rows = await tx.select().from(schema.admins).where(and(eq(schema.admins.id, Number(id)), eq(schema.admins.companyId, companyId))).limit(1).for('update');
         if (!rows[0]) throw attendanceError(404, 'حساب المسؤول غير متاح');
-        const values: any = { name: name.trim(), username: username.trim().toLowerCase() };
+        await assertUnique(tx,[adminIdentity({...rows[0],username,email:email===undefined?rows[0].email:email})],[adminIdentity(rows[0])]);
+        const values: any = { name: name.trim(), username: identityValue(username),email:email===undefined?rows[0].email:identityValue(email) };
         if (typeof password === 'string' && password.trim()) values.password = hashPassword(password.trim());
         [saved] = await tx.update(schema.admins).set(values).where(eq(schema.admins.id, Number(id))).returning();
       } else {
         if (typeof password !== 'string' || !password.trim()) throw attendanceError(400, 'كلمة المرور مطلوبة');
-        [saved] = await tx.insert(schema.admins).values({ name: name.trim(), username: username.trim().toLowerCase(), password: hashPassword(password.trim()), companyId }).returning();
+        await assertUnique(tx,[adminIdentity({id:'new',companyId,username,email})]);
+        [saved] = await tx.insert(schema.admins).values({ name: name.trim(), username: identityValue(username), email:identityValue(email),password: hashPassword(password.trim()), companyId }).returning();
       }
       await tx.insert(schema.systemData).values({ key: adminAccessKey(companyId, saved.id), value: access }).onConflictDoUpdate({ target: schema.systemData.key, set: { value: access, updatedAt: new Date() } });
       await audit(tx, auth, companyId, 'admin.access.update', saved.id, { departmentIds: access.departmentIds, permissions: access.permissions, actorName: auth.name || auth.username });
@@ -1933,9 +1851,10 @@ app.get('/api/companies', async (req, res) => {
   const isSuperadmin = auth?.role === 'superadmin';
   try {
     const result = await db.select().from(schema.companies).orderBy(desc(schema.companies.createdAt));
-    if (isSuperadmin) return res.json(result);
-    const safeResult = result.map(({ adminPassword, companyCode, ...rest }) => rest);
-    return res.json(safeResult);
+    const safe=result.filter(c=>c.id!=='default').map(({adminPassword:hidden,...rest})=>rest);
+    if(isSuperadmin){const main=await getMainDataByCompanyId('default');return res.json([{id:'default',name:main?.settings?.companyName || 'الشركة الافتراضية',companyCode:'101',adminUsername:'admin',subscriptionStatus:'active',isDefault:true,monthlyFee:'0'},...safe]);}
+    if(!auth)return res.json([]);
+    return res.json(safe.filter(c=>c.id===auth.companyId).map(c=>({id:c.id,name:c.name,logoUrl:c.logoUrl,companyCode:c.companyCode})));
   } catch (error: any) {
     console.error('Error getting companies from PostgreSQL:', error);
     return res.status(500).json({
@@ -1945,72 +1864,29 @@ app.get('/api/companies', async (req, res) => {
   }
 });
 
-app.post('/api/companies', requireAuth(['superadmin'], false), async (req, res) => {
-  const { id, name, logoUrl, subscriptionStatus, subscriptionExpiresAt, monthlyFee, adminUsername, adminPassword, companyCode } = req.body;
-
-  try {
-    const existing = await db.select().from(schema.companies).where(eq(schema.companies.id, id)).limit(1);
-    
-    let resultCompany;
-    if (existing.length > 0) {
-      const updateSet: Record<string, any> = {
-        name,
-        logoUrl: logoUrl || '',
-        subscriptionStatus: subscriptionStatus || 'active',
-        subscriptionExpiresAt: subscriptionExpiresAt ? new Date(subscriptionExpiresAt) : null,
-        monthlyFee: monthlyFee || '100',
-        adminUsername,
-        companyCode: companyCode || '0',
-      };
-      // Blank password on an edit means "keep the current one" — the dashboard no
-      // longer displays or prefills the existing plaintext password.
-      if (adminPassword && adminPassword.trim()) {
-        updateSet.adminPassword = hashPassword(adminPassword.trim());
-      }
-      const updated = await db.update(schema.companies)
-        .set(updateSet)
-        .where(eq(schema.companies.id, id))
-        .returning();
-      resultCompany = updated[0];
-    } else {
-      if (!adminPassword || !adminPassword.trim()) {
-        return res.status(400).json({ error: 'كلمة مرور المدير المسؤول مطلوبة عند إنشاء شركة جديدة' });
-      }
-      const inserted = await db.insert(schema.companies).values({
-        id,
-        name,
-        logoUrl: logoUrl || '',
-        subscriptionStatus: subscriptionStatus || 'active',
-        subscriptionExpiresAt: subscriptionExpiresAt ? new Date(subscriptionExpiresAt) : null,
-        monthlyFee: monthlyFee || '100',
-        adminUsername,
-        adminPassword: hashPassword(adminPassword.trim()),
-        companyCode: companyCode || '0',
-      }).returning();
-      resultCompany = inserted[0];
-      
-      const cleanData = createCleanCompanyData(name);
-      await db.insert(schema.systemData).values({
-        key: 'mainData_' + id,
-        value: cleanData,
-      }).catch(() => {});
-    }
-    const { adminPassword: _pw, ...safeCompany } = resultCompany;
-    return res.json(safeCompany);
-  } catch (error: any) {
-    console.error('Error saving company to PostgreSQL:', error);
-    return res.status(500).json({
-      error: 'فشل حفظ بيانات الشركة في قاعدة البيانات: ' + (error?.message || String(error))
-    });
-  }
+app.post('/api/companies',requireAuth(['superadmin'],false),async(req,res)=>{
+ const {id,name,logoUrl,subscriptionStatus,subscriptionExpiresAt,monthlyFee,adminUsername,adminPassword,adminEmail}=req.body || {};
+ if(typeof id!=='string'||!id || id==='default'||! /^[a-z0-9_-]+$/.test(id)||typeof name!=='string'||!name.trim()||typeof adminUsername!=='string'||!adminUsername.trim())return res.status(400).json({error:'بيانات الشركة غير صحيحة؛ الشركة الافتراضية تُدار من الإعدادات'});
+ if(adminEmail && !validEmployeeEmail(adminEmail))return res.status(400).json({error:'بريد مدير الشركة غير صحيح'});
+ try{
+  const result=await db.transaction(async tx=>{await identityLock(tx);const rows=await tx.select().from(schema.companies).where(eq(schema.companies.id,id)).limit(1);const previous=rows[0];
+   await assertUnique(tx,[masterIdentity({id,adminUsername,adminEmail:adminEmail===undefined?previous?.adminEmail:adminEmail})],previous?[masterIdentity(previous)]:[]);
+   const values:any={name:name.trim(),logoUrl:logoUrl || '',subscriptionStatus:subscriptionStatus || 'active',subscriptionExpiresAt:subscriptionExpiresAt?new Date(subscriptionExpiresAt):null,monthlyFee:monthlyFee || '100',adminUsername:identityValue(adminUsername),adminEmail:adminEmail===undefined?(previous?.adminEmail || ''):identityValue(adminEmail)};
+   if(adminPassword?.trim())values.adminPassword=hashPassword(adminPassword.trim());
+   if(previous)return (await tx.update(schema.companies).set(values).where(eq(schema.companies.id,id)).returning())[0];
+   if(!values.adminPassword)throw attendanceError(400,'كلمة مرور مدير الشركة مطلوبة');
+   const companyCode=await nextCompanyCode(tx);const [created]=await tx.insert(schema.companies).values({id,...values,companyCode}).returning();
+   await tx.insert(schema.systemData).values({key:'mainData_'+id,value:createCleanCompanyData(name.trim())});return created;
+  });const {adminPassword:hidden,...safe}=result;return res.json(safe);
+ }catch(error:any){return res.status(error.status || 400).json({error:error.status?error.message:'تعذر حفظ بيانات الشركة'});}
 });
 
 app.delete('/api/companies/:id', requireAuth(['superadmin'], false), async (req, res) => {
   const id = req.params.id;
 
+  if(id==='default')return res.status(400).json({error:'لا يمكن حذف الشركة الافتراضية'});
   try {
-    await db.delete(schema.companies).where(eq(schema.companies.id, id));
-    await db.delete(schema.systemData).where(eq(schema.systemData.key, 'mainData_' + id));
+    await db.transaction(async tx=>{await identityLock(tx);await tx.delete(schema.companies).where(eq(schema.companies.id,id));await tx.delete(schema.systemData).where(eq(schema.systemData.key,'mainData_'+id));await tx.delete(schema.admins).where(eq(schema.admins.companyId,id));});
     return res.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting company from PostgreSQL:', error);
@@ -2026,6 +1902,7 @@ app.delete('/api/companies/:id', requireAuth(['superadmin'], false), async (req,
 
 async function startServer() {
   await initializeSchemaAndTables();
+  await migrateCompanyCodes(db);
   await ensureJwtSecret();
 
   if (process.env.NODE_ENV !== 'production') {

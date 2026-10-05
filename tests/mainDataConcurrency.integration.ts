@@ -395,6 +395,7 @@ try {
   assert.equal(createDeptAdmin.status,200);
   const deptAdmin = await createDeptAdmin.json() as any;
   assert.deepEqual(deptAdmin.departmentIds,['new']); assert.equal(deptAdmin.password,undefined);
+  await pool.query('INSERT INTO shift_app.companies(id,name,admin_username,admin_password,company_code) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING',[exceptionCompany,'Exception CI','exception-master-ci','ci-only-hash','999']);
   const deptLogin = await fetch(origin + '/api/auth/admin-login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({companyId:exceptionCompany,username:'department-ci',password:'department-password'})});
   assert.equal(deptLogin.status,200);
   const deptLoginData = await deptLogin.json() as any;

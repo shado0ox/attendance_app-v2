@@ -31,6 +31,7 @@ import CompaniesView from '../pages/admin/CompaniesView';
 
 interface AdminPortalProps {
   onRefreshData: () => Promise<boolean>;
+  onSelectCompany: (companyId:string) => void;
   admin: any;
   appSettings: any;
   appData: any;
@@ -49,6 +50,7 @@ interface AdminPortalProps {
 
 export default function AdminPortal({
   onRefreshData,
+  onSelectCompany,
   admin,
   appSettings,
   appData,
@@ -157,7 +159,7 @@ export default function AdminPortal({
   const [compMonthlyFee, setCompMonthlyFee] = useState('150');
   const [compAdminUsername, setCompAdminUsername] = useState('');
   const [compAdminPassword, setCompAdminPassword] = useState('');
-  const [compCompanyCode, setCompCompanyCode] = useState('0');
+  const [compAdminEmail, setCompAdminEmail] = useState('');
   const [compMonths, setCompMonths] = useState('12');
   const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
   const [emName, setEmName] = useState('');
@@ -306,7 +308,7 @@ export default function AdminPortal({
   };
 
   const handleSaveCompany = async () => {
-    if (!compName.trim() || !compSlug.trim() || !compAdminUsername.trim() || !compAdminPassword.trim()) {
+    if (!compName.trim() || !compSlug.trim() || !compAdminUsername.trim() || (!editingCompId && !compAdminPassword.trim())) {
       alert('الرجاء إدخال كافة الحقول الأساسية: اسم الشركة، رمز الرابط، اسم المستخدم، ورمز المرور');
       return;
     }
@@ -326,12 +328,12 @@ export default function AdminPortal({
       id: cleanSlug,
       name: compName.trim(),
       logoUrl: compLogoUrl.trim(),
-      subscriptionStatus: 'active',
-      subscriptionExpiresAt: expiresAt.toISOString(),
+      subscriptionStatus: editingCompId ? companiesList.find(c=>c.id===editingCompId)?.subscriptionStatus : 'active',
+      subscriptionExpiresAt: editingCompId ? companiesList.find(c=>c.id===editingCompId)?.subscriptionExpiresAt : expiresAt.toISOString(),
       monthlyFee: compMonthlyFee.trim() || '150',
       adminUsername: compAdminUsername.trim().toLowerCase(),
+      adminEmail:compAdminEmail.trim(),
       adminPassword: compAdminPassword.trim(),
-      companyCode: compCompanyCode.trim() || '0',
     };
 
     try {
@@ -346,7 +348,7 @@ export default function AdminPortal({
         throw new Error(errorData.error || 'فشل حفظ الشركة');
       }
 
-      alert('🎉 تم إنشاء مساحة عمل الشركة والبيانات الافتراضية بنجاح!');
+      alert(editingCompId?'تم حفظ بيانات الشركة وحساب مديرها':'تم إنشاء الشركة وتخصيص رمزها تلقائيًا');
       setCompanyModalOpen(false);
       
       // Clear fields
@@ -356,7 +358,7 @@ export default function AdminPortal({
       setCompMonthlyFee('150');
       setCompAdminUsername('');
       setCompAdminPassword('');
-      setCompCompanyCode('0');
+      setCompAdminEmail('');
       setCompMonths('12');
 
       fetchCompanies();
@@ -646,7 +648,7 @@ export default function AdminPortal({
     const adminData: any = {
       name: admName.trim(),
       username: admUsername.trim().toLowerCase(),
-      email: admEmail.trim() || `${admUsername.trim().toLowerCase()}@company.com`,
+      email: admEmail.trim(),
       role: 'admin',
       permissions: admPerms,
       departmentIds: admDepartmentIds,
@@ -980,7 +982,8 @@ export default function AdminPortal({
                 {activeView === 'shifttypes' && 'نوع ومدة الشيفت'}
                 {activeView === 'departments' && 'الأقسام والشيفتات'}
                 {activeView === 'requests' && 'صندوق طلبات الحضور والمسكن'}
-                {activeView === 'health' && 'صحة النظام'}
+                {admin.role==='superadmin' && companyId!=='default' && <button className="mb-3 px-3 py-2 text-xs bg-white border rounded-lg" onClick={()=>onSelectCompany('default')}>العودة للشركة الافتراضية 101</button>}
+          {activeView === 'health' && 'صحة النظام'}
                 {activeView === 'settings' && 'إعدادات الشركة والمنصات'}
                 {activeView === 'companies' && 'إدارة مساحات عمل الشركات والاشتراكات الشهرية'}
               </h1>
@@ -1321,49 +1324,13 @@ export default function AdminPortal({
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ status: 'approved' })
                       });
-                      if (!response.ok) throw new Error();
+                      if (!response.ok) {const result=await response.json();throw new Error(result.error || 'تعذر اعتماد الطلب');}
 
-                      if (it.type === 'employee') {
-                        const updated = [...employees, {
-                          id: 'e' + Date.now(),
-                          name: it.name,
-                          dept: departments[0]?.id || '',
-                          phone: it.phone,
-                          username: it.username || it.name.replace(/\s+/g, '_').toLowerCase(),
-                          password: it.password || '123456',
-                          color: '#01696f'
-                        }];
-                        onUpdateAppData({ ...appData, employees: updated });
-                      } else if (it.type === 'admin') {
-                        const adminData = {
-                          name: it.name,
-                          username: (it.username || it.name.replace(/\s+/g, '_')).toLowerCase(),
-                          email: `${(it.username || it.name.replace(/\s+/g, '_')).toLowerCase()}@company.com`,
-                          password: it.password,
-                          role: 'admin',
-                          departmentIds: null,
-                          companyId: companyId || 'default',
-                          permissions: {
-                            canEditSchedule: true,
-                            canManageEmployees: true,
-                            canManageDepts: true,
-                            canApproveRequests: true,
-                            canViewReports: true,
-                            canManageSettings: true,
-                            canPrint: true
-                          }
-                        };
-                        const resAdmin = await fetch('/api/admins', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify(adminData)
-                        });
-                        if (!resAdmin.ok) throw new Error();
-                      }
+                      await onRefreshData();
                       alert('تم اعتماد وتسجيل الحساب بنجاح.');
                       loadRequests();
-                    } catch (e) {
-                      alert('فشل الإجراء');
+                    } catch (e:any) {
+                      alert(e.message || 'فشل الإجراء');
                     }
                     resolve();
                   });
@@ -1396,6 +1363,8 @@ export default function AdminPortal({
           {activeView === 'companies' && admin.role === 'superadmin' && companyId === 'default' && (
             <CompaniesView
               companiesList={companiesList}
+              onSelect={id=>{onSelectCompany(id);navigate('/admin/dashboard');}}
+              onEdit={comp=>{setEditingCompId(comp.id);setCompSlug(comp.id);setCompName(comp.name);setCompLogoUrl(comp.logoUrl || '');setCompMonthlyFee(comp.monthlyFee || '150');setCompAdminUsername(comp.adminUsername || '');setCompAdminEmail(comp.adminEmail || '');setCompAdminPassword('');setCompanyModalOpen(true);}}
               onAddNew={() => {
                 setEditingCompId(null);
                 setCompName('');
@@ -1404,6 +1373,7 @@ export default function AdminPortal({
                 setCompMonthlyFee('150');
                 setCompAdminUsername('');
                 setCompAdminPassword('');
+                setCompAdminEmail('');
                 setCompMonths('12');
                 setCompanyModalOpen(true);
               }}
@@ -1427,7 +1397,7 @@ export default function AdminPortal({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900 bg-opacity-40 backdrop-blur-sm">
           <div className="w-full max-w-md p-6 bg-white rounded-2xl shadow-xl border border-sky-100 max-h-[85vh] overflow-y-auto" dir="rtl">
             <h3 className="text-sm font-extrabold text-slate-800 mb-4 pb-2 border-b text-right">
-              🏢 تسجيل شركة جديدة وتوليد مساحة عمل باشتراك شهري
+              {editingCompId?'تعديل بيانات الشركة وحساب المدير':'تسجيل شركة جديدة'}
             </h3>
             
             <div className="flex flex-col gap-4 text-right">
@@ -1449,11 +1419,12 @@ export default function AdminPortal({
                 <input
                   type="text"
                   value={compSlug}
+                  disabled={!!editingCompId}
                   onChange={(e) => setCompSlug(e.target.value)}
                   placeholder="مثال: stars (حروف إنجليزية صغيرة فقط)"
                   className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:border-sky-500 font-mono font-bold"
                 />
-                <span className="text-[10px] text-slate-400">سيكون الرابط ومساحة الدخول مخصصة لهذه الشركة عبر تحديدها من القائمة.</span>
+                <span className="text-[10px] text-slate-400">معرّف داخلي ثابت للشركة؛ تسجيل الدخول يحدد الشركة تلقائيًا من بيانات الحساب.</span>
               </div>
 
               {/* Logo Url */}
@@ -1480,21 +1451,11 @@ export default function AdminPortal({
                 />
               </div>
 
-              {/* Company Code */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-slate-600">رمز التحقق للشركة (Company Code)</label>
-                <input
-                  type="text"
-                  value={compCompanyCode}
-                  onChange={(e) => setCompCompanyCode(e.target.value)}
-                  placeholder="مثال: 1234 (الرمز الافتراضي: 0)"
-                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:border-sky-500 font-mono font-bold"
-                />
-                <span className="text-[10px] text-slate-400">هذا الرمز سيطلب من المسؤولين عند تسجيل الدخول لتأمين حسابات الشركة.</span>
-              </div>
+              <div className="flex flex-col gap-1"><label className="text-xs font-bold text-slate-600">بريد مدير الشركة (اختياري للدخول)</label><input type="email" value={compAdminEmail} onChange={e=>setCompAdminEmail(e.target.value)} className="w-full px-3 py-2 text-xs border rounded-lg" /></div>
+              <p className="text-xs text-slate-500">{editingCompId?'رمز الشركة: '+companiesList.find(c=>c.id===editingCompId)?.companyCode+' (ثابت)':'رمز الشركة يُخصص تلقائيًا بالتسلسل بدءًا من 102؛ الشركة الافتراضية رمزها 101.'}</p>
 
               {/* Subscription Duration */}
-              <div className="flex flex-col gap-1">
+              {!editingCompId && <div className="flex flex-col gap-1">
                 <label className="text-xs font-bold text-slate-600">مدة الاشتراك المبدئية (بالأشهر)</label>
                 <select
                   value={compMonths}
@@ -1507,7 +1468,7 @@ export default function AdminPortal({
                   <option value="12">سنة كاملة (12 شهر)</option>
                   <option value="24">سنتين (24 شهر)</option>
                 </select>
-              </div>
+              </div>}
 
               <div className="p-3 bg-sky-50 rounded-xl border border-sky-100 flex flex-col gap-2 mt-1">
                 <span className="text-[10px] font-bold text-sky-800">🔑 بيانات الدخول لمدير الشركة المشترك (Master Admin):</span>
@@ -1531,7 +1492,7 @@ export default function AdminPortal({
                     type="text"
                     value={compAdminPassword}
                     onChange={(e) => setCompAdminPassword(e.target.value)}
-                    placeholder="مثال: 1234"
+                    placeholder={editingCompId?'اتركه فارغًا للإبقاء على كلمة المرور':'كلمة مرور مدير الشركة'}
                     className="w-full px-3 py-1.5 text-xs bg-white border rounded focus:outline-none font-mono font-bold"
                   />
                 </div>
@@ -1550,7 +1511,7 @@ export default function AdminPortal({
                 onClick={handleSaveCompany}
                 className="px-5 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold shadow transition-all"
               >
-                إنشاء وتفعيل مساحة العمل ✨
+                {editingCompId?'حفظ التعديلات':'إنشاء الشركة'}
               </button>
             </div>
           </div>

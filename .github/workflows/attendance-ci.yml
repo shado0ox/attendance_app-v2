@@ -43,3 +43,4 @@ jobs:
       - run: node --import tsx tests/mainDataConcurrency.integration.ts
       - run: node --import tsx tests/emailVerification.integration.ts
       - run: node --import tsx tests/systemHealth.integration.ts
+      - run: node --import tsx tests/companyIdentity.integration.ts
