@@ -3,6 +3,8 @@ import { Building2, Check, Plus } from 'lucide-react';
 interface CompaniesViewProps {
   companiesList: any[];
   onAddNew: () => void;
+  onEdit: (comp:any) => void;
+  onSelect: (companyId:string) => void;
   onExtendSubscription: (comp: any) => void;
   onToggleStatus: (comp: any) => void;
   onDeleteCompany: (compId: string) => void;
@@ -11,6 +13,8 @@ interface CompaniesViewProps {
 export default function CompaniesView({
   companiesList,
   onAddNew,
+  onEdit,
+  onSelect,
   onExtendSubscription,
   onToggleStatus,
   onDeleteCompany,
@@ -109,12 +113,12 @@ export default function CompaniesView({
                       <div>
                         <span className="block text-slate-400">حساب المدير المسؤول:</span>
                         <span className="font-bold text-slate-700 font-mono">
-                          {comp.adminUsername} / {comp.adminPassword}
+                          {comp.adminUsername}
                         </span>
                       </div>
                       <div>
-                        <span className="block text-slate-400">رمز الشركة (للتحقق):</span>
-                        <span className="font-bold text-sky-700 font-mono">{comp.companyCode || '0'}</span>
+                        <span className="block text-slate-400">رمز الشركة:</span>
+                        <span className="font-bold text-sky-700 font-mono">{comp.companyCode}</span>
                       </div>
                       <div>
                         <span className="block text-slate-400">قيمة الاشتراك الشهري:</span>
@@ -143,8 +147,10 @@ export default function CompaniesView({
                     </div>
                   </div>
 
+                  <button className="text-xs bg-sky-600 text-white rounded-lg p-2" onClick={()=>onSelect(comp.id)}>فتح مساحة الشركة</button>
                   {/* Quick Actions */}
-                  <div className="flex gap-2 border-t pt-3 mt-1 text-[11px]">
+                  {!comp.isDefault && <div className="flex flex-wrap gap-2 border-t pt-3 mt-1 text-[11px]">
+                    <button onClick={()=>onEdit(comp)} className="px-2.5 py-1.5 bg-white border rounded font-bold">تعديل الحساب والبيانات</button>
                     <button
                       onClick={() => onExtendSubscription(comp)}
                       className="px-2.5 py-1.5 bg-sky-50 text-sky-700 hover:bg-sky-100 rounded font-bold transition-all flex-1"
@@ -164,7 +170,7 @@ export default function CompaniesView({
                     >
                       🗑️ حذف
                     </button>
-                  </div>
+                  </div>}
                 </div>
               );
             })}

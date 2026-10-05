@@ -219,6 +219,7 @@ export const initializeSchemaAndTables = async () => {
         ADD COLUMN IF NOT EXISTS check_out_location text,
         ADD COLUMN IF NOT EXISTS check_out_location_2 text;`);
 
+      await client.query(`ALTER TABLE "${dbSchema}"."companies" ADD COLUMN IF NOT EXISTS admin_email text DEFAULT ''; ALTER TABLE "${dbSchema}"."admins" ADD COLUMN IF NOT EXISTS email text DEFAULT '';`);
       console.log(`[DB INIT] Schema "${dbSchema}" and tables initialized successfully.`);
     } finally {
       client.release();
