@@ -143,14 +143,14 @@ export default function AdminSidebar({
 
             {hasPermission('canViewReports') && <NavItem to="/admin/exceptions" active={activeView === 'exceptions'} icon={<ClipboardCheck size={15} />} label="استثناءات الحضور" onNavigate={closeMobileSidebar} />}
 
-            <NavItem
+            {['canApproveRequests', 'canViewReports', 'canEditSchedule', 'canPrint', 'canManageDepts'].some(hasPermission) && <NavItem
               to="/admin/alerts"
               active={activeView === 'alerts'}
               icon={<Bell size={15} />}
-              label="تنبيهات تغطية الشيفتات"
+              label="مركز التنبيهات"
               badge={unreadAlertsCount}
               onNavigate={closeMobileSidebar}
-            />
+            />}
           </div>
 
           <div className="flex flex-col gap-1.5">

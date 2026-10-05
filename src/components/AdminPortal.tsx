@@ -19,7 +19,8 @@ import DashboardView from '../pages/admin/DashboardView';
 import AttendanceView from '../pages/admin/AttendanceView';
 import AttendanceExceptionsView from '../pages/admin/AttendanceExceptionsView';
 import ScheduleView from '../pages/admin/ScheduleView';
-import AlertsView from '../pages/admin/AlertsView';
+import NotificationsView from '../pages/admin/NotificationsView';
+import type { AdminNotification } from '../lib/adminNotifications';
 import EmployeesView from '../pages/admin/EmployeesView';
 import DepartmentsView from '../pages/admin/DepartmentsView';
 import RequestsView from '../pages/admin/RequestsView';
@@ -67,6 +68,8 @@ export default function AdminPortal({
   const activeView = routeView || 'dashboard';
   const publishedData = effectiveScheduleData(appData);
   const setActiveTab = (view: string) => navigate(`/admin/${view}`);
+  const [notificationUnread, setNotificationUnread] = useState(0);
+  const [notificationFocus, setNotificationFocus] = useState<AdminNotification['target'] | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Month navigation state
@@ -441,37 +444,7 @@ export default function AdminPortal({
   const getShiftGaps = () => coverageAlerts(
     departments, employees, publishedData.shiftTypes, publishedData.schedule,
     getDaysInSelectedMonth().map(d => d.dateStr)
-  ).filter(a => !(appSettings.deletedAlerts || []).includes(a.id));
-
-  const toggleAlertRead = (alertId: string) => {
-    const currentRead = appSettings.readAlerts || [];
-    let updated;
-    if (currentRead.includes(alertId)) {
-      updated = currentRead.filter((id: string) => id !== alertId);
-    } else {
-      updated = [...currentRead, alertId];
-    }
-    onUpdateSettings({ ...appSettings, readAlerts: updated });
-  };
-
-  const dismissAlert = (alertId: string) => {
-    const deleted = appSettings.deletedAlerts || [];
-    if (!deleted.includes(alertId)) {
-      onUpdateSettings({ ...appSettings, deletedAlerts: [...deleted, alertId] });
-    }
-  };
-
-  const dismissAllAlerts = (alertIds: string[]) => {
-    const deleted = appSettings.deletedAlerts || [];
-    const newDeleted = Array.from(new Set([...deleted, ...alertIds]));
-    onUpdateSettings({ ...appSettings, deletedAlerts: newDeleted, readAlerts: [] });
-  };
-
-  const markAllAlertsAsRead = (alertIds: string[]) => {
-    const read = appSettings.readAlerts || [];
-    const newRead = Array.from(new Set([...read, ...alertIds]));
-    onUpdateSettings({ ...appSettings, readAlerts: newRead });
-  };
+  );
 
   const getTodayAttendanceStats = () => {
     const todayStrFull = attendanceToday();
@@ -973,7 +946,7 @@ export default function AdminPortal({
         sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen}
         hasPermission={hasPermission}
-        unreadAlertsCount={getShiftGaps().filter(g => !(appSettings.readAlerts || []).includes(g.id)).length}
+        unreadAlertsCount={notificationUnread}
         pendingRequestsCount={
           registrationRequests.filter((r) => r.status === 'pending').length +
           adminRequests.filter((r) => r.status === 'pending').length
@@ -1001,7 +974,7 @@ export default function AdminPortal({
                 {activeView === 'schedule' && 'جدول وشيفتات الدوام'}
                 {activeView === 'attendance' && 'كشف حضور وانصراف الموظفين'}
                 {activeView === 'exceptions' && 'استثناءات الحضور للمراجعة'}
-                {activeView === 'alerts' && 'تنبيهات غياب التغطية'}
+                {activeView === 'alerts' && 'مركز التنبيهات'}
                 {activeView === 'employees' && 'إدارة الموظفين والبطاقات'}
                 {activeView === 'shifttypes' && 'نوع ومدة الشيفت'}
                 {activeView === 'departments' && 'الأقسام والشيفتات'}
@@ -1050,7 +1023,7 @@ export default function AdminPortal({
               setSelectedDept={setSelectedDept}
               hasPermission={hasPermission}
               getShiftGaps={getShiftGaps}
-              toggleAlertRead={toggleAlertRead}
+              onOpenNotifications={() => navigate('/admin/alerts')}
               DAYS_AR={DAYS_AR}
               onEditCell={(empId, dateStr, shiftType, note) => {
                 setSmEmployee(empId);
@@ -1133,22 +1106,13 @@ export default function AdminPortal({
             />
           )}
 
-          {activeView === 'exceptions' && hasPermission('canViewReports') && <div key={companyId}><AttendanceExceptionsView canExport={hasPermission('canPrint')} companyId={companyId} employees={employees} departments={departments} onOpenDay={(empId, date) => { setAttFilterFrom(date); setAttFilterTo(date); setAttFilterEmp(empId); setAttFilterDept(''); setAttFilterStatus(''); navigate('/admin/attendance'); }} /></div>}
+          {activeView === 'exceptions' && hasPermission('canViewReports') && <div key={companyId + JSON.stringify(notificationFocus?.view === 'exceptions' ? notificationFocus : null)}><AttendanceExceptionsView initialSelection={notificationFocus?.view === 'exceptions' ? notificationFocus : undefined} canExport={hasPermission('canPrint')} companyId={companyId} employees={employees} departments={departments} onOpenDay={(empId, date) => { setAttFilterFrom(date); setAttFilterTo(date); setAttFilterEmp(empId); setAttFilterDept(''); setAttFilterStatus(''); navigate('/admin/attendance'); }} /></div>}
 
-          {/* View: Department Coverage Alerts */}
-          {activeView === 'alerts' && (
-            <AlertsView
-              appSettings={appSettings}
-              scheduleMonth={scheduleMonth}
-              getShiftGaps={getShiftGaps}
-              toggleAlertRead={toggleAlertRead}
-              dismissAlert={dismissAlert}
-              dismissAllAlerts={dismissAllAlerts}
-              markAllAlertsAsRead={markAllAlertsAsRead}
-              onUpdateSettings={onUpdateSettings}
-              requestConfirm={requestConfirm}
-            />
-          )}
+          {activeView === 'alerts' && <NotificationsView companyId={companyId} departments={departments} onUnread={setNotificationUnread} onOpen={(target) => {
+            setNotificationFocus(target);
+            if (target.view === 'schedule') { setSelectedDept(target.dept); setScheduleMonth(target.date.slice(0, 7)); }
+            navigate(`/admin/${target.view}`);
+          }} />}
 
           {/* View: Employees CRUD */}
           {activeView === 'employees' && (
@@ -1235,8 +1199,8 @@ export default function AdminPortal({
 
           {/* View: Received Requests approval */}
           {activeView === 'requests' && (
-            <RequestsView adminRequests={adminRequests} requestsLoading={requestsLoading} onReview={handleReviewRequest}
-              reviewingRequest={reviewingRequest} />
+            <><div>{notificationFocus?.view === 'requests' && <div className="text-xs bg-sky-50 p-3 rounded-xl mb-3 flex gap-3 items-center">طلبات موظف التنبيه ليوم {notificationFocus.date}<button className="border rounded px-3 py-1" onClick={() => setNotificationFocus(null)}>عرض كل الطلبات</button></div>}</div><RequestsView adminRequests={notificationFocus?.view === 'requests' ? adminRequests.filter(r => String(r.empId) === String(notificationFocus.empId) && r.date === notificationFocus.date) : adminRequests} requestsLoading={requestsLoading} onReview={handleReviewRequest}
+              reviewingRequest={reviewingRequest} /></>
           )}
 
           {/* View: Shift Types Management */}
