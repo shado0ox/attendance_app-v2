@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   LayoutDashboard, CalendarDays, ClipboardCheck, Bell, Users, Building2,
-  Clock, Inbox, Settings, LogOut
+  Clock, Inbox, Settings, LogOut, ShieldCheck
 } from 'lucide-react';
 
 interface AdminSidebarProps {
@@ -197,6 +197,7 @@ export default function AdminSidebar({
               />
             )}
 
+            {hasPermission('canManageSettings') && !Array.isArray(admin.departmentIds) && <NavItem to="/admin/health" active={activeView === 'health'} icon={<ShieldCheck size={15} />} label="صحة النظام" onNavigate={closeMobileSidebar} />}
             {hasPermission('canManageSettings') && (
               <NavItem
                 to="/admin/settings"

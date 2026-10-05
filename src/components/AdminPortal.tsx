@@ -26,6 +26,7 @@ import DepartmentsView from '../pages/admin/DepartmentsView';
 import RequestsView from '../pages/admin/RequestsView';
 import ShiftTypesView from '../pages/admin/ShiftTypesView';
 import SettingsView from '../pages/admin/SettingsView';
+import SystemHealthView from '../pages/admin/SystemHealthView';
 import CompaniesView from '../pages/admin/CompaniesView';
 
 interface AdminPortalProps {
@@ -979,6 +980,7 @@ export default function AdminPortal({
                 {activeView === 'shifttypes' && 'نوع ومدة الشيفت'}
                 {activeView === 'departments' && 'الأقسام والشيفتات'}
                 {activeView === 'requests' && 'صندوق طلبات الحضور والمسكن'}
+                {activeView === 'health' && 'صحة النظام'}
                 {activeView === 'settings' && 'إعدادات الشركة والمنصات'}
                 {activeView === 'companies' && 'إدارة مساحات عمل الشركات والاشتراكات الشهرية'}
               </h1>
@@ -1113,6 +1115,8 @@ export default function AdminPortal({
             if (target.view === 'schedule') { setSelectedDept(target.dept); setScheduleMonth(target.date.slice(0, 7)); }
             navigate(`/admin/${target.view}`);
           }} />}
+
+          {activeView === 'health' && hasPermission('canManageSettings') && !departmentScoped && <SystemHealthView companyId={companyId} />}
 
           {/* View: Employees CRUD */}
           {activeView === 'employees' && (

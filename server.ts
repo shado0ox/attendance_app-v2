@@ -1,3 +1,5 @@
+import { backupHealth, buildInfo, mailHealthRows, readHealthFile, recordOperationalError, welcomeStateKey } from './src/server/systemHealth';
+import { runBackup, verifyBackupRestore, startBackupScheduler } from './src/server/backup';
 import { parseNotificationQuery, notificationPage, updateNotificationRead } from './src/lib/adminNotifications';
 import { buildAdminNotifications, notificationPermissions, notificationStateKey } from './src/server/adminNotifications';
 import { fullAdminAccess, parseAdminAccess, scopedMainData, mergeAdminData, ownsEmployee, ownsDay, allowedAdminRoute, type AdminAccess } from './src/lib/adminAccess';
@@ -137,6 +139,9 @@ async function visibleRows(req: Request, rows: any[], companyId: string) {
   return rows.filter(row => ownsDay(access, data, row));
 }
 
+
+app.use((req,res,next)=>{res.on('finish',()=>{if(res.statusCode>=500 && req.path.startsWith('/api/') && !req.path.startsWith('/api/system-health') && req.route?.path){const auth=(req as any).auth as AuthTokenPayload|undefined;if(auth)void recordOperationalError(String(req.query.companyId || req.body?.companyId || auth.companyId || 'default'),String(req.route.path),req.method,res.statusCode);}});next();});
+startBackupScheduler();
 
 // Requires a valid bearer token with one of `roles`. When `matchCompany` is true (default),
 // the token's companyId must match the request's companyId (superadmin is always exempt).
@@ -1172,7 +1177,7 @@ app.post('/api/employee-profile/email-verification/confirm', requireAuth(['emplo
 // Only stored employee addresses can receive welcome mail; durable claim prevents concurrent sends.
 app.post('/api/employees/:id/welcome-email', requireAuth(['admin', 'superadmin']), async (req, res) => {
   const companyId = String(req.query.companyId || 'default');
-  const key = 'welcomeEmail_' + crypto.createHash('sha256').update(JSON.stringify([companyId, req.params.id])).digest('hex');
+  const key = welcomeStateKey(companyId, req.params.id);
   let claimed: any;
   try {
     const data = await db.select().from(schema.systemData).where(eq(schema.systemData.key, companyId === 'default' ? 'mainData' : 'mainData_' + companyId)).limit(1);
@@ -1181,9 +1186,11 @@ app.post('/api/employees/:id/welcome-email', requireAuth(['admin', 'superadmin']
     const companies = await db.select().from(schema.companies).where(eq(schema.companies.id, companyId)).limit(1);
     const rows = await db.select().from(schema.systemData).where(eq(schema.systemData.key, key)).limit(1);
     const previous: any = rows[0]?.value;
+    if (!isActiveEmployee(employee) || !validEmployeeEmail(employee.email)) return res.status(409).json({ error: 'حساب أو بريد الموظف يحتاج مراجعة' });
     if (previous?.status === 'sent') return res.json({ message: 'سبق قبول رسالة الترحيب بواسطة خدمة البريد', status: 'sent' });
+    if (previous?.payload?.to?.[0] && normalizedEmail(previous.payload.to[0]) !== normalizedEmail(employee.email)) return res.status(409).json({ error: 'تغير بريد الموظف؛ راجع سجل Resend قبل إعادة الإرسال' });
     // Never replay an ambiguous send beyond the provider's 24-hour idempotency window.
-    if (previous && Date.now() - previous.startedAt > 23 * 3600000) return res.status(409).json({ error: 'يلزم مراجعة سجل Resend قبل إعادة الإرسال؛ انتهت نافذة منع التكرار' });
+    if (previous && (!Number.isFinite(previous.startedAt) || Date.now() - previous.startedAt > 23 * 3600000)) return res.status(409).json({ error: 'يلزم مراجعة سجل Resend قبل إعادة الإرسال؛ انتهت نافذة منع التكرار' });
     if (previous?.status === 'sending' && Date.now() - previous.claimedAt < 60000) return res.status(409).json({ error: 'الإرسال جارٍ بالفعل، انتظر ثم حاول مجددًا' });
     const payload = previous?.payload || welcomePayload(employee, companies[0]?.name || 'الشركة');
     if (!process.env.RESEND_API_KEY) return res.status(503).json({ error: 'لم يتم إعداد مفتاح Resend على السيرفر' });
@@ -1351,6 +1358,31 @@ app.get('/api/attendance-report', requireAuth(['admin', 'superadmin']), async (r
     return res.json({ ...attendanceReportPage(days.filter(day => ownsDay(requestAccess(req), mainData, day)), query), companyName: mainData?.settings?.companyName || companyId, from: query.from, to: query.to });
   } catch (error) { console.error('Attendance report query failed', error); return res.status(500).json({ error: 'تعذر تحميل كشف الحضور' }); }
 });
+
+app.get('/api/health/live', (_req, res) => res.json({ status: 'ok' }));
+app.get('/api/system-health', requireAuth(['admin', 'superadmin']), async (req,res) => {
+  res.set('Cache-Control','private, no-store');
+  const companyId=String(req.query.companyId || 'default'), auth=(req as any).auth as AuthTokenPayload, access=requestAccess(req);
+  const [backup,version,errorLog]=await Promise.all([backupHealth(),buildInfo(),readHealthFile('health-errors.json')]);
+  let database:any={status:'unavailable',latencyMs:null,tables:[],message:'تعذر الاتصال بقاعدة البيانات'}, mail:any={available:false,items:[],counts:{accepted:0,failed:0,pending:0},total:0};
+  let client:any;
+  try {
+    const started=Date.now();client=await pool.connect();await client.query({text:'SELECT 1',query_timeout:3000});
+    const tables=await client.query({text:'SELECT table_name FROM information_schema.tables WHERE table_schema=$1',values:[getDbSchemaName()],query_timeout:3000});
+    const expected=['system_data','attendance','requests','admins','companies','audit_log','attendance_months','registration_requests'];
+    const missing=expected.filter(name=>!tables.rows.some((r:any)=>r.table_name===name));
+    database={status:missing.length?'incomplete':'ok',latencyMs:Date.now()-started,tables:expected.map(name=>({name,present:!missing.includes(name)})),message:missing.length?'جداول مطلوبة غير موجودة':'الاتصال والجداول الأساسية سليمة'};
+    client.release();client=undefined;
+    const data=await getMainDataByCompanyId(companyId), employees=data?.employees || [];
+    const keys=new Map<string,{kind:string;empId:string}>();for(const e of employees){keys.set(welcomeStateKey(companyId,String(e.id)),{kind:'welcome',empId:String(e.id)});keys.set(emailVerificationKey(companyId,String(e.id)),{kind:'verification',empId:String(e.id)});}
+    const rows=keys.size?await db.select().from(schema.systemData).where(inArray(schema.systemData.key,[...keys.keys()])):[];
+    const entries=rows.map(row=>({...row,...keys.get(row.key)}));
+    mail={available:true,...mailHealthRows(employees,entries.filter(e=>e.kind==='welcome'),entries.filter(e=>e.kind==='verification'),auth.role==='superadmin'||access.permissions.canManageEmployees)};
+  }catch{}finally{client?.release();}
+  const errors=(Array.isArray(errorLog?.items)?errorLog.items:[]).filter((e:any)=>e.companyId===companyId).slice(0,20).map((e:any)=>({route:e.route,method:e.method,status:e.status,at:e.at}));
+  return res.json({generatedAt:new Date().toISOString(),database,backup,version,mail:{...mail,configured:!!(process.env.RESEND_API_KEY && process.env.RESEND_FROM && process.env.APP_URL),provider:'Resend',deliveryConfirmed:false},errors,permissions:{canBackup:auth.role==='superadmin',canRetryWelcome:auth.role==='superadmin'||access.permissions.canManageEmployees}});
+});
+for(const [endpoint,job] of [['backup',runBackup],['verify-restore',verifyBackupRestore]] as const) app.post('/api/system-health/'+endpoint,requireAuth(['superadmin']),async(_req,res)=>{try{await job();return res.json({success:true});}catch(error:any){return res.status(error.status || 503).json({error:error.status ? error.message : 'تعذر تأكيد العملية'});}});
 
 // Derived notification center; read flags are per account and never update company settings.
 async function collectNotifications(req: Request) {
