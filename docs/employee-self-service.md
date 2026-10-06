@@ -1,6 +1,6 @@
 # Employee portal tabs and private self-service
 
-The employee portal now separates Schedule, Attendance and absence, Profile, Requests, and Settings. Settings contains password changes, biometric enrollment, automatic attendance preferences, email verification and the privacy link. Daily punch actions precede the employee's monthly history. Narrow screens can scroll the tab bar horizontally, and request dialogs scroll vertically.
+The employee portal now separates Home, Attendance history and absence, Profile, Requests, and Settings. Home contains today’s punch actions and a Saturday–Friday weekly schedule, with previous/current/next-week navigation. The full monthly schedule expands on request. Settings contains password changes, biometric enrollment, automatic attendance preferences, email verification and the privacy link. Daily punch actions remain immediately accessible on Home; detailed attendance history is a separate tab. Narrow screens can scroll the tab bar horizontally, and request dialogs scroll vertically.
 
 Employees may edit their display name, phone, email and optional photo. Official HR name, username, department, status, permissions, schedule and credentials are not editable through this API. Company and employee IDs come from the validated employee session; supplied target IDs cannot redirect reads or writes. Email uniqueness is enforced transactionally across accounts, and changing an address revokes its previous email proof. Profile changes are audited without photo content or secrets; unchanged saves create no additional writes.
 
