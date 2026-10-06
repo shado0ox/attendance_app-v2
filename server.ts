@@ -1,3 +1,4 @@
+import { businessCompany, canReadCompany, subscriptionMetadata, subscriptionUpdate } from './src/server/tenantPrivacy';
 import { identityValue, employeeIdentities, adminIdentity, masterIdentity, identityLock, allIdentities, assertUnique, resolveIdentity, migrateCompanyCodes, nextCompanyCode } from './src/server/companyIdentity';
 import { backupHealth, buildInfo, mailHealthRows, readHealthFile, recordOperationalError, welcomeStateKey } from './src/server/systemHealth';
 import { runBackup, verifyBackupRestore, startBackupScheduler } from './src/server/backup';
@@ -42,6 +43,7 @@ import {
 } from '@simplewebauthn/server';
 
 const app = express();
+app.use('/api', (_req,res,next)=>{res.set('Cache-Control','private, no-store');res.vary('Authorization');next();});
 // Main data includes the schedule and an optional base64 company logo.
 app.use(express.json({ limit: '10mb' }));
 app.use((error: any, _req: Request, res: Response, next: NextFunction) => {
@@ -118,6 +120,7 @@ interface AuthTokenPayload {
   companyId: string;
   id?: string | number;
   username?: string;
+  passwordRevision?: string;
   name?: string;
 }
 
@@ -145,7 +148,7 @@ app.use((req,res,next)=>{res.on('finish',()=>{if(res.statusCode>=500 && req.path
 startBackupScheduler();
 
 // Requires a valid bearer token with one of `roles`. When `matchCompany` is true (default),
-// the token's companyId must match the request's companyId (superadmin is always exempt).
+// Business access is scoped to one company, including platform admins (company 101 only).
 function requireAuth(roles: AuthTokenPayload['role'][], matchCompany: boolean = true) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const header = req.headers.authorization;
@@ -163,8 +166,13 @@ function requireAuth(roles: AuthTokenPayload['role'][], matchCompany: boolean = 
     }
     if (req.query.companyId && req.body?.companyId && req.query.companyId !== req.body.companyId) return res.status(400).json({ error: 'معرّف الشركة في الطلب غير متطابق' });
     const requestedCompanyId = (req.query.companyId as string) || (req.body && req.body.companyId) || 'default';
-    if (matchCompany && payload.role !== 'superadmin' && payload.companyId !== requestedCompanyId) {
+    if (matchCompany && !canReadCompany(payload, requestedCompanyId)) {
       return res.status(403).json({ error: 'لا يمكن الوصول لبيانات شركة أخرى' });
+    }
+    payload = { ...payload, companyId: businessCompany(payload) };
+    if (payload.companyId !== 'default') {
+      try { if (!await companyCanLogin(payload.companyId)) return res.status(403).json({error:'اشتراك الشركة غير نشط أو تم حذفها'}); }
+      catch { return res.status(503).json({error:'تعذر التحقق من الشركة'}); }
     }
     if (payload.role === 'employee') {
       try {
@@ -175,6 +183,7 @@ function requireAuth(roles: AuthTokenPayload['role'][], matchCompany: boolean = 
     }
     if (payload.role === 'admin') {
       try {
+        await validateOwnerSession(payload);
         const access = await resolveAdminAccess(payload);
         (req as any).adminAccess = access;
         if (payload.id !== undefined && req.query.mode === 'all' && ['/api/attendance-report', '/api/attendance-exceptions'].includes(req.path) && !access.permissions.canPrint) return res.status(403).json({ error: 'ليس لديك صلاحية التصدير' });
@@ -194,7 +203,7 @@ function requireOwnedRow(table: any) {
       if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'رقم السجل غير صحيح' });
       const rows = await db.select().from(table).where(eq(table.id, id)).limit(1);
       const auth = (req as any).auth as AuthTokenPayload;
-      if (!rows[0] || (auth.role !== 'superadmin' && rows[0].companyId !== auth.companyId)) return res.status(404).json({ error: 'السجل غير موجود أو غير مسموح' });
+      if (!rows[0] || !canReadCompany(auth, rows[0].companyId || 'default')) return res.status(404).json({ error: 'السجل غير موجود أو غير مسموح' });
       if (!(await visibleRows(req, rows, rows[0].companyId || 'default')).length) return res.status(404).json({ error: 'السجل خارج نطاق أقسامك' });
       (req as any).ownedRow = rows[0]; next();
     } catch { return res.status(500).json({ error: 'تعذر التحقق من صلاحية السجل' }); }
@@ -480,7 +489,12 @@ const loginError = { error: 'اسم المستخدم أو البريد أو كل
 async function companyCanLogin(companyId:string) {
   if(companyId==='default')return true;
   const rows=await db.select().from(schema.companies).where(eq(schema.companies.id,companyId)).limit(1);const company=rows[0];
-  return !!company && !['suspended','expired'].includes(company.subscriptionStatus || '') && (!company.subscriptionExpiresAt || new Date(company.subscriptionExpiresAt)>=new Date());
+  return !!company && ['active','trial'].includes(company.subscriptionStatus || '') && (!company.subscriptionExpiresAt || new Date(company.subscriptionExpiresAt)>=new Date());
+}
+async function validateOwnerSession(auth:AuthTokenPayload) {
+  if(auth.role!=='admin'||auth.id!==undefined||auth.companyId==='default')return;
+  const rows=await db.select().from(schema.systemData).where(eq(schema.systemData.key,'ownerPasswordRevision:'+auth.companyId)).limit(1);
+  if(rows[0] && auth.passwordRevision!==(rows[0].value as any).revision)throw new Error('انتهت جلسة مدير الشركة بعد تغيير كلمة المرور');
 }
 app.post('/api/auth/admin-login', async (req,res)=>{
   const {username,password,companyCode}=req.body || {};if(typeof username!=='string'||typeof password!=='string'||!username.trim()||!password)return res.status(400).json({error:'أدخل اسم المستخدم أو البريد وكلمة المرور'});
@@ -498,7 +512,7 @@ app.post('/api/auth/admin-login', async (req,res)=>{
     const adminRows=account.kind==='admin'?await db.select().from(schema.admins).where(eq(schema.admins.id,Number(account.id))).limit(1):[];const admin=adminRows[0];
     const stored=company?.adminPassword || admin?.password;if(!stored || !verifyPassword(password,stored,(hash)=>{if(company)db.update(schema.companies).set({adminPassword:hash}).where(eq(schema.companies.id,companyId)).catch(()=>{});else db.update(schema.admins).set({password:hash}).where(eq(schema.admins.id,admin.id)).catch(()=>{});}))return res.status(401).json(loginError);
     if(!await companyCanLogin(companyId))return res.status(403).json({error:'اشتراك الشركة منتهي أو معطل؛ راجع الإدارة'});
-    if(company)return res.json({token:signToken({role:'admin',companyId,name:'مدير '+company.name,username:company.adminUsername}),role:'admin',companyId,companyCode:company.companyCode,name:'مدير '+company.name,isMaster:true,...fullAdminAccess()});
+    if(company){const revisions=await db.select().from(schema.systemData).where(eq(schema.systemData.key,'ownerPasswordRevision:'+companyId)).limit(1);return res.json({token:signToken({role:'admin',companyId,name:'مدير '+company.name,username:company.adminUsername,passwordRevision:(revisions[0]?.value as any)?.revision}),role:'admin',companyId,companyCode:company.companyCode,name:'مدير '+company.name,isMaster:true,...fullAdminAccess()});}
     const {password:ignored,...safe}=admin;return res.json({token:signToken({role:'admin',companyId,id:admin.id,name:admin.name,username:admin.username}),role:'admin',...safe,companyId,...await resolveAdminAccess({role:'admin',companyId,id:admin.id})});
   }catch{return res.status(503).json({error:'تعذر تسجيل الدخول؛ حاول لاحقًا'});}
 });
@@ -521,6 +535,9 @@ app.post('/api/auth/webauthn-register-options', requireAuth(['employee', 'admin'
   const { companyId: rawCompanyId, empId } = req.body || {};
   const companyId = rawCompanyId || 'default';
   const auth = (req as any).auth as AuthTokenPayload;
+
+  const caller=tryReadAuth(req);
+  if(caller && !canReadCompany(caller,companyId)) return res.status(403).json({error:'لا يمكن الوصول لبيانات شركة أخرى'});
 
   if (!empId) {
     return res.status(400).json({ error: 'empId مطلوب' });
@@ -642,6 +659,9 @@ app.post('/api/auth/webauthn-challenge', async (req, res) => {
   let companyId = rawCompanyId || 'default';
   if(req.body?.username){try{const account=resolveIdentity(await allIdentities(db),req.body.username,'employee');if(!account)return res.status(401).json(loginError);empId=account.id;companyId=account.companyId;}catch{return res.status(503).json({error:'تعذر التحقق من الحساب'});}}
 
+  const caller=tryReadAuth(req);
+  if(caller && !canReadCompany(caller,companyId)) return res.status(403).json({error:'لا يمكن الوصول لبيانات شركة أخرى'});
+
   if (!empId) {
     return res.status(400).json({ error: 'empId مطلوب' });
   }
@@ -697,6 +717,8 @@ app.post('/api/auth/webauthn-verify', async (req, res) => {
   } = req.body || {};
 
   const companyId = rawCompanyId || 'default';
+  const caller=tryReadAuth(req);
+  if(caller && !canReadCompany(caller,companyId)) return res.status(403).json({error:'لا يمكن الوصول لبيانات شركة أخرى'});
 
   if (!empId || !credentialId || !clientDataJSON || !authenticatorData || !signature) {
     return res.status(400).json({ error: 'بيانات التحقق البيومتري غير مكتملة' });
@@ -824,12 +846,16 @@ app.get('/api/main-data', async (req, res) => {
   const key = companyId === 'default' ? 'mainData' : 'mainData_' + companyId;
   const auth = tryReadAuth(req);
   // Employee PIN codes / the superadmin password are only included for a caller who is
-  // logged in as that same company's admin/superadmin (or as superadmin generally).
-  if (auth && auth.role !== 'superadmin' && auth.companyId !== companyId) return res.status(403).json({ error: 'بيانات شركة أخرى غير متاحة' });
+  // logged in as that company's admin, or the platform admin for company 101.
+  if (auth && !canReadCompany(auth, companyId)) return res.status(403).json({ error: 'بيانات شركة أخرى غير متاحة' });
+  if (auth && companyId !== 'default') {
+    try { if (!await companyCanLogin(companyId)) return res.status(403).json({error:'اشتراك الشركة غير نشط أو تم حذفها'}); }
+    catch { return res.status(503).json({error:'تعذر التحقق من الشركة'}); }
+  }
   let access = fullAdminAccess();
-  if (auth?.role === 'admin') { try { access = await resolveAdminAccess(auth); } catch { return res.status(403).json({ error: 'حساب المسؤول غير متاح' }); } }
+  if (auth?.role === 'admin') { try { await validateOwnerSession(auth); access = await resolveAdminAccess(auth); } catch { return res.status(403).json({ error: 'حساب المسؤول غير متاح' }); } }
   const visibleMainData = (value: any) => {
-    if (!auth) return { departments: [], employees: [], shiftTypes: [], schedule: {}, settings: { companyName: value?.settings?.companyName, logoDataUrl: value?.settings?.logoDataUrl } };
+    if (!auth) return { departments: [], employees: [], shiftTypes: [], schedule: {}, settings: { companyName: 'نظام الدوام' } };
     if (auth.role !== 'employee') return { ...scopedMainData(sanitizeMainData(value, true), access), _adminAccess: access };
     return employeeMainData(value, auth);
   };
@@ -845,7 +871,8 @@ app.get('/api/main-data', async (req, res) => {
       let initialVal = defaultMainData;
       if (companyId !== 'default') {
         const comp = await db.select().from(schema.companies).where(eq(schema.companies.id, companyId)).limit(1);
-        const compName = comp.length > 0 ? comp[0].name : 'شركة فرعية جديدة';
+        if (!comp.length) return res.status(404).json({error:'الشركة غير موجودة'});
+        const compName = comp[0].name;
         initialVal = createCleanCompanyData(compName);
       }
       
@@ -1455,7 +1482,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
   try {
     if (id) {
       const rows = await db.select().from(schema.attendance).where(eq(schema.attendance.id, Number(id))).limit(1);
-      if (!rows[0] || (auth.role !== 'superadmin' && rows[0].companyId !== auth.companyId)) return res.status(404).json({ error: 'سجل الحضور غير متاح' });
+      if (!rows[0] || !canReadCompany(auth, rows[0].companyId || 'default')) return res.status(404).json({ error: 'سجل الحضور غير متاح' });
       activeCompanyId = rows[0].companyId || 'default';
     }
     const mainData = await getMainDataByCompanyId(activeCompanyId);
@@ -1841,60 +1868,107 @@ app.get('/api/audit-log', requireAuth(['admin', 'superadmin']), async (req, res)
   } catch { res.status(500).json({ error: 'تعذر تحميل سجل التعديلات' }); }
 });
 
-// 7. Companies / Subscription Management Endpoints
-// The company list is fetched by the public login screen (to populate the workspace
-// picker), so it can't require login itself — but it used to also hand back every
-// company's master admin password and verification code in plain text to any visitor.
-// A logged-in superadmin still gets the full rows (needed to manage/renew companies).
+// Subscription control plane: no credentials, employees, schedules or tenant impersonation.
 app.get('/api/companies', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store'); res.vary('Authorization');
   const auth = tryReadAuth(req);
-  const isSuperadmin = auth?.role === 'superadmin';
+  if (!auth) return res.json([]);
   try {
-    const result = await db.select().from(schema.companies).orderBy(desc(schema.companies.createdAt));
-    const safe=result.filter(c=>c.id!=='default').map(({adminPassword:hidden,...rest})=>rest);
-    if(isSuperadmin){const main=await getMainDataByCompanyId('default');return res.json([{id:'default',name:main?.settings?.companyName || 'الشركة الافتراضية',companyCode:'101',adminUsername:'admin',subscriptionStatus:'active',isDefault:true,monthlyFee:'0'},...safe]);}
-    if(!auth)return res.json([]);
-    return res.json(safe.filter(c=>c.id===auth.companyId).map(c=>({id:c.id,name:c.name,logoUrl:c.logoUrl,companyCode:c.companyCode})));
-  } catch (error: any) {
-    console.error('Error getting companies from PostgreSQL:', error);
-    return res.status(500).json({
-      error: 'خطأ في جلب الشركات من قاعدة البيانات',
-      details: error?.message || String(error)
-    });
-  }
+    if (auth.role === 'superadmin') {
+      const result = await db.select({id:schema.companies.id,name:schema.companies.name,companyCode:schema.companies.companyCode,subscriptionStatus:schema.companies.subscriptionStatus,subscriptionExpiresAt:schema.companies.subscriptionExpiresAt,monthlyFee:schema.companies.monthlyFee,createdAt:schema.companies.createdAt}).from(schema.companies).orderBy(desc(schema.companies.createdAt));
+      const main = await getMainDataByCompanyId('default');
+      return res.json([{id:'default',name:main?.settings?.companyName || 'الشركة الافتراضية',companyCode:'101',subscriptionStatus:'active',isDefault:true,monthlyFee:'0'},...result.filter(c=>c.id!=='default').map(subscriptionMetadata)]);
+    }
+    const result = await db.select({id:schema.companies.id,name:schema.companies.name,companyCode:schema.companies.companyCode}).from(schema.companies).where(eq(schema.companies.id,auth.companyId));
+    return res.json(result);
+  } catch { return res.status(500).json({error:'تعذر جلب الشركات'}); }
 });
 
-app.post('/api/companies',requireAuth(['superadmin'],false),async(req,res)=>{
- const {id,name,logoUrl,subscriptionStatus,subscriptionExpiresAt,monthlyFee,adminUsername,adminPassword,adminEmail}=req.body || {};
- if(typeof id!=='string'||!id || id==='default'||! /^[a-z0-9_-]+$/.test(id)||typeof name!=='string'||!name.trim()||typeof adminUsername!=='string'||!adminUsername.trim())return res.status(400).json({error:'بيانات الشركة غير صحيحة؛ الشركة الافتراضية تُدار من الإعدادات'});
- if(adminEmail && !validEmployeeEmail(adminEmail))return res.status(400).json({error:'بريد مدير الشركة غير صحيح'});
- try{
-  const result=await db.transaction(async tx=>{await identityLock(tx);const rows=await tx.select().from(schema.companies).where(eq(schema.companies.id,id)).limit(1);const previous=rows[0];
-   await assertUnique(tx,[masterIdentity({id,adminUsername,adminEmail:adminEmail===undefined?previous?.adminEmail:adminEmail})],previous?[masterIdentity(previous)]:[]);
-   const values:any={name:name.trim(),logoUrl:logoUrl || '',subscriptionStatus:subscriptionStatus || 'active',subscriptionExpiresAt:subscriptionExpiresAt?new Date(subscriptionExpiresAt):null,monthlyFee:monthlyFee || '100',adminUsername:identityValue(adminUsername),adminEmail:adminEmail===undefined?(previous?.adminEmail || ''):identityValue(adminEmail)};
-   if(adminPassword?.trim())values.adminPassword=hashPassword(adminPassword.trim());
-   if(previous)return (await tx.update(schema.companies).set(values).where(eq(schema.companies.id,id)).returning())[0];
-   if(!values.adminPassword)throw attendanceError(400,'كلمة مرور مدير الشركة مطلوبة');
-   const companyCode=await nextCompanyCode(tx);const [created]=await tx.insert(schema.companies).values({id,...values,companyCode}).returning();
-   await tx.insert(schema.systemData).values({key:'mainData_'+id,value:createCleanCompanyData(name.trim())});return created;
-  });const {adminPassword:hidden,...safe}=result;return res.json(safe);
- }catch(error:any){return res.status(error.status || 400).json({error:error.status?error.message:'تعذر حفظ بيانات الشركة'});}
+app.post('/api/companies', requireAuth(['superadmin'], false), async (req,res) => {
+  try {
+    const values = subscriptionUpdate(req.body);
+    const result = await db.update(schema.companies).set(values).where(eq(schema.companies.id,req.body.id)).returning({id:schema.companies.id});
+    if (!result.length) return res.status(404).json({error:'الشركة غير موجودة؛ ينشئ صاحب الشركة حسابه من شاشة الدخول'});
+    return res.json({success:true});
+  } catch(error:any) { return res.status(error.status || 500).json({error:error.status?error.message:'تعذر تحديث الاشتراك'}); }
 });
 
-app.delete('/api/companies/:id', requireAuth(['superadmin'], false), async (req, res) => {
-  const id = req.params.id;
+app.get('/api/privacy-info', (_req,res)=>res.json({contact:process.env.PRIVACY_CONTACT_EMAIL || '',controller:process.env.PRIVACY_CONTROLLER_NAME || '',retention:process.env.PRIVACY_RETENTION_NOTICE || '',version:'2026-10-06'}));
 
-  if(id==='default')return res.status(400).json({error:'لا يمكن حذف الشركة الافتراضية'});
+app.post('/api/company-owner/password', requireAuth(['admin']), async(req,res)=>{
+  const auth=(req as any).auth as AuthTokenPayload;
+  if(auth.companyId==='default'||auth.id!==undefined)return res.status(403).json({error:'خاص بصاحب الشركة المشتركة'});
+  const {currentPassword,newPassword}=req.body || {};
+  if(typeof currentPassword!=='string'||typeof newPassword!=='string'||newPassword.length<10||Buffer.byteLength(newPassword,'utf8')>72)return res.status(400).json({error:'أدخل كلمة المرور الحالية والجديدة (10 أحرف على الأقل، وحتى 72 بايت)'});
   try {
-    await db.transaction(async tx=>{await identityLock(tx);await tx.delete(schema.companies).where(eq(schema.companies.id,id));await tx.delete(schema.systemData).where(eq(schema.systemData.key,'mainData_'+id));await tx.delete(schema.admins).where(eq(schema.admins.companyId,id));});
-    return res.json({ success: true });
-  } catch (error: any) {
-    console.error('Error deleting company from PostgreSQL:', error);
-    return res.status(500).json({
-      error: 'فشل حذف الشركة من قاعدة البيانات',
-      details: error?.message || String(error)
+    const password=hashPassword(newPassword);
+    await db.transaction(async tx=>{
+      await identityLock(tx);
+      const [company]=await tx.select().from(schema.companies).where(eq(schema.companies.id,auth.companyId)).for('update');
+      if(!company || !verifyPassword(currentPassword,company.adminPassword || ''))throw attendanceError(401,'كلمة المرور الحالية غير صحيحة');
+      // Recheck the revision under the same identity lock to prevent stale concurrent rotations.
+      const key='ownerPasswordRevision:'+auth.companyId;
+      const previous=await tx.select().from(schema.systemData).where(eq(schema.systemData.key,key));
+      if(previous[0] && auth.passwordRevision!==(previous[0].value as any).revision)throw attendanceError(403,'الجلسة لم تعد صالحة');
+      await tx.update(schema.companies).set({adminPassword:password}).where(eq(schema.companies.id,auth.companyId));
+      const value={revision:crypto.randomUUID()};
+      await tx.insert(schema.systemData).values({key,value}).onConflictDoUpdate({target:schema.systemData.key,set:{value,updatedAt:new Date()}});
     });
-  }
+    return res.json({success:true,message:'تم تغيير كلمة المرور وإلغاء جلسات مدير الشركة القديمة؛ سجّل الدخول مجددًا'});
+  }catch(error:any){return res.status(error.status || 500).json({error:error.status?error.message:'تعذر تغيير كلمة المرور'});}
+});
+
+// Company owners choose their own credentials. Platform admins cannot create known passwords.
+const registrationWindow = new Map<string,{started:number;count:number}>();
+app.post('/api/company-registration', async (req,res) => {
+  if (tryReadAuth(req)) return res.status(403).json({error:'تسجيل الشركة يتم بواسطة صاحبها دون جلسة مسؤول النظام'});
+  const now=Date.now(),ip=req.ip || 'unknown';
+  for(const [key,value] of registrationWindow) if(now-value.started>3600000) registrationWindow.delete(key);
+  const quota=registrationWindow.get(ip) || {started:now,count:0};
+  if(quota.count>=10) return res.status(429).json({error:'محاولات تسجيل كثيرة؛ أعد المحاولة لاحقًا'});
+  quota.count++;registrationWindow.set(ip,quota);
+  const {id,name,adminUsername,adminEmail,adminPassword,privacyAccepted}=req.body || {};
+  if(typeof id!=='string'||id==='default'||! /^[a-z0-9_-]{2,64}$/.test(id)||typeof name!=='string'||!name.trim()||name.length>200||typeof adminUsername!=='string'||!adminUsername.trim()||adminUsername.length>100||!validEmployeeEmail(adminEmail)||typeof adminPassword!=='string'||adminPassword.length<10||Buffer.byteLength(adminPassword,'utf8')>72||privacyAccepted!==true) return res.status(400).json({error:'أدخل بيانات الشركة وبريدًا صحيحًا وكلمة مرور من 10 أحرف على الأقل ووافق على سياسة الخصوصية'});
+  try {
+    const password=hashPassword(adminPassword);
+    const created=await db.transaction(async tx=>{
+      await identityLock(tx);
+      const existing=await tx.select({id:schema.companies.id}).from(schema.companies).where(eq(schema.companies.id,id));
+      const data=await tx.select({key:schema.systemData.key}).from(schema.systemData).where(inArray(schema.systemData.key,['mainData_'+id,'deletedCompany:'+id]));
+      if(existing.length || data.length) throw attendanceError(409,'معرّف الشركة مستخدم أو محجوز؛ اختر معرّفًا جديدًا');
+      await assertUnique(tx,[masterIdentity({id,adminUsername,adminEmail})]);
+      const companyCode=await nextCompanyCode(tx);
+      await tx.insert(schema.companies).values({id,name:name.trim(),adminUsername:identityValue(adminUsername),adminEmail:identityValue(adminEmail),adminPassword:password,companyCode,subscriptionStatus:'pending',monthlyFee:'0'});
+      await tx.insert(schema.systemData).values({key:'mainData_'+id,value:createCleanCompanyData(name.trim())});
+      await tx.insert(schema.systemData).values({key:'companyPrivacy:'+id,value:{version:'2026-10-06',acceptedAt:new Date().toISOString()}});
+      return {companyCode};
+    });
+    return res.json({...created,message:'تم التسجيل. حساب الشركة ينتظر تفعيل الاشتراك؛ احتفظ ببيانات دخولك.'});
+  } catch(error:any) { return res.status(error.status || 500).json({error:error.status?error.message:'تعذر تسجيل الشركة'}); }
+});
+
+app.delete('/api/companies/:id', requireAuth(['superadmin'], false), async (req,res) => {
+  const id=req.params.id;
+  if(id==='default') return res.status(400).json({error:'لا يمكن حذف الشركة الافتراضية'});
+  try {
+    await db.transaction(async tx=>{
+      await identityLock(tx);
+      const companies=await tx.select({id:schema.companies.id,adminUsername:schema.companies.adminUsername}).from(schema.companies).where(eq(schema.companies.id,id));
+      if(!companies.length) throw attendanceError(404,'الشركة غير موجودة');
+      const data=await tx.select().from(schema.systemData).where(eq(schema.systemData.key,'mainData_'+id));
+      const admins=await tx.select({id:schema.admins.id,username:schema.admins.username}).from(schema.admins).where(eq(schema.admins.companyId,id));
+      const keys=['mainData_'+id,'companyPrivacy:'+id,'ownerPasswordRevision:'+id,emailVerificationQuotaKey(id),notificationStateKey(id,{role:'admin'}),notificationStateKey(id,{role:'admin',username:companies[0].adminUsername || undefined})];
+      for(const employee of (data[0]?.value as any)?.employees || []) keys.push(welcomeStateKey(id,String(employee.id)),emailVerificationKey(id,String(employee.id)));
+      for(const admin of admins) keys.push(adminAccessKey(id,admin.id),notificationStateKey(id,{role:'admin',id:admin.id}));
+      for(const role of ['superadmin','admin']) for(const username of [undefined, 'admin']) keys.push(notificationStateKey(id,{role,username}));
+      for(const table of [schema.attendance,schema.requests,schema.registrationRequests,schema.auditLog,schema.attendanceMonths,schema.admins]) await tx.delete(table).where(eq(table.companyId,id));
+      await tx.delete(schema.systemData).where(inArray(schema.systemData.key,keys));
+      await tx.delete(schema.companies).where(eq(schema.companies.id,id));
+      // Reserve the old namespace so old JWTs cannot access a newly created company's data.
+      await tx.insert(schema.systemData).values({key:'deletedCompany:'+id,value:{deletedAt:new Date().toISOString()}}).onConflictDoNothing();
+    });
+    return res.json({success:true});
+  } catch(error:any) { return res.status(error.status || 500).json({error:error.status?error.message:'تعذر حذف الشركة'}); }
 });
 
 

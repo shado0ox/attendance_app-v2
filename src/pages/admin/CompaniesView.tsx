@@ -1,9 +1,7 @@
-import { Building2, Check, Plus } from 'lucide-react';
+import { Building2, Check } from 'lucide-react';
 
 interface CompaniesViewProps {
   companiesList: any[];
-  onAddNew: () => void;
-  onEdit: (comp:any) => void;
   onSelect: (companyId:string) => void;
   onExtendSubscription: (comp: any) => void;
   onToggleStatus: (comp: any) => void;
@@ -12,8 +10,6 @@ interface CompaniesViewProps {
 
 export default function CompaniesView({
   companiesList,
-  onAddNew,
-  onEdit,
   onSelect,
   onExtendSubscription,
   onToggleStatus,
@@ -64,20 +60,13 @@ export default function CompaniesView({
         <div className="flex items-center justify-between border-b pb-4 flex-wrap gap-2">
           <div>
             <h3 className="font-extrabold text-slate-800 text-sm">قائمة مساحات العمل والشركات المشتركة</h3>
-            <p className="text-[10px] text-slate-400 mt-1">يمكنك إدارة الشركات وتوليد مساحات عمل مخصصة والتحكم بحالة اشتراك كل منها.</p>
+            <p className="text-[10px] text-slate-400 mt-1">الشركة 101 فقط متاحة لإدارة بياناتها. الشركات المشتركة بياناتها خاصة؛ صلاحيتك التفعيل والإيقاف والتجديد والحذف فقط. ينشئ صاحب الشركة حسابه من شاشة الدخول.</p>
           </div>
-          <button
-            onClick={onAddNew}
-            className="flex items-center gap-1.5 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl text-xs shadow transition-all"
-          >
-            <Plus size={14} />
-            <span>تسجيل شركة جديدة</span>
-          </button>
         </div>
 
         {companiesList.length === 0 ? (
           <div className="py-12 text-center text-xs text-slate-400">
-            لا توجد شركات مسجلة باشتراك شهري حالياً. اضغط على زر تسجيل شركة جديدة للبدء.
+            لا توجد شركات مسجلة حاليًا.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -111,18 +100,12 @@ export default function CompaniesView({
                     {/* Details Grid */}
                     <div className="grid grid-cols-2 gap-2 mt-3 pt-2 border-t border-dashed text-[10px] text-slate-500">
                       <div>
-                        <span className="block text-slate-400">حساب المدير المسؤول:</span>
-                        <span className="font-bold text-slate-700 font-mono">
-                          {comp.adminUsername}
-                        </span>
-                      </div>
-                      <div>
                         <span className="block text-slate-400">رمز الشركة:</span>
                         <span className="font-bold text-sky-700 font-mono">{comp.companyCode}</span>
                       </div>
                       <div>
                         <span className="block text-slate-400">قيمة الاشتراك الشهري:</span>
-                        <span className="font-bold text-slate-700">{comp.monthlyFee || '150'} ريال</span>
+                        <span className="font-bold text-slate-700">{comp.monthlyFee ?? '0'} ريال</span>
                       </div>
                       <div>
                         <span className="block text-slate-400">حالة الاشتراك:</span>
@@ -135,7 +118,7 @@ export default function CompaniesView({
                               : 'bg-emerald-50 text-emerald-600'
                           }`}
                         >
-                          {comp.subscriptionStatus === 'suspended' ? '⏳ موقوف مؤقتاً' : isExpired ? '⚠️ منتهي الصلاحية' : '✅ نشط وساري'}
+                          {comp.subscriptionStatus === 'pending' ? 'بانتظار التفعيل' : comp.subscriptionStatus === 'suspended' ? '⏳ موقوف مؤقتاً' : isExpired ? '⚠️ منتهي الصلاحية' : '✅ نشط وساري'}
                         </span>
                       </div>
                       <div>
@@ -147,10 +130,9 @@ export default function CompaniesView({
                     </div>
                   </div>
 
-                  <button className="text-xs bg-sky-600 text-white rounded-lg p-2" onClick={()=>onSelect(comp.id)}>فتح مساحة الشركة</button>
+                  {comp.isDefault ? <button className="text-xs bg-sky-600 text-white rounded-lg p-2" onClick={()=>onSelect('default')}>فتح الشركة الافتراضية 101</button> : <p className="text-xs text-slate-500">🔒 بيانات الموظفين والجداول والحضور متاحة لإدارة الشركة فقط.</p>}
                   {/* Quick Actions */}
                   {!comp.isDefault && <div className="flex flex-wrap gap-2 border-t pt-3 mt-1 text-[11px]">
-                    <button onClick={()=>onEdit(comp)} className="px-2.5 py-1.5 bg-white border rounded font-bold">تعديل الحساب والبيانات</button>
                     <button
                       onClick={() => onExtendSubscription(comp)}
                       className="px-2.5 py-1.5 bg-sky-50 text-sky-700 hover:bg-sky-100 rounded font-bold transition-all flex-1"

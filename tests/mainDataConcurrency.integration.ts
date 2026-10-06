@@ -297,7 +297,7 @@ try {
   const tenantAdminHeaders = { ...headers, Authorization: 'Bearer ' + jwt.sign({ role: 'admin', companyId: 'default', name: 'Tenant admin' }, 'ci-integration-only-secret', { expiresIn: '1h' }) };
   assert.equal((await fetch(profileUrl, { headers: tenantAdminHeaders })).status, 200);
   assert.equal((await fetch(profileUrl.replace('companyId=default', 'companyId=another-company'), { headers: tenantAdminHeaders })).status, 403);
-  assert.equal((await fetch(profileUrl.replace('companyId=default', 'companyId=another-company'), { headers })).status, 404, 'superadmin may select another company, but employee membership is still required');
+  assert.equal((await fetch(profileUrl.replace('companyId=default', 'companyId=another-company'), { headers })).status, 403, 'platform admin cannot select another company');
   assert.equal((await fetch(profileUrl.replace('employee-ci', 'unknown-ci'), { headers })).status, 404);
   assert.equal((await profileRead('private')).status, 400);
   assert.equal((await profileRead('requests', '&page=0')).status, 400);
@@ -351,6 +351,7 @@ try {
   const exceptionHeaders = { ...headers, Authorization: 'Bearer ' + jwt.sign({ role: 'admin', companyId: exceptionCompany }, 'ci-integration-only-secret', { expiresIn: '1h' }) };
   const exceptionData = { departments: [{id:'old',name:'Old department'},{id:'new',name:'New department'}], employees: [{ id: exceptionEmployee, name: 'Exception employee', dept: 'new', employmentHistory: { dept: [{date:'2024-10-15',before:'old',after:'new'}] } }], shiftTypes: [{id:'S',name:'Morning',start:'08:00',end:'16:00'},{id:'D',name:'Double',type:'double',start:'08:00',end:'12:00',start2:'16:00',end2:'20:00'},{id:'BAD',name:'Invalid',start:'bad',end:'16:00'}], settings: { companyName: 'Exception company', attendanceAnalysis: {graceMinutes:5} }, schedule: {}, _schedulePublication: { schedule: { '2024-10-10': {[exceptionEmployee]: {shiftType:'S'}}, '2024-10-11': {[exceptionEmployee]: {shiftType:'S'}}, '2024-10-12': {[exceptionEmployee]: {shiftType:'S'}}, '2024-10-13': {[exceptionEmployee]: {shiftType:'OFF'}}, '2024-10-14': {[exceptionEmployee]: {shiftType:'S'}}, '2024-10-15': {[exceptionEmployee]: {shiftType:'D'}}, '2024-10-16': {[exceptionEmployee]: {shiftType:'BAD'}}, '2024-10-18': {[exceptionEmployee]: {shiftType:'S'}} }, shiftTypes: [] } };
   exceptionData._schedulePublication.shiftTypes = exceptionData.shiftTypes;
+  await pool.query('INSERT INTO shift_app.companies(id,name,admin_username,admin_password,company_code) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING',[exceptionCompany,'Exception CI','exception-master-ci','ci-only-hash','999']);
   await pool.query('INSERT INTO shift_app.system_data (key,value) VALUES ($1,$2)', ['mainData_' + exceptionCompany, JSON.stringify(exceptionData)]);
   for (const row of [{date:'2024-10-10',dept:'old',checkIn:'08:15',checkOut:'15:50'}, {date:'2024-10-11',dept:'old',checkIn:'08:00'}, {date:'2024-10-13',dept:'old',checkIn:'08:00',checkOut:'16:00'}, {date:'2024-10-15',dept:'new',checkIn:'08:00',checkOut:'12:00',checkIn2:'16:00',checkOut2:'20:00'}, {date:'2024-10-17',dept:'new',checkIn:'08:00',checkOut:'16:00'}, {date:'2024-10-18',dept:'new',checkIn:'08:00',checkOut:'12:00'}, {date:'2024-10-18',dept:'new',checkIn:'13:00',checkOut:'16:00'}]) await pool.query('INSERT INTO shift_app.attendance (emp_id,emp_name,date,dept,check_in,check_out,check_in_2,check_out_2,company_id,check_in_lat) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,24)', [exceptionEmployee,'Exception employee',row.date,row.dept,row.checkIn,row.checkOut || null,(row as any).checkIn2 || null,(row as any).checkOut2 || null,exceptionCompany]);
   await pool.query("INSERT INTO shift_app.requests (emp_id,emp_name,date,type,status,company_id,notes) VALUES ($1,'Exception employee','2024-10-14','leave','approved',$2,'Approved leave'), ($1,'Exception employee','2024-10-11','attendance_adjustment','pending',$2,'Own pending correction'), ($1,'Foreign employee','2024-10-11','attendance_adjustment','pending','foreign-ci','Foreign private note')", [exceptionEmployee,exceptionCompany]);
@@ -391,11 +392,10 @@ try {
   assert.deepEqual(exceptionAfter,exceptionData,'exception viewing/export is read-only');
   // Department access is persisted separately and checked from storage for every request.
   const deptPermissions = { canEditSchedule:true,canManageEmployees:false,canManageDepts:false,canApproveRequests:true,canViewReports:true,canManageSettings:false,canPrint:true };
-  const createDeptAdmin = await fetch(origin + '/api/admins', { method:'POST', headers, body:JSON.stringify({name:'Department manager',username:'department-ci',password:'department-password',companyId:exceptionCompany,permissions:deptPermissions,departmentIds:['new']}) });
+  const createDeptAdmin = await fetch(origin + '/api/admins', { method:'POST', headers:exceptionHeaders, body:JSON.stringify({name:'Department manager',username:'department-ci',password:'department-password',companyId:exceptionCompany,permissions:deptPermissions,departmentIds:['new']}) });
   assert.equal(createDeptAdmin.status,200);
   const deptAdmin = await createDeptAdmin.json() as any;
   assert.deepEqual(deptAdmin.departmentIds,['new']); assert.equal(deptAdmin.password,undefined);
-  await pool.query('INSERT INTO shift_app.companies(id,name,admin_username,admin_password,company_code) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING',[exceptionCompany,'Exception CI','exception-master-ci','ci-only-hash','999']);
   const deptLogin = await fetch(origin + '/api/auth/admin-login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({companyId:exceptionCompany,username:'department-ci',password:'department-password'})});
   assert.equal(deptLogin.status,200);
   const deptLoginData = await deptLogin.json() as any;
@@ -433,7 +433,7 @@ try {
   assert.deepEqual(storedDeptData._schedulePublication,exceptionData._schedulePublication,'department draft never publishes');
   assert.equal(storedDeptData.schedule['2024-10-18']['exception-a'].shiftType,'OFF');
   assert.equal((await deptSave(nextDeptView)).status,409);
-  const approvalOnly = await fetch(origin + '/api/admins',{method:'POST',headers,body:JSON.stringify({id:deptAdmin.id,name:deptAdmin.name,username:deptAdmin.username,companyId:exceptionCompany,permissions:{...deptPermissions,canEditSchedule:false},departmentIds:['new']})});
+  const approvalOnly = await fetch(origin + '/api/admins',{method:'POST',headers:exceptionHeaders,body:JSON.stringify({id:deptAdmin.id,name:deptAdmin.name,username:deptAdmin.username,companyId:exceptionCompany,permissions:{...deptPermissions,canEditSchedule:false},departmentIds:['new']})});
   assert.equal(approvalOnly.status,200);
   const approvedShift = await pool.query("INSERT INTO shift_app.requests (company_id,emp_id,emp_name,dept,date,type,target_shift,status) VALUES ($1,'exception-a','Exception employee','new','2024-10-19','shift_change','S','pending') RETURNING id",[exceptionCompany]);
   const applyShift = () => fetch(origin + '/api/requests/' + approvedShift.rows[0].id,{method:'PUT',headers:deptHeaders,body:JSON.stringify({status:'approved'})});
@@ -447,19 +447,21 @@ try {
   assert.equal((await fetch(origin + '/api/requests/' + invalidShift.rows[0].id,{method:'PUT',headers:deptHeaders,body:JSON.stringify({status:'approved'})})).status,409);
   assert.equal((await pool.query('SELECT status FROM shift_app.requests WHERE id=$1',[invalidShift.rows[0].id])).rows[0].status,'pending');
   assert.deepEqual((await pool.query('SELECT value FROM shift_app.system_data WHERE key=$1',['mainData_' + exceptionCompany])).rows[0].value,afterApprovedShift,'invalid approval leaves company draft untouched');
-  const removeExport = await fetch(origin + '/api/admins',{method:'POST',headers,body:JSON.stringify({id:deptAdmin.id,name:deptAdmin.name,username:deptAdmin.username,companyId:exceptionCompany,permissions:{...deptPermissions,canPrint:false},departmentIds:['new']})});
+  const removeExport = await fetch(origin + '/api/admins',{method:'POST',headers:exceptionHeaders,body:JSON.stringify({id:deptAdmin.id,name:deptAdmin.name,username:deptAdmin.username,companyId:exceptionCompany,permissions:{...deptPermissions,canPrint:false},departmentIds:['new']})});
   assert.equal(removeExport.status,200);
   assert.equal((await deptGet('/api/attendance-exceptions?from=2024-10-10&to=2024-10-18')).status,200);
   assert.equal((await deptGet('/api/attendance-exceptions?from=2024-10-10&to=2024-10-18&mode=all')).status,403,'export permission is enforced separately');
-  const revokeDeptAdmin = await fetch(origin + '/api/admins',{method:'POST',headers,body:JSON.stringify({id:deptAdmin.id,name:deptAdmin.name,username:deptAdmin.username,companyId:exceptionCompany,permissions:{...deptPermissions,canViewReports:false},departmentIds:['new']})});
+  const revokeDeptAdmin = await fetch(origin + '/api/admins',{method:'POST',headers:exceptionHeaders,body:JSON.stringify({id:deptAdmin.id,name:deptAdmin.name,username:deptAdmin.username,companyId:exceptionCompany,permissions:{...deptPermissions,canViewReports:false},departmentIds:['new']})});
   assert.equal(revokeDeptAdmin.status,200);
   assert.equal((await deptGet('/api/attendance-exceptions?from=2024-10-10&to=2024-10-18')).status,403,'stored revocation applies to existing token');
-  const invalidScope = await fetch(origin + '/api/admins',{method:'POST',headers,body:JSON.stringify({id:deptAdmin.id,name:deptAdmin.name,username:deptAdmin.username,companyId:exceptionCompany,permissions:deptPermissions,departmentIds:['foreign-department']})});
+  const invalidScope = await fetch(origin + '/api/admins',{method:'POST',headers:exceptionHeaders,body:JSON.stringify({id:deptAdmin.id,name:deptAdmin.name,username:deptAdmin.username,companyId:exceptionCompany,permissions:deptPermissions,departmentIds:['foreign-department']})});
   assert.equal(invalidScope.status,400);
-  assert.equal((await fetch(origin + '/api/admins/' + deptAdmin.id,{method:'DELETE',headers})).status,200);
+  assert.equal((await fetch(origin + '/api/admins/' + deptAdmin.id,{method:'DELETE',headers:exceptionHeaders})).status,200);
   assert.equal((await deptGet('/api/main-data')).status,403,'deleted administrator cannot reuse a token');
   // Notification read state is per account and only explicit marks persist metadata.
   const niCompany = 'notifications-ci', niToday = new Date(Date.now()+3*3600000).toISOString().slice(0,10), niYesterday = dateOffset(niToday,-1), niTomorrow = dateOffset(niToday,1);
+  const niMasterHeaders = {...headers,Authorization:'Bearer '+jwt.sign({role:'admin',companyId:niCompany},'ci-integration-only-secret',{expiresIn:'1h'})};
+  await pool.query('INSERT INTO shift_app.companies(id,name,admin_username,admin_password,company_code) VALUES ($1,$2,$3,$4,$5)',[niCompany,'Notifications CI','notifications-master-ci','ci-only-hash','998']);
   const niShifts = [{id:'M2',name:'Second morning',type:'morning',start:'08:00',end:'16:00'}];
   const niPublished = {[niYesterday]:{na:{shiftType:'M2'},nb:{shiftType:'M2'}},[niToday]:{na:{shiftType:'OFF'},nb:{shiftType:'OFF'}},[niTomorrow]:{na:{shiftType:'M2'}}};
   const niData = {departments:[{id:'a',name:'A',needsMorning:true,friday:'full'},{id:'b',name:'B',needsMorning:true,friday:'full'}],employees:[{id:'na',name:'Notify A',dept:'a',password:'secret-a'},{id:'nb',name:'Notify B',dept:'b',password:'secret-b'}],shiftTypes:niShifts,settings:{companyName:'Notification company'},schedule:{...niPublished,[niTomorrow]:{na:{shiftType:'M2'},nb:{shiftType:'M2'}}},_schedulePublication:{schedule:niPublished,shiftTypes:niShifts}};
@@ -470,12 +472,12 @@ try {
   assert.equal((await fetch(niUrl)).status,401);
   const niEmployeeHeaders = {...headers,Authorization:'Bearer '+jwt.sign({role:'employee',companyId:niCompany,id:'na'},'ci-integration-only-secret',{expiresIn:'1h'})};
   assert.equal((await fetch(niUrl,{headers:niEmployeeHeaders})).status,403);
-  const niRootBefore = await fetch(niUrl,{headers}); assert.equal(niRootBefore.status,200); assert.equal(niRootBefore.headers.get('cache-control'),'private, no-store');
+  const niRootBefore = await fetch(niUrl,{headers:niMasterHeaders}); assert.equal(niRootBefore.status,200); assert.equal(niRootBefore.headers.get('cache-control'),'private, no-store');
   const niRoot = await niRootBefore.json() as any; assert.equal(niRoot.activeTotal,8); assert.equal(niRoot.unread,8);
   assert.equal(niRoot.counts.requests.total,2); assert.equal(niRoot.counts.coverage.total,4); assert.equal(niRoot.counts.attendance.total,2);
   assert.ok(!JSON.stringify(niRoot).includes('secret-a')); assert.ok(!JSON.stringify(niRoot).includes('checkInLat'));
   const niPermissions = {canEditSchedule:false,canManageEmployees:false,canManageDepts:false,canApproveRequests:true,canViewReports:true,canManageSettings:false,canPrint:false};
-  const niCreate = async (username:string) => { const response=await fetch(origin+'/api/admins',{method:'POST',headers,body:JSON.stringify({companyId:niCompany,name:username,username,password:'notify-password',departmentIds:['a'],permissions:niPermissions})}); assert.equal(response.status,200); return response.json() as Promise<any>; };
+  const niCreate = async (username:string) => { const response=await fetch(origin+'/api/admins',{method:'POST',headers:niMasterHeaders,body:JSON.stringify({companyId:niCompany,name:username,username,password:'notify-password',departmentIds:['a'],permissions:niPermissions})}); assert.equal(response.status,200); return response.json() as Promise<any>; };
   const niAdmin1 = await niCreate('notification-manager-1'), niAdmin2 = await niCreate('notification-manager-2');
   const niHeaders = (id:number) => ({...headers,Authorization:'Bearer '+jwt.sign({role:'admin',companyId:niCompany,id},'ci-integration-only-secret',{expiresIn:'1h'})});
   const niH1 = niHeaders(niAdmin1.id), niH2 = niHeaders(niAdmin2.id);
@@ -489,7 +491,7 @@ try {
   const niOwnRequest = niOwn.items.find((item:any)=>item.category==='requests'), niOwnAttendance = niOwn.items.find((item:any)=>item.category==='attendance');
   const niMarks=await Promise.all([niMark([niOwnRequest.id],true),niMark([niOwnAttendance.id],true)]); assert.deepEqual(niMarks.map(r=>r.status),[200,200]);
   assert.equal((await niRead()).unread,2,'concurrent marks preserve both IDs');
-  assert.equal((await niRead(niH2)).unread,4,'another manager is independent'); assert.equal((await niRead(headers)).unread,8,'root read state is independent');
+  assert.equal((await niRead(niH2)).unread,4,'another manager is independent'); assert.equal((await niRead(niMasterHeaders)).unread,8,'root read state is independent');
   const niReadOnly = await niRead(niH1,'&read=read'); assert.equal(niReadOnly.total,2); assert.equal(niReadOnly.activeTotal,4);
   const niOther = niRoot.items.find((item:any)=>item.dept==='b'); assert.equal((await niMark([niOther.id],true)).status,400);
   assert.equal((await niMark(['requests-'+'f'.repeat(64)],true)).status,400);
@@ -502,10 +504,10 @@ try {
   assert.equal((await niMark([niOwnRequest.id],true)).status,400,'resolved identities cannot be marked');
   await pool.query("UPDATE shift_app.attendance SET check_out='16:00' WHERE id=$1",[niRecord.rows[0].id]);
   assert.ok(!(await niRead()).items.some((item:any)=>item.category==='attendance'),'resolved punch exception disappears');
-  const niReassign = await fetch(origin+'/api/admins',{method:'POST',headers,body:JSON.stringify({id:niAdmin1.id,name:niAdmin1.name,username:niAdmin1.username,companyId:niCompany,permissions:niPermissions,departmentIds:['b']})}); assert.equal(niReassign.status,200);
+  const niReassign = await fetch(origin+'/api/admins',{method:'POST',headers:niMasterHeaders,body:JSON.stringify({id:niAdmin1.id,name:niAdmin1.name,username:niAdmin1.username,companyId:niCompany,permissions:niPermissions,departmentIds:['b']})}); assert.equal(niReassign.status,200);
   const niReassigned = await niRead(); assert.ok(niReassigned.items.every((item:any)=>item.dept==='b')); assert.equal(niReassigned.unread,4,'new department cannot inherit another alert read flag');
   assert.equal((await niMark([niOwn.items.find((item:any)=>item.category==='coverage').id],true)).status,400,'existing token cannot mark former department');
-  const niRevoke = await fetch(origin+'/api/admins',{method:'POST',headers,body:JSON.stringify({id:niAdmin1.id,name:niAdmin1.name,username:niAdmin1.username,companyId:niCompany,permissions:Object.fromEntries(Object.keys(niPermissions).map(p=>[p,false])),departmentIds:['b']})}); assert.equal(niRevoke.status,200);
+  const niRevoke = await fetch(origin+'/api/admins',{method:'POST',headers:niMasterHeaders,body:JSON.stringify({id:niAdmin1.id,name:niAdmin1.name,username:niAdmin1.username,companyId:niCompany,permissions:Object.fromEntries(Object.keys(niPermissions).map(p=>[p,false])),departmentIds:['b']})}); assert.equal(niRevoke.status,200);
   assert.equal((await fetch(niUrl,{headers:niH1})).status,403);
   console.log('PASS: notification center combines published coverage/approved leave, pending requests and attendance exceptions; scopes every category, stores independent/concurrent read state, resolves live causes, prevents foreign/stale marks and never writes company data.');
   console.log('PASS: department access is persisted, secret-free, filtered before grouping/export, preserves other data during draft saves, rejects historical/foreign writes and privilege escalation, scopes request review, and honors revocation/deletion with existing tokens.');

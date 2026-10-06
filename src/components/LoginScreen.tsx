@@ -1,3 +1,4 @@
+import CompanyRegistration from './CompanyRegistration';
 import { useState, useEffect } from 'react';
 import { User, Shield, UserPlus, LogIn, Loader, Fingerprint, ScanFace, AlertCircle, ShieldCheck } from 'lucide-react';
 
@@ -602,6 +603,9 @@ export default function LoginScreen({
             </button>
           </div>
         )}
+
+        <CompanyRegistration />
+        <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="block mt-4 text-center text-xs underline text-sky-700">سياسة الخصوصية واستخدام الموقع</a>
 
         <div className="mt-8 text-[11px] text-center text-slate-400 border-t border-slate-100/10 pt-4 font-sans tracking-wide">
           التصميم والتطوير عن طريق <strong className="text-slate-300 font-extrabold hover:text-sky-400 transition-colors">SHADY NASSEF</strong> &nbsp;•&nbsp; جميع الحقوق محفوظة © 2026

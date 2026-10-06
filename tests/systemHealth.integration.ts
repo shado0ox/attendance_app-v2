@@ -12,12 +12,13 @@ const directory=await fs.mkdtemp(path.join(tmpdir(),'attendance-health-')),secre
 const pool=new pg.Pool({host:process.env.SQL_HOST,port:Number(process.env.SQL_PORT || 5432),user:process.env.SQL_USER,password:process.env.SQL_PASSWORD,database:process.env.SQL_DB_NAME});
 const child=spawn(process.execPath,['--import','./tests/mockResend.mjs','dist/server.cjs'],{env:{...process.env,NODE_ENV:'production',JWT_SECRET:secret,BACKUP_ENABLED:'false',BACKUP_DIR:directory,RESEND_API_KEY:'mock-key',RESEND_FROM:'Attendance <attendance@example.com>',APP_URL:'https://attendance.example.com',ATTENDANCE_TEST_EMAIL_CAPTURE:path.join(directory,'mail.jsonl')},stdio:'inherit'});
 const origin='http://127.0.0.1:3011';
-const headers=(role:string)=>({Authorization:'Bearer '+jwt.sign({role,companyId,...(role==='employee'?{id}:{}),name:'Health CI'},secret,{expiresIn:'1h'}),'Content-Type':'application/json'});
-const request=(endpoint:string,role='admin',method='GET')=>fetch(origin+endpoint+'?companyId='+companyId,{method,headers:headers(role),...(method==='POST'?{body:'{}'}:{})});
+const headers=(role:string)=>({Authorization:'Bearer '+jwt.sign({role,companyId:role==='superadmin'?'default':companyId,...(role==='employee'?{id}:{}),name:'Health CI'},secret,{expiresIn:'1h'}),'Content-Type':'application/json'});
+const request=(endpoint:string,role='admin',method='GET')=>fetch(origin+endpoint+'?companyId='+(role==='superadmin'?'default':companyId),{method,headers:headers(role),...(method==='POST'?{body:'{}'}:{})});
 const put=(key:string,value:any)=>pool.query('INSERT INTO shift_app.system_data (key,value) VALUES ($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',[key,JSON.stringify(value)]);
 try{
  let ready=false;for(let i=0;i<60;i++){try{if((await fetch(origin+'/api/health/live')).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,500));}assert.ok(ready);
  const data={employees:[{id,name:'Health Employee',email:'health@example.com',dept:'d'}],departments:[{id:'d',name:'Department'}],shiftTypes:[],schedule:{},settings:{companyName:'Health CI'}};
+ await pool.query('INSERT INTO shift_app.companies(id,name,admin_username,admin_password) VALUES ($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING',[companyId,companyId,companyId+'-master','ci-only-hash']);
  await put('mainData_'+companyId,data);
  await put(welcomeStateKey(companyId,id),{status:'failed',startedAt:Date.now()-100000,claimedAt:Date.now()-100000,payload:{from:'Attendance <attendance@example.com>',to:['health@example.com'],subject:'Welcome',text:'private-mail-body'},claim:'private-claim'});
  await put(emailVerificationKey(companyId,id),{email:'health@example.com',delivery:'failed',requestedAt:Date.now(),codeHash:'private-hash',nonce:'private-nonce'});
