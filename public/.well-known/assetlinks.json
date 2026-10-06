@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.xshadox.wafrdawam.preview",
+      "sha256_cert_fingerprints": [
+        "B0:2C:DF:54:1F:D3:35:CB:60:17:DE:9F:85:F2:1A:18:A5:11:27:43:32:42:22:16:20:83:6F:E3:6B:63:CB:3E"
+      ]
+    }
+  }
+]
