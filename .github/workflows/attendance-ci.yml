@@ -44,3 +44,4 @@ jobs:
       - run: node --import tsx tests/emailVerification.integration.ts
       - run: node --import tsx tests/systemHealth.integration.ts
       - run: node --import tsx tests/companyIdentity.integration.ts
+      - run: node --import tsx tests/tenantPrivacy.integration.ts

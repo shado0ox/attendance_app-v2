@@ -1,3 +1,4 @@
+import CompanyOwnerSecurity from './CompanyOwnerSecurity';
 import { effectiveScheduleData } from '../lib/schedulePublication';
 import { employeeStatus, isActiveEmployee, employmentToday, type EmployeeStatus } from '../lib/employeeLifecycle';
 import DepartmentBadge from './DepartmentBadge';
@@ -31,7 +32,6 @@ import CompaniesView from '../pages/admin/CompaniesView';
 
 interface AdminPortalProps {
   onRefreshData: () => Promise<boolean>;
-  onSelectCompany: (companyId:string) => void;
   admin: any;
   appSettings: any;
   appData: any;
@@ -50,7 +50,6 @@ interface AdminPortalProps {
 
 export default function AdminPortal({
   onRefreshData,
-  onSelectCompany,
   admin,
   appSettings,
   appData,
@@ -150,17 +149,6 @@ export default function AdminPortal({
   // CRUD dialog modals for employees and departments
   const [empModalOpen, setEmpModalOpen] = useState(false);
 
-  // Company management states
-  const [companyModalOpen, setCompanyModalOpen] = useState(false);
-  const [editingCompId, setEditingCompId] = useState<string | null>(null);
-  const [compName, setCompName] = useState('');
-  const [compSlug, setCompSlug] = useState('');
-  const [compLogoUrl, setCompLogoUrl] = useState('');
-  const [compMonthlyFee, setCompMonthlyFee] = useState('150');
-  const [compAdminUsername, setCompAdminUsername] = useState('');
-  const [compAdminPassword, setCompAdminPassword] = useState('');
-  const [compAdminEmail, setCompAdminEmail] = useState('');
-  const [compMonths, setCompMonths] = useState('12');
   const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
   const [emName, setEmName] = useState('');
   const [emDept, setEmDept] = useState('');
@@ -307,68 +295,8 @@ export default function AdminPortal({
     }
   };
 
-  const handleSaveCompany = async () => {
-    if (!compName.trim() || !compSlug.trim() || !compAdminUsername.trim() || (!editingCompId && !compAdminPassword.trim())) {
-      alert('الرجاء إدخال كافة الحقول الأساسية: اسم الشركة، رمز الرابط، اسم المستخدم، ورمز المرور');
-      return;
-    }
-
-    const cleanSlug = compSlug.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    if (!cleanSlug) {
-      alert('الرجاء إدخال رمز رابط صالح (حروف إنجليزية وأرقام فقط)');
-      return;
-    }
-
-    // Subscription expiration calculation
-    const months = parseInt(compMonths) || 12;
-    const expiresAt = new Date();
-    expiresAt.setMonth(expiresAt.getMonth() + months);
-
-    const payload = {
-      id: cleanSlug,
-      name: compName.trim(),
-      logoUrl: compLogoUrl.trim(),
-      subscriptionStatus: editingCompId ? companiesList.find(c=>c.id===editingCompId)?.subscriptionStatus : 'active',
-      subscriptionExpiresAt: editingCompId ? companiesList.find(c=>c.id===editingCompId)?.subscriptionExpiresAt : expiresAt.toISOString(),
-      monthlyFee: compMonthlyFee.trim() || '150',
-      adminUsername: compAdminUsername.trim().toLowerCase(),
-      adminEmail:compAdminEmail.trim(),
-      adminPassword: compAdminPassword.trim(),
-    };
-
-    try {
-      const response = await fetch('/api/companies', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'فشل حفظ الشركة');
-      }
-
-      alert(editingCompId?'تم حفظ بيانات الشركة وحساب مديرها':'تم إنشاء الشركة وتخصيص رمزها تلقائيًا');
-      setCompanyModalOpen(false);
-      
-      // Clear fields
-      setCompName('');
-      setCompSlug('');
-      setCompLogoUrl('');
-      setCompMonthlyFee('150');
-      setCompAdminUsername('');
-      setCompAdminPassword('');
-      setCompAdminEmail('');
-      setCompMonths('12');
-
-      fetchCompanies();
-    } catch (e: any) {
-      alert('حدث خطأ: ' + e.message);
-    }
-  };
-
   const handleExtendCompanySubscription = async (comp: any) => {
-    const currentExpire = comp.subscriptionExpiresAt ? new Date(comp.subscriptionExpiresAt) : new Date();
+    const currentExpire = new Date(Math.max(Date.now(), comp.subscriptionExpiresAt ? new Date(comp.subscriptionExpiresAt).getTime() : Date.now()));
     const newExpire = new Date(currentExpire.getTime() + 30 * 24 * 60 * 60 * 1000); // Add 30 days
     
     try {
@@ -376,7 +304,7 @@ export default function AdminPortal({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...comp,
+          id: comp.id,
           subscriptionExpiresAt: newExpire.toISOString(),
           subscriptionStatus: 'active'
         })
@@ -400,7 +328,7 @@ export default function AdminPortal({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            ...comp,
+            id: comp.id,
             subscriptionStatus: nextStatus
           })
         });
@@ -982,9 +910,8 @@ export default function AdminPortal({
                 {activeView === 'shifttypes' && 'نوع ومدة الشيفت'}
                 {activeView === 'departments' && 'الأقسام والشيفتات'}
                 {activeView === 'requests' && 'صندوق طلبات الحضور والمسكن'}
-                {admin.role==='superadmin' && companyId!=='default' && <button className="mb-3 px-3 py-2 text-xs bg-white border rounded-lg" onClick={()=>onSelectCompany('default')}>العودة للشركة الافتراضية 101</button>}
           {activeView === 'health' && 'صحة النظام'}
-                {activeView === 'settings' && 'إعدادات الشركة والمنصات'}
+          {activeView === 'settings' && 'إعدادات الشركة والمنصات'}
                 {activeView === 'companies' && 'إدارة مساحات عمل الشركات والاشتراكات الشهرية'}
               </h1>
               <p className="hidden sm:block text-[10px] text-slate-400 font-bold mt-0.5">
@@ -1241,6 +1168,7 @@ export default function AdminPortal({
           )}
 
           {/* View: General Settings */}
+          {activeView === 'settings' && admin.role === 'admin' && admin.isMaster && companyId !== 'default' && <CompanyOwnerSecurity companyId={companyId} />}
           {activeView === 'settings' && (
             <SettingsView
               admin={admin}
@@ -1363,20 +1291,7 @@ export default function AdminPortal({
           {activeView === 'companies' && admin.role === 'superadmin' && companyId === 'default' && (
             <CompaniesView
               companiesList={companiesList}
-              onSelect={id=>{onSelectCompany(id);navigate('/admin/dashboard');}}
-              onEdit={comp=>{setEditingCompId(comp.id);setCompSlug(comp.id);setCompName(comp.name);setCompLogoUrl(comp.logoUrl || '');setCompMonthlyFee(comp.monthlyFee || '150');setCompAdminUsername(comp.adminUsername || '');setCompAdminEmail(comp.adminEmail || '');setCompAdminPassword('');setCompanyModalOpen(true);}}
-              onAddNew={() => {
-                setEditingCompId(null);
-                setCompName('');
-                setCompSlug('');
-                setCompLogoUrl('');
-                setCompMonthlyFee('150');
-                setCompAdminUsername('');
-                setCompAdminPassword('');
-                setCompAdminEmail('');
-                setCompMonths('12');
-                setCompanyModalOpen(true);
-              }}
+              onSelect={()=>navigate('/admin/dashboard')}
               onExtendSubscription={handleExtendCompanySubscription}
               onToggleStatus={handleToggleCompanyStatus}
               onDeleteCompany={handleDeleteCompanySpace}
@@ -1391,132 +1306,6 @@ export default function AdminPortal({
           التصميم والتطوير عن طريق <strong className="text-slate-500 font-extrabold hover:text-sky-500 transition-colors">SHADY NASSEF</strong> &nbsp;•&nbsp; جميع الحقوق محفوظة © 2026
         </footer>
       </div>
-
-      {/* Company Registration Modal */}
-      {companyModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900 bg-opacity-40 backdrop-blur-sm">
-          <div className="w-full max-w-md p-6 bg-white rounded-2xl shadow-xl border border-sky-100 max-h-[85vh] overflow-y-auto" dir="rtl">
-            <h3 className="text-sm font-extrabold text-slate-800 mb-4 pb-2 border-b text-right">
-              {editingCompId?'تعديل بيانات الشركة وحساب المدير':'تسجيل شركة جديدة'}
-            </h3>
-            
-            <div className="flex flex-col gap-4 text-right">
-              {/* Company Name */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-slate-600">اسم الشركة / المؤسسة</label>
-                <input
-                  type="text"
-                  value={compName}
-                  onChange={(e) => setCompName(e.target.value)}
-                  placeholder="مثال: شركة النجوم للتجارة"
-                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:border-sky-500 font-bold"
-                />
-              </div>
-
-              {/* Company Slug / Unique Link */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-slate-600">رمز مساحة العمل الفريد (للرابط)</label>
-                <input
-                  type="text"
-                  value={compSlug}
-                  disabled={!!editingCompId}
-                  onChange={(e) => setCompSlug(e.target.value)}
-                  placeholder="مثال: stars (حروف إنجليزية صغيرة فقط)"
-                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:border-sky-500 font-mono font-bold"
-                />
-                <span className="text-[10px] text-slate-400">معرّف داخلي ثابت للشركة؛ تسجيل الدخول يحدد الشركة تلقائيًا من بيانات الحساب.</span>
-              </div>
-
-              {/* Logo Url */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-slate-600">رابط صورة شعار الشركة (اختياري)</label>
-                <input
-                  type="text"
-                  value={compLogoUrl}
-                  onChange={(e) => setCompLogoUrl(e.target.value)}
-                  placeholder="مثال: https://example.com/logo.png"
-                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:border-sky-500 font-mono"
-                />
-              </div>
-
-              {/* Monthly Subscription Fee */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-slate-600">قيمة الاشتراك الشهري (بالريال)</label>
-                <input
-                  type="number"
-                  value={compMonthlyFee}
-                  onChange={(e) => setCompMonthlyFee(e.target.value)}
-                  placeholder="مثال: 150"
-                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:border-sky-500 font-bold"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1"><label className="text-xs font-bold text-slate-600">بريد مدير الشركة (اختياري للدخول)</label><input type="email" value={compAdminEmail} onChange={e=>setCompAdminEmail(e.target.value)} className="w-full px-3 py-2 text-xs border rounded-lg" /></div>
-              <p className="text-xs text-slate-500">{editingCompId?'رمز الشركة: '+companiesList.find(c=>c.id===editingCompId)?.companyCode+' (ثابت)':'رمز الشركة يُخصص تلقائيًا بالتسلسل بدءًا من 102؛ الشركة الافتراضية رمزها 101.'}</p>
-
-              {/* Subscription Duration */}
-              {!editingCompId && <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-slate-600">مدة الاشتراك المبدئية (بالأشهر)</label>
-                <select
-                  value={compMonths}
-                  onChange={(e) => setCompMonths(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:border-sky-500 font-bold"
-                >
-                  <option value="1">شهر واحد</option>
-                  <option value="3">3 أشهر</option>
-                  <option value="6">6 أشهر</option>
-                  <option value="12">سنة كاملة (12 شهر)</option>
-                  <option value="24">سنتين (24 شهر)</option>
-                </select>
-              </div>}
-
-              <div className="p-3 bg-sky-50 rounded-xl border border-sky-100 flex flex-col gap-2 mt-1">
-                <span className="text-[10px] font-bold text-sky-800">🔑 بيانات الدخول لمدير الشركة المشترك (Master Admin):</span>
-                
-                {/* Admin Username */}
-                <div className="flex flex-col gap-1">
-                  <label className="text-[10px] font-bold text-slate-600">اسم المستخدم للمدير</label>
-                  <input
-                    type="text"
-                    value={compAdminUsername}
-                    onChange={(e) => setCompAdminUsername(e.target.value)}
-                    placeholder="مثال: owner"
-                    className="w-full px-3 py-1.5 text-xs bg-white border rounded focus:outline-none font-mono font-bold"
-                  />
-                </div>
-
-                {/* Admin Password */}
-                <div className="flex flex-col gap-1">
-                  <label className="text-[10px] font-bold text-slate-600">رمز الدخول السري للمدير</label>
-                  <input
-                    type="text"
-                    value={compAdminPassword}
-                    onChange={(e) => setCompAdminPassword(e.target.value)}
-                    placeholder={editingCompId?'اتركه فارغًا للإبقاء على كلمة المرور':'كلمة مرور مدير الشركة'}
-                    className="w-full px-3 py-1.5 text-xs bg-white border rounded focus:outline-none font-mono font-bold"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex gap-2 justify-end mt-6 pt-4 border-t text-xs">
-              <button
-                onClick={() => setCompanyModalOpen(false)}
-                className="px-4 py-2 hover:bg-slate-100 border rounded-lg text-slate-500 font-bold"
-              >
-                إلغاء
-              </button>
-              <button
-                onClick={handleSaveCompany}
-                className="px-5 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold shadow transition-all"
-              >
-                {editingCompId?'حفظ التعديلات':'إنشاء الشركة'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Admin Creator Modal */}
       {subAdminModalOpen && (

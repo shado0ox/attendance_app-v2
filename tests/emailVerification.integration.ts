@@ -33,6 +33,7 @@ try {
     await new Promise(resolve => setTimeout(resolve, 500));
   }
   assert.ok(ready);
+ await pool.query('INSERT INTO shift_app.companies(id,name,admin_username,admin_password) VALUES ($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING',[companyId,companyId,companyId+'-master','ci-only-hash']);
   await pool.query('INSERT INTO shift_app.system_data (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', ['mainData_' + companyId, JSON.stringify({ departments: [], employees: [{ id, name: 'Verification employee', email: 'verify@example.com', password: 'untouched-password', dept: 'original' }, { id: 'other-employee-ci', name: 'Other employee', email: 'other@example.com' }], schedule: {}, shiftTypes: [], settings: { companyName: 'Verification company' } })]);
   await pool.query('DELETE FROM shift_app.system_data WHERE key IN ($1,$2)', [key, quotaKey]);
   assert.equal((await fetch(verificationUrl + '?companyId=' + companyId)).status, 401);

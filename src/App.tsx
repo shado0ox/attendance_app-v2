@@ -92,7 +92,11 @@ export default function App() {
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
   const cacheKey = (id: string) => `schedule_mainData_v2_${JSON.stringify([id, session.role, session.info?.id || session.info?.username || null])}`;
+  const clearPrivateCaches = () => {
+    for (const key of Object.keys(localStorage)) if (key.startsWith('schedule_mainData')) localStorage.removeItem(key);
+  };
   const cacheData = (id: string, data: any) => {
+    if (session.role !== 'employee') return;
     try { localStorage.setItem(cacheKey(id), JSON.stringify(data)); }
     catch (error) { console.warn('Could not cache application data', error); }
   };
@@ -201,7 +205,8 @@ export default function App() {
   // If user logs in and belongs to a specific company, sync it
   useEffect(() => {
     if (session && session.info && session.info.companyId) {
-      setCompanyId(session.info.companyId);
+      if (session.role !== 'employee') clearPrivateCaches();
+      setCompanyId(session.role === 'superadmin' ? 'default' : session.info.companyId);
     }
   }, [session]);
 
@@ -285,7 +290,7 @@ export default function App() {
         if (cancelled || fetchRevision !== revision.current || unsaved.current) return false;
         setDataSyncError('تعذر تحديث الجدول من السيرفر؛ البيانات المعروضة قد تكون قديمة.');
         if (receivedData) return false;
-        const cached = session.role === 'admin' ? null : localStorage.getItem(cacheKey(companyId));
+        const cached = session.role !== 'employee' ? null : localStorage.getItem(cacheKey(companyId));
         if (cached) {
           try {
             console.log('[Cache Fallback] Loading application data from local storage cache.');
@@ -450,6 +455,13 @@ export default function App() {
   const location = useLocation();
 
   const persistSession = (role: 'superadmin' | 'admin' | 'employee' | null, info: any) => {
+    clearPrivateCaches();
+    dataRef.current={departments:[],employees:[],shiftTypes:[],schedule:{}};
+    settingsRef.current={companyName:'نظام الدوام'};
+    setAppData(dataRef.current);
+    setAppSettings(settingsRef.current);
+    setLoading(true);
+    setCompanyId(role === 'superadmin' || !role ? 'default' : info.companyId);
     const s = { role, info };
     setSession(s);
     if (role === null) {
@@ -570,6 +582,7 @@ export default function App() {
   return (
     <div dir="rtl" className="font-tajawal text-slate-800 transition-all select-none">
       
+      <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="fixed bottom-2 left-2 z-40 px-2 py-1 rounded bg-white/90 border text-xs">الخصوصية</a>
       <SystemUpdateNotice blocked={saving || !!saveError || saveConflict || unsaved.current}/>
       {(saving || saveError) && (
         <div role="status" className="sticky top-0 z-[120] p-3 bg-amber-50 border-b border-amber-200 text-sm text-center">
@@ -653,7 +666,6 @@ export default function App() {
                 onUpdateSettings={handleUpdateSettings}
                 onUpdateAppData={handleUpdateAppData}
                 onRefreshData={() => refreshMainData.current()}
-                onSelectCompany={id=>{if(unsaved.current || pendingSaves.current){setSaveError('احفظ التعديلات الحالية قبل الانتقال لشركة أخرى');return;}setCompanyId(id);}}
                 registrationRequests={registrationRequests}
                 companyId={companyId}
                 companiesList={companiesList}

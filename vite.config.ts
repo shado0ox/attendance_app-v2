@@ -12,13 +12,13 @@ export default defineConfig(() => {
       VitePWA({
         registerType: 'prompt',
         injectRegister: false,
-        includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/app-icon.svg'],
+        includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/app-icon.svg', 'privacy.html'],
         workbox: {
           skipWaiting: false,
           importScripts: ['/pwa-upgrade-bridge.js'],
           clientsClaim: true,
           cleanupOutdatedCaches: true,
-          navigateFallbackDenylist: [/^\/api\//],
+          navigateFallbackDenylist: [/^\/api\//, /^\/privacy\.html$/],
         },
         manifest: {
           name: 'نظام إدارة الدوام والحضور',
