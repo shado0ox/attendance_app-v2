@@ -1,3 +1,5 @@
+import EmployeeSelfProfile from './EmployeeSelfProfile';
+import EmployeeAttendanceHistory from './EmployeeAttendanceHistory';
 import EmployeeEmailVerification from './EmployeeEmailVerification';
 import { useAutoPunch } from '../hooks/useAutoPunch';
 import { autoPeriodWindow } from '../lib/autoPunch';
@@ -38,6 +40,7 @@ export default function EmployeePortal({
   onOpenChangePassword,
   companyId
 }: EmployeePortalProps) {
+  const [activeTab,setActiveTab]=useState<'schedule'|'attendance'|'profile'|'settings'|'requests'>(()=>employee.email?'schedule':'profile');
   const currentProfile = employees.find(e => String(e.id) === String(employee.id)) || employee;
   const appSettings = useMemo(() => ({ ...companySettings, _attendanceEmployee: currentProfile }), [companySettings, currentProfile]);
   const [scheduleChanged, setScheduleChanged] = useState(false);
@@ -840,12 +843,11 @@ export default function EmployeePortal({
 
   return (
     <div id="emp-portal" className="min-h-screen pb-12 bg-sky-50 bg-opacity-40">
-      <div key={companyId + ':' + employee.id}><EmployeeEmailVerification employee={currentProfile} companyId={companyId} onSaved={onRefreshSchedule} /></div>
       {scheduleChanged && <div className="bg-sky-100 border-b border-sky-200 p-3 text-sm flex flex-wrap justify-center items-center gap-3" dir="rtl"><strong>تم تحديث جدول دوامك أو مواعيد شيفتاتك.</strong><span>راجع الأيام والمواعيد في الجدول أدناه.</span><button onClick={acknowledgeSchedule} className="bg-white border rounded px-3 py-1 text-xs">اطلعت على التحديث</button></div>}
       {/* Top Navbar */}
-      <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bg-white border-b border-sky-100 shadow-sm">
+      <header className="sticky top-0 z-50 flex items-center justify-between gap-3 px-3 sm:px-6 py-4 bg-white border-b border-sky-100 shadow-sm">
         <div className="flex items-center gap-3">
-          {appSettings?.logoDataUrl ? (
+          {currentProfile.photoDataUrl ? (<img src={currentProfile.photoDataUrl} alt="الصورة الشخصية" className="w-11 h-11 rounded-full object-cover border" />) : appSettings?.logoDataUrl ? (
             <img 
               src={appSettings.logoDataUrl} 
               alt="Logo" 
@@ -858,20 +860,12 @@ export default function EmployeePortal({
             </div>
           )}
           <div>
-            <h1 className="font-extrabold text-slate-800 text-sm leading-tight">{employee.name}</h1>
+            <h1 className="font-extrabold text-slate-800 text-sm leading-tight">{currentProfile.displayName || employee.name}</h1>
             <p className="text-[11px] text-slate-400 mt-0.5">{dept ? dept.name : 'بدون قسم'}</p>
           </div>
         </div>
 
         <div className="flex gap-2">
-          <button
-            onClick={onOpenChangePassword}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-sky-100 bg-sky-50 text-sky-600 hover:bg-sky-100 transition-all"
-          >
-            <Key size={13} />
-            <span>كلمة المرور</span>
-          </button>
-          
           <button
             onClick={onLogout}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg text-rose-500 hover:bg-rose-50 transition-all border border-transparent"
@@ -884,6 +878,12 @@ export default function EmployeePortal({
 
       {/* Main Container */}
       <main className="max-w-4xl px-4 py-8 mx-auto flex flex-col gap-6">
+
+        <nav aria-label="تبويبات بوابة الموظف" className="flex gap-2 overflow-x-auto pb-2 shrink-0" dir="rtl">
+          {([['schedule','جدولي'],['attendance','البصمة والغياب'],['profile','ملفي الشخصي'],['requests','طلباتي'],['settings','الإعدادات']] as const).map(([id,label])=><button key={id} type="button" aria-pressed={activeTab===id} onClick={()=>setActiveTab(id)} className={'whitespace-nowrap shrink-0 px-4 py-3 rounded-xl text-sm font-bold border '+(activeTab===id?'bg-sky-600 text-white border-sky-600':'bg-white text-slate-600')}>{label}</button>)}
+        </nav>
+        <section hidden={activeTab!=='profile'} style={{display:activeTab==='profile'?'block':'none'}}><div key={String(employee.id)}><EmployeeSelfProfile employee={currentProfile} departmentName={dept?.name || 'بدون قسم'} companyId={companyId} onSaved={onRefreshSchedule} /></div>{!currentProfile.email && <EmployeeEmailVerification employee={currentProfile} companyId={companyId} onSaved={onRefreshSchedule}/>}</section>
+        {activeTab==='settings' && <div className="bg-white border p-4 rounded-xl flex flex-wrap gap-3"><button onClick={onOpenChangePassword} className="bg-sky-100 text-sky-800 rounded-lg px-4 py-2 text-sm">تغيير كلمة المرور</button><a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="text-sm underline p-2">سياسة الخصوصية</a><EmployeeEmailVerification employee={currentProfile} companyId={companyId} onSaved={onRefreshSchedule} /></div>}
 
         {/* Missed Shift Alert Banner */}
         {missedShiftAlert && (
@@ -913,6 +913,7 @@ export default function EmployeePortal({
           </div>
         )}
 
+        <section hidden={activeTab!=='settings'} style={{display:activeTab==='settings'?'flex':'none'}} className="flex flex-col gap-6">
                 {/* Biometric Enrollment Card */}
         <div className="p-4 bg-white border border-sky-100 rounded-2xl shadow-sm" dir="rtl">
           <div className="flex items-start justify-between gap-3">
@@ -998,6 +999,8 @@ export default function EmployeePortal({
         </div>
 
         
+        </section>
+        <section hidden={activeTab!=='schedule'} style={{display:activeTab==='schedule'?'flex':'none'}} className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-white border border-sky-100 text-xs">
           <button type="button" disabled={scheduleRefreshing} onClick={() => { void onRefreshSchedule(); }} className="px-3 py-2 rounded-lg bg-sky-100 text-sky-800 font-bold disabled:opacity-50">{scheduleRefreshing ? 'جارٍ تحديث الجدول…' : 'تحديث جدول الدوام'}</button>
           <span>آخر مزامنة مع السيرفر: {scheduleSyncedAt ? new Date(scheduleSyncedAt).toLocaleString('ar-SA', {timeZone:'Asia/Riyadh',numberingSystem:'latn'}) : 'لم يتم التحقق بعد'}</span>
@@ -1146,6 +1149,8 @@ export default function EmployeePortal({
           </table>
         </div>
 
+        </section>
+        <section hidden={activeTab!=='attendance'} style={{display:activeTab==='attendance'?'flex':'none'}} className="flex flex-col gap-6">
         {/* Punch Clock Module */}
         <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
           <div className="flex items-center gap-2 font-bold text-slate-800 text-sm pb-3 border-b border-sky-50">
@@ -1303,6 +1308,9 @@ export default function EmployeePortal({
           )}
         </div>
 
+        {activeTab==='attendance' && <><EmployeeAttendanceHistory companyId={companyId} refreshKey={JSON.stringify([todayRecord?.id,todayRecord?.checkIn,todayRecord?.checkOut,todayRecord?.checkIn2,todayRecord?.checkOut2])} /><button className="p-3 bg-white border rounded-xl text-sm text-sky-700" onClick={()=>setActiveTab('requests')}>طلب تصحيح بصمة أو مراجعة الغياب</button></>}
+        </section>
+        <section hidden={activeTab!=='settings'} style={{display:activeTab==='settings'?'flex':'none'}} className="flex flex-col gap-6">
         {/* Automatic Geofencing Punch Card */}
         <div className="p-6 bg-gradient-to-br from-slate-900 to-indigo-950 border border-indigo-900 rounded-2xl shadow-xl text-white flex flex-col gap-5 relative overflow-hidden">
           {/* Subtle decorative lights */}
@@ -1479,6 +1487,8 @@ export default function EmployeePortal({
         </div>
 
         {/* Requests Management Buttons */}
+        </section>
+        <section hidden={activeTab!=='requests'} style={{display:activeTab==='requests'?'flex':'none'}} className="flex flex-col gap-6">
         <div className="flex gap-2.5 flex-wrap">
           <button
             onClick={() => { setRequestType('leave'); setRequestModalOpen(true); }}
@@ -1563,6 +1573,7 @@ export default function EmployeePortal({
             </div>
           )}
         </div>
+        </section>
       </main>
 
       {/* Design and Development Footer credit */}
@@ -1573,7 +1584,7 @@ export default function EmployeePortal({
       {/* Requests Creator Modal */}
       {requestModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900 bg-opacity-40 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-sm p-6 bg-white rounded-2xl shadow-xl border border-sky-100">
+          <div className="w-full max-w-sm max-h-[90svh] overflow-y-auto p-6 bg-white rounded-2xl shadow-xl border border-sky-100">
             <h3 className="text-sm font-extrabold text-slate-800 mb-4 pb-2 border-b">
               {requestType === 'leave' && 'تقديم طلب إجازة'}
               {requestType === 'shift_change' && 'طلب تغيير شيفت الدوام'}
