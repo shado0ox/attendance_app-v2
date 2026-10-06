@@ -12,13 +12,13 @@ export default defineConfig(() => {
       VitePWA({
         registerType: 'prompt',
         injectRegister: false,
-        includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/app-icon.svg', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png', 'icons/icon.ico', 'icons/icon-16.png', 'icons/icon-32.png', 'brand/logo-light.svg', 'brand/logo-dark.svg', 'brand/logo-mono.svg', 'privacy.html'],
+        includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/app-icon.svg', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png', 'icons/icon.ico', 'icons/icon-16.png', 'icons/icon-32.png', 'brand/logo-light.svg', 'brand/logo-dark.svg', 'brand/logo-mono.svg', 'privacy.html', 'account-deletion.html'],
         workbox: {
           skipWaiting: false,
           importScripts: ['/pwa-upgrade-bridge.js'],
           clientsClaim: true,
           cleanupOutdatedCaches: true,
-          navigateFallbackDenylist: [/^\/api\//, /^\/privacy\.html$/],
+          navigateFallbackDenylist: [/^\/api\//, /^\/privacy\.html$/, /^\/account-deletion\.html$/],
         },
         manifest: {
           name: 'وفر دوام | WAFR Dawam',

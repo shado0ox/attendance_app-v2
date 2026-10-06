@@ -605,7 +605,7 @@ export default function LoginScreen({
         )}
 
         <CompanyRegistration />
-        <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="block mt-4 text-center text-xs underline text-sky-700">سياسة الخصوصية واستخدام الموقع</a>
+        <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="block mt-4 text-center text-xs underline text-sky-700">سياسة الخصوصية واستخدام الموقع</a><a href="/account-deletion.html" target="_blank" rel="noopener noreferrer" className="block mt-2 text-center text-xs underline text-sky-700">طلب حذف الحساب والبيانات</a>
 
         <div className="mt-8 text-[11px] text-center text-slate-400 border-t border-slate-100/10 pt-4 font-sans tracking-wide">
           التصميم والتطوير عن طريق <strong className="text-slate-300 font-extrabold hover:text-sky-400 transition-colors">SHADY NASSEF</strong> &nbsp;•&nbsp; جميع الحقوق محفوظة © 2026
