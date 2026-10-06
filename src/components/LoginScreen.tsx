@@ -269,8 +269,6 @@ export default function LoginScreen({
     }
   };
 
-  const companyName = 'نظام الحضور والدوام';
-  const logoUrl = '';
 
   return (
     <div id="login-screen" className="flex flex-col items-center justify-center min-h-screen px-4 bg-sky-50 bg-opacity-70">
@@ -297,20 +295,8 @@ export default function LoginScreen({
 
         {/* Logo and Brand */}
         <div className="flex flex-col items-center mb-8 text-center">
-          {logoUrl ? (
-            <img
-              src={logoUrl}
-              alt="Logo"
-              className="w-16 h-16 p-1 mb-3 rounded-xl border border-sky-100 object-contain bg-sky-50 shadow-sm"
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            <div className="flex items-center justify-center w-14 h-14 mb-3 text-xl font-extrabold text-white bg-sky-600 rounded-xl shadow-md">
-              {companyName.charAt(0)}
-            </div>
-          )}
-          <h2 className="text-xl font-extrabold text-slate-800">{companyName}</h2>
-          <p className="text-xs text-slate-400 mt-1">نظام إدارة الجداول الزمنية والحضور والانصراف</p>
+<img src="/brand/logo-light.svg" alt="وفر دوام | WAFR Dawam" className="w-full max-w-[280px] h-auto" width="1024" height="224" />
+                    <p className="text-xs text-slate-400 mt-1">حضور منظّم، ووقت محسوب</p>
         </div>
 
         {/* Tab Selection */}

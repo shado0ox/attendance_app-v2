@@ -846,6 +846,7 @@ export default function EmployeePortal({
   return (
     <div id="emp-portal" className="min-h-screen pb-12 bg-sky-50 bg-opacity-40">
       {scheduleChanged && <div className="bg-sky-100 border-b border-sky-200 p-3 text-sm flex flex-wrap justify-center items-center gap-3" dir="rtl"><strong>تم تحديث جدول دوامك أو مواعيد شيفتاتك.</strong><span>راجع الأيام والمواعيد في الجدول أدناه.</span><button onClick={acknowledgeSchedule} className="bg-white border rounded px-3 py-1 text-xs">اطلعت على التحديث</button></div>}
+      <div className="bg-[#102C3A] px-4 py-2 flex justify-center"><img src="/brand/logo-dark.svg" alt="وفر دوام | WAFR Dawam" width="1024" height="224" className="w-40 h-auto" /></div>
       {/* Top Navbar */}
       <header className="sticky top-0 z-50 flex items-center justify-between gap-3 px-3 sm:px-6 py-4 bg-white border-b border-sky-100 shadow-sm">
         <div className="flex items-center gap-3">
