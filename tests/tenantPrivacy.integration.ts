@@ -1,3 +1,4 @@
+import { employeePhotoKey } from '../src/server/employeeSelfService';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import pg from 'pg';
@@ -51,7 +52,7 @@ try {
  assert.equal((await request('/api/admins?companyId='+companyId,owner)).status,403,'old session revoked across APIs');
  assert.equal((await request('/api/auth/admin-login',anonymous,'POST',{username:signup.adminUsername,password:signup.adminPassword})).status,401);
  const fresh:any=await (await request('/api/auth/admin-login',anonymous,'POST',{username:signup.adminUsername,password:'new-private-owner-password'})).json();const freshOwner={...anonymous,Authorization:'Bearer '+fresh.token};assert.equal((await request('/api/main-data?companyId='+companyId,freshOwner)).status,200);
- const privateKeys=[welcomeStateKey(companyId,'private-employee'),emailVerificationKey(companyId,'private-employee'),emailVerificationQuotaKey(companyId),'adminAccess:'+companyId+':'+admin,notificationStateKey(companyId,{role:'admin',id:admin}),notificationStateKey(companyId,{role:'admin'}),notificationStateKey(companyId,{role:'superadmin'}),notificationStateKey(companyId,{role:'admin',username:signup.adminUsername})];
+ const privateKeys=[employeePhotoKey(companyId,'private-employee'),welcomeStateKey(companyId,'private-employee'),emailVerificationKey(companyId,'private-employee'),emailVerificationQuotaKey(companyId),'adminAccess:'+companyId+':'+admin,notificationStateKey(companyId,{role:'admin',id:admin}),notificationStateKey(companyId,{role:'admin'}),notificationStateKey(companyId,{role:'superadmin'}),notificationStateKey(companyId,{role:'admin',username:signup.adminUsername})];
  for(const key of privateKeys)await put(key,{private:'private-content'});
  await pool.query("INSERT INTO shift_app.audit_log(company_id,actor_id,actor_role,action,details) VALUES ($1,'private-employee','employee','private.event',$2)",[companyId,JSON.stringify({private:true})]);
  await pool.query('INSERT INTO shift_app.attendance_months(key,company_id,month,value) VALUES ($1,$2,$3,$4)',[companyId+':2026-10',companyId,'2026-10',JSON.stringify({private:true})]);

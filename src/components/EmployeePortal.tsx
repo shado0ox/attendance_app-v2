@@ -1,3 +1,6 @@
+import EmployeeWeekSchedule from './EmployeeWeekSchedule';
+import EmployeeSelfProfile from './EmployeeSelfProfile';
+import EmployeeAttendanceHistory from './EmployeeAttendanceHistory';
 import EmployeeEmailVerification from './EmployeeEmailVerification';
 import { useAutoPunch } from '../hooks/useAutoPunch';
 import { autoPeriodWindow } from '../lib/autoPunch';
@@ -38,6 +41,7 @@ export default function EmployeePortal({
   onOpenChangePassword,
   companyId
 }: EmployeePortalProps) {
+  const [activeTab,setActiveTab]=useState<'schedule'|'attendance'|'profile'|'settings'|'requests'>('schedule');
   const currentProfile = employees.find(e => String(e.id) === String(employee.id)) || employee;
   const appSettings = useMemo(() => ({ ...companySettings, _attendanceEmployee: currentProfile }), [companySettings, currentProfile]);
   const [scheduleChanged, setScheduleChanged] = useState(false);
@@ -53,6 +57,7 @@ export default function EmployeePortal({
     setScheduleChanged(false);
   };
   const [monthOffset, setMonthOffset] = useState(0);
+  const [showFullMonth,setShowFullMonth]=useState(false);
   const [requests, setRequests] = useState<any[]>([]);
   const [reqsLoading, setReqsLoading] = useState(false);
   const [attendanceStatus, setAttendanceStatus] = useState<string>('checking'); // 'checking' | 'not-checked-in' | 'checked-in' | 'checked-out' | 'error'
@@ -840,12 +845,11 @@ export default function EmployeePortal({
 
   return (
     <div id="emp-portal" className="min-h-screen pb-12 bg-sky-50 bg-opacity-40">
-      <div key={companyId + ':' + employee.id}><EmployeeEmailVerification employee={currentProfile} companyId={companyId} onSaved={onRefreshSchedule} /></div>
       {scheduleChanged && <div className="bg-sky-100 border-b border-sky-200 p-3 text-sm flex flex-wrap justify-center items-center gap-3" dir="rtl"><strong>تم تحديث جدول دوامك أو مواعيد شيفتاتك.</strong><span>راجع الأيام والمواعيد في الجدول أدناه.</span><button onClick={acknowledgeSchedule} className="bg-white border rounded px-3 py-1 text-xs">اطلعت على التحديث</button></div>}
       {/* Top Navbar */}
-      <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bg-white border-b border-sky-100 shadow-sm">
+      <header className="sticky top-0 z-50 flex items-center justify-between gap-3 px-3 sm:px-6 py-4 bg-white border-b border-sky-100 shadow-sm">
         <div className="flex items-center gap-3">
-          {appSettings?.logoDataUrl ? (
+          {currentProfile.photoDataUrl ? (<img src={currentProfile.photoDataUrl} alt="الصورة الشخصية" className="w-11 h-11 rounded-full object-cover border" />) : appSettings?.logoDataUrl ? (
             <img 
               src={appSettings.logoDataUrl} 
               alt="Logo" 
@@ -858,20 +862,12 @@ export default function EmployeePortal({
             </div>
           )}
           <div>
-            <h1 className="font-extrabold text-slate-800 text-sm leading-tight">{employee.name}</h1>
+            <h1 className="font-extrabold text-slate-800 text-sm leading-tight">{currentProfile.displayName || employee.name}</h1>
             <p className="text-[11px] text-slate-400 mt-0.5">{dept ? dept.name : 'بدون قسم'}</p>
           </div>
         </div>
 
         <div className="flex gap-2">
-          <button
-            onClick={onOpenChangePassword}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-sky-100 bg-sky-50 text-sky-600 hover:bg-sky-100 transition-all"
-          >
-            <Key size={13} />
-            <span>كلمة المرور</span>
-          </button>
-          
           <button
             onClick={onLogout}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg text-rose-500 hover:bg-rose-50 transition-all border border-transparent"
@@ -884,6 +880,13 @@ export default function EmployeePortal({
 
       {/* Main Container */}
       <main className="max-w-4xl px-4 py-8 mx-auto flex flex-col gap-6">
+
+        {!currentProfile.email && <EmployeeEmailVerification employee={currentProfile} companyId={companyId} onSaved={onRefreshSchedule}/>}
+        <nav aria-label="تبويبات بوابة الموظف" className="flex gap-2 overflow-x-auto pb-2 shrink-0" dir="rtl">
+          {([['schedule','الرئيسية'],['attendance','كشف البصمة والغياب'],['profile','ملفي الشخصي'],['requests','طلباتي'],['settings','الإعدادات']] as const).map(([id,label])=><button key={id} type="button" aria-pressed={activeTab===id} onClick={()=>setActiveTab(id)} className={'whitespace-nowrap shrink-0 px-4 py-3 rounded-xl text-sm font-bold border '+(activeTab===id?'bg-sky-600 text-white border-sky-600':'bg-white text-slate-600')}>{label}</button>)}
+        </nav>
+        <section hidden={activeTab!=='profile'} style={{display:activeTab==='profile'?'block':'none'}}><div key={String(employee.id)}><EmployeeSelfProfile employee={currentProfile} departmentName={dept?.name || 'بدون قسم'} companyId={companyId} onSaved={onRefreshSchedule} /></div></section>
+        {activeTab==='settings' && <div className="bg-white border p-4 rounded-xl flex flex-wrap gap-3"><button onClick={onOpenChangePassword} className="bg-sky-100 text-sky-800 rounded-lg px-4 py-2 text-sm">تغيير كلمة المرور</button><a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="text-sm underline p-2">سياسة الخصوصية</a>{currentProfile.email && <EmployeeEmailVerification employee={currentProfile} companyId={companyId} onSaved={onRefreshSchedule} />}</div>}
 
         {/* Missed Shift Alert Banner */}
         {missedShiftAlert && (
@@ -913,6 +916,7 @@ export default function EmployeePortal({
           </div>
         )}
 
+        <section hidden={activeTab!=='settings'} style={{display:activeTab==='settings'?'flex':'none'}} className="flex flex-col gap-6">
                 {/* Biometric Enrollment Card */}
         <div className="p-4 bg-white border border-sky-100 rounded-2xl shadow-sm" dir="rtl">
           <div className="flex items-start justify-between gap-3">
@@ -998,154 +1002,8 @@ export default function EmployeePortal({
         </div>
 
         
-        <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-white border border-sky-100 text-xs">
-          <button type="button" disabled={scheduleRefreshing} onClick={() => { void onRefreshSchedule(); }} className="px-3 py-2 rounded-lg bg-sky-100 text-sky-800 font-bold disabled:opacity-50">{scheduleRefreshing ? 'جارٍ تحديث الجدول…' : 'تحديث جدول الدوام'}</button>
-          <span>آخر مزامنة مع السيرفر: {scheduleSyncedAt ? new Date(scheduleSyncedAt).toLocaleString('ar-SA', {timeZone:'Asia/Riyadh',numberingSystem:'latn'}) : 'لم يتم التحقق بعد'}</span>
-          <span className="text-slate-500">يتحدث تلقائياً خلال دقيقة أثناء فتح التطبيق، وعند العودة إليه أو رجوع الإنترنت.</span>
-          {scheduleSyncError && <p role="alert" className="w-full text-amber-800">{scheduleSyncError}</p>}
-        </div>
-        {/* Month Selector */}
-        <div className="flex items-center justify-between px-4 py-3 bg-white border border-sky-100 rounded-2xl shadow-sm">
-          <button
-            onClick={() => setMonthOffset((prev) => prev - 1)}
-            className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-sky-600"
-          >
-            <ChevronRight size={16} />
-            <span>الشهر السابق</span>
-          </button>
-          <span className="text-sm font-extrabold text-slate-800">
-            {MONTHS_AR[showingMonth]} {showingYear}
-          </span>
-          <button
-            onClick={() => setMonthOffset((prev) => prev + 1)}
-            className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-sky-600"
-          >
-            <span>الشهر التالي</span>
-            <ChevronLeft size={16} />
-          </button>
-        </div>
-
-        {/* Roster Calendar */}
-        <div className="overflow-hidden bg-white border border-sky-100 rounded-2xl shadow-sm w-full mx-auto max-w-full">
-          <table className="w-full border-collapse table-fixed select-none">
-            <thead>
-              <tr className="bg-sky-50">
-                {DAYS_AR.map((day, dIdx) => (
-                  <th
-                    key={day}
-                    className={`py-3 text-center text-[11px] sm:text-xs font-bold border-b border-sky-100 ${
-                      dIdx === 6 ? 'bg-rose-50/50 text-rose-600 font-extrabold' : 'text-slate-600'
-                    }`}
-                  >
-                    {day}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: Math.ceil(calendarCells.length / 7) }).map((_, rIdx) => (
-                <tr key={rIdx} className="hover:bg-slate-50/50 transition-all">
-                  {calendarCells.slice(rIdx * 7, (rIdx + 1) * 7).map((cell, cIdx) => {
-                    if (cell === null) {
-                      return (
-                        <td
-                          key={cIdx}
-                          className="p-1 border border-sky-100 bg-slate-50/10 h-[68px] sm:h-[84px] md:h-[96px] transition-all"
-                        ></td>
-                      );
-                    }
-
-                    const dateStr = `${showingYear}-${String(showingMonth + 1).padStart(2, '0')}-${String(cell).padStart(2, '0')}`;
-                    const isToday = dateStr === getTodayStr();
-
-                    // Read shift configuration
-                    const assigned = scheduleData[dateStr]?.[employee.id];
-                    const stType = assigned?.shiftType || 'A';
-
-                    let cellBg = 'bg-white';
-                    let label = assigned?.shiftType ? 'إجازة / راحة' : 'غير مجدول';
-                    let labelColor = 'text-slate-400';
-
-                    const matchingShift = (shiftTypes || []).find((s: any) => s.id === stType);
-                    if (matchingShift) {
-                      label = matchingShift.name;
-                      if (matchingShift.type === 'double') {
-                        cellBg = 'bg-indigo-50/55 bg-opacity-80';
-                        labelColor = 'text-indigo-700';
-                      } else if (matchingShift.type === 'evening') {
-                        cellBg = 'bg-amber-50/55 bg-opacity-80';
-                        labelColor = 'text-amber-700';
-                      } else {
-                        cellBg = 'bg-emerald-50/55 bg-opacity-80';
-                        labelColor = 'text-emerald-700';
-                      }
-                    } else if (stType === 'S') {
-                      cellBg = 'bg-emerald-50 bg-opacity-70';
-                      label = 'صباحي';
-                      labelColor = 'text-emerald-700';
-                    } else if (stType === 'E') {
-                      cellBg = 'bg-amber-50 bg-opacity-70';
-                      label = 'مسائي';
-                      labelColor = 'text-amber-700';
-                    }
-
-                    if (cIdx === 6 && stType === 'A') { // Friday column override if no active shift is assigned
-                      cellBg = 'bg-rose-50/30';
-                      label = 'إجازة جمعة';
-                      labelColor = 'text-rose-500';
-                    }
-
-                    return (
-                      <td
-                        key={cIdx}
-                        className={`p-1 border border-sky-100 text-center align-middle relative transition-all h-[68px] sm:h-[84px] md:h-[96px] ${cellBg} ${
-                          isToday ? 'outline-2 outline-amber-500 shadow-md ring-2 ring-amber-100 z-10' : ''
-                        }`}
-                        title={assigned?.note ? `ملاحظة: ${assigned.note}` : ''}
-                      >
-                        <div className="flex flex-col justify-between h-full w-full overflow-hidden select-none">
-                          {/* Top row: day number */}
-                          <div className={`font-bold text-[11px] sm:text-xs ${isToday ? 'text-amber-600 font-black scale-105' : 'text-slate-700'}`}>
-                            {cell}
-                            {isToday && <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full mr-1 animate-pulse"></span>}
-                          </div>
-
-                          {/* Middle row: Shift type label */}
-                          <div className={`text-[9px] sm:text-[10px] font-extrabold truncate ${labelColor} leading-tight`}>
-                            {label}
-                          </div>
-
-                          {/* Bottom row: hours or notes */}
-                          <div className="min-h-[14px] flex items-center justify-center overflow-hidden">
-                            {matchingShift ? (
-                              <div className="text-[7px] sm:text-[8px] text-slate-500 font-mono scale-95 sm:scale-100 origin-center whitespace-nowrap opacity-90 leading-none">
-                                {matchingShift.type === 'double' ? (
-                                  <div className="flex flex-col text-[7px] leading-none">
-                                    <span className="text-amber-600">🌅 {matchingShift.start}</span>
-                                    <span className="text-indigo-600">🌙 {matchingShift.start2 || '17:00'}</span>
-                                  </div>
-                                ) : (
-                                  <span>{matchingShift.start}</span>
-                                )}
-                              </div>
-                            ) : assigned?.note ? (
-                              <div className="text-[7px] sm:text-[8px] text-slate-400 truncate bg-slate-100 px-0.5 py-0.5 rounded leading-none w-full text-center" title={assigned.note}>
-                                ✏️ {assigned.note}
-                              </div>
-                            ) : (
-                              <span className="text-[8px] text-slate-300">-</span>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
+        </section>
+        <section hidden={activeTab!=='schedule'} style={{display:activeTab==='schedule'?'flex':'none'}} className="flex flex-col gap-6">
         {/* Punch Clock Module */}
         <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
           <div className="flex items-center gap-2 font-bold text-slate-800 text-sm pb-3 border-b border-sky-50">
@@ -1303,6 +1161,163 @@ export default function EmployeePortal({
           )}
         </div>
 
+        <EmployeeWeekSchedule employeeId={String(employee.id)} schedule={scheduleData} shiftTypes={shiftTypes} />
+        <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-white border border-sky-100 text-xs">
+          <button type="button" disabled={scheduleRefreshing} onClick={() => { void onRefreshSchedule(); }} className="px-3 py-2 rounded-lg bg-sky-100 text-sky-800 font-bold disabled:opacity-50">{scheduleRefreshing ? 'جارٍ تحديث الجدول…' : 'تحديث جدول الدوام'}</button>
+          <span>آخر مزامنة مع السيرفر: {scheduleSyncedAt ? new Date(scheduleSyncedAt).toLocaleString('ar-SA', {timeZone:'Asia/Riyadh',numberingSystem:'latn'}) : 'لم يتم التحقق بعد'}</span>
+          <span className="text-slate-500">يتحدث تلقائياً خلال دقيقة أثناء فتح التطبيق، وعند العودة إليه أو رجوع الإنترنت.</span>
+          {scheduleSyncError && <p role="alert" className="w-full text-amber-800">{scheduleSyncError}</p>}
+        </div>
+        <button type="button" aria-expanded={showFullMonth} onClick={()=>setShowFullMonth(!showFullMonth)} className="bg-white border rounded-xl p-3 text-sm text-sky-800">{showFullMonth?'إخفاء الجدول الشهري':'عرض جدول الشهر كاملًا'}</button>
+        <div hidden={!showFullMonth} style={{display:showFullMonth?'block':'none'}} className="space-y-6">
+        {/* Month Selector */}
+        <div className="flex items-center justify-between px-4 py-3 bg-white border border-sky-100 rounded-2xl shadow-sm">
+          <button
+            onClick={() => setMonthOffset((prev) => prev - 1)}
+            className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-sky-600"
+          >
+            <ChevronRight size={16} />
+            <span>الشهر السابق</span>
+          </button>
+          <span className="text-sm font-extrabold text-slate-800">
+            {MONTHS_AR[showingMonth]} {showingYear}
+          </span>
+          <button
+            onClick={() => setMonthOffset((prev) => prev + 1)}
+            className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-sky-600"
+          >
+            <span>الشهر التالي</span>
+            <ChevronLeft size={16} />
+          </button>
+        </div>
+
+        {/* Roster Calendar */}
+        <div className="overflow-hidden bg-white border border-sky-100 rounded-2xl shadow-sm w-full mx-auto max-w-full">
+          <table className="w-full border-collapse table-fixed select-none">
+            <thead>
+              <tr className="bg-sky-50">
+                {DAYS_AR.map((day, dIdx) => (
+                  <th
+                    key={day}
+                    className={`py-3 text-center text-[11px] sm:text-xs font-bold border-b border-sky-100 ${
+                      dIdx === 6 ? 'bg-rose-50/50 text-rose-600 font-extrabold' : 'text-slate-600'
+                    }`}
+                  >
+                    {day}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: Math.ceil(calendarCells.length / 7) }).map((_, rIdx) => (
+                <tr key={rIdx} className="hover:bg-slate-50/50 transition-all">
+                  {calendarCells.slice(rIdx * 7, (rIdx + 1) * 7).map((cell, cIdx) => {
+                    if (cell === null) {
+                      return (
+                        <td
+                          key={cIdx}
+                          className="p-1 border border-sky-100 bg-slate-50/10 h-[68px] sm:h-[84px] md:h-[96px] transition-all"
+                        ></td>
+                      );
+                    }
+
+                    const dateStr = `${showingYear}-${String(showingMonth + 1).padStart(2, '0')}-${String(cell).padStart(2, '0')}`;
+                    const isToday = dateStr === getTodayStr();
+
+                    // Read shift configuration
+                    const assigned = scheduleData[dateStr]?.[employee.id];
+                    const stType = assigned?.shiftType || 'A';
+
+                    let cellBg = 'bg-white';
+                    let label = assigned?.shiftType ? 'إجازة / راحة' : 'غير مجدول';
+                    let labelColor = 'text-slate-400';
+
+                    const matchingShift = (shiftTypes || []).find((s: any) => s.id === stType);
+                    if (matchingShift) {
+                      label = matchingShift.name;
+                      if (matchingShift.type === 'double') {
+                        cellBg = 'bg-indigo-50/55 bg-opacity-80';
+                        labelColor = 'text-indigo-700';
+                      } else if (matchingShift.type === 'evening') {
+                        cellBg = 'bg-amber-50/55 bg-opacity-80';
+                        labelColor = 'text-amber-700';
+                      } else {
+                        cellBg = 'bg-emerald-50/55 bg-opacity-80';
+                        labelColor = 'text-emerald-700';
+                      }
+                    } else if (stType === 'S') {
+                      cellBg = 'bg-emerald-50 bg-opacity-70';
+                      label = 'صباحي';
+                      labelColor = 'text-emerald-700';
+                    } else if (stType === 'E') {
+                      cellBg = 'bg-amber-50 bg-opacity-70';
+                      label = 'مسائي';
+                      labelColor = 'text-amber-700';
+                    }
+
+                    if (cIdx === 6 && stType === 'A') { // Friday column override if no active shift is assigned
+                      cellBg = 'bg-rose-50/30';
+                      label = 'إجازة جمعة';
+                      labelColor = 'text-rose-500';
+                    }
+
+                    return (
+                      <td
+                        key={cIdx}
+                        className={`p-1 border border-sky-100 text-center align-middle relative transition-all h-[68px] sm:h-[84px] md:h-[96px] ${cellBg} ${
+                          isToday ? 'outline-2 outline-amber-500 shadow-md ring-2 ring-amber-100 z-10' : ''
+                        }`}
+                        title={assigned?.note ? `ملاحظة: ${assigned.note}` : ''}
+                      >
+                        <div className="flex flex-col justify-between h-full w-full overflow-hidden select-none">
+                          {/* Top row: day number */}
+                          <div className={`font-bold text-[11px] sm:text-xs ${isToday ? 'text-amber-600 font-black scale-105' : 'text-slate-700'}`}>
+                            {cell}
+                            {isToday && <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full mr-1 animate-pulse"></span>}
+                          </div>
+
+                          {/* Middle row: Shift type label */}
+                          <div className={`text-[9px] sm:text-[10px] font-extrabold truncate ${labelColor} leading-tight`}>
+                            {label}
+                          </div>
+
+                          {/* Bottom row: hours or notes */}
+                          <div className="min-h-[14px] flex items-center justify-center overflow-hidden">
+                            {matchingShift ? (
+                              <div className="text-[7px] sm:text-[8px] text-slate-500 font-mono scale-95 sm:scale-100 origin-center whitespace-nowrap opacity-90 leading-none">
+                                {matchingShift.type === 'double' ? (
+                                  <div className="flex flex-col text-[7px] leading-none">
+                                    <span className="text-amber-600">🌅 {matchingShift.start}</span>
+                                    <span className="text-indigo-600">🌙 {matchingShift.start2 || '17:00'}</span>
+                                  </div>
+                                ) : (
+                                  <span>{matchingShift.start}</span>
+                                )}
+                              </div>
+                            ) : assigned?.note ? (
+                              <div className="text-[7px] sm:text-[8px] text-slate-400 truncate bg-slate-100 px-0.5 py-0.5 rounded leading-none w-full text-center" title={assigned.note}>
+                                ✏️ {assigned.note}
+                              </div>
+                            ) : (
+                              <span className="text-[8px] text-slate-300">-</span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        </div>
+        </section>
+        <section hidden={activeTab!=='attendance'} style={{display:activeTab==='attendance'?'flex':'none'}} className="flex flex-col gap-6">
+        {activeTab==='attendance' && <><EmployeeAttendanceHistory companyId={companyId} refreshKey={JSON.stringify([todayRecord?.id,todayRecord?.checkIn,todayRecord?.checkOut,todayRecord?.checkIn2,todayRecord?.checkOut2])} /><button className="p-3 bg-white border rounded-xl text-sm text-sky-700" onClick={()=>setActiveTab('requests')}>طلب تصحيح بصمة أو مراجعة الغياب</button></>}
+        </section>
+        <section hidden={activeTab!=='settings'} style={{display:activeTab==='settings'?'flex':'none'}} className="flex flex-col gap-6">
         {/* Automatic Geofencing Punch Card */}
         <div className="p-6 bg-gradient-to-br from-slate-900 to-indigo-950 border border-indigo-900 rounded-2xl shadow-xl text-white flex flex-col gap-5 relative overflow-hidden">
           {/* Subtle decorative lights */}
@@ -1479,6 +1494,8 @@ export default function EmployeePortal({
         </div>
 
         {/* Requests Management Buttons */}
+        </section>
+        <section hidden={activeTab!=='requests'} style={{display:activeTab==='requests'?'flex':'none'}} className="flex flex-col gap-6">
         <div className="flex gap-2.5 flex-wrap">
           <button
             onClick={() => { setRequestType('leave'); setRequestModalOpen(true); }}
@@ -1563,6 +1580,7 @@ export default function EmployeePortal({
             </div>
           )}
         </div>
+        </section>
       </main>
 
       {/* Design and Development Footer credit */}
@@ -1573,7 +1591,7 @@ export default function EmployeePortal({
       {/* Requests Creator Modal */}
       {requestModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900 bg-opacity-40 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-sm p-6 bg-white rounded-2xl shadow-xl border border-sky-100">
+          <div className="w-full max-w-sm max-h-[90svh] overflow-y-auto p-6 bg-white rounded-2xl shadow-xl border border-sky-100">
             <h3 className="text-sm font-extrabold text-slate-800 mb-4 pb-2 border-b">
               {requestType === 'leave' && 'تقديم طلب إجازة'}
               {requestType === 'shift_change' && 'طلب تغيير شيفت الدوام'}

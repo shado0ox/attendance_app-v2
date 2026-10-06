@@ -1,3 +1,4 @@
+import { selfProfile, selfProfileUpdate, privateAttendanceDay, employeePhotoKey } from './src/server/employeeSelfService';
 import { businessCompany, canReadCompany, subscriptionMetadata, subscriptionUpdate } from './src/server/tenantPrivacy';
 import { identityValue, employeeIdentities, adminIdentity, masterIdentity, identityLock, allIdentities, assertUnique, resolveIdentity, migrateCompanyCodes, nextCompanyCode } from './src/server/companyIdentity';
 import { backupHealth, buildInfo, mailHealthRows, readHealthFile, recordOperationalError, welcomeStateKey } from './src/server/systemHealth';
@@ -854,10 +855,12 @@ app.get('/api/main-data', async (req, res) => {
   }
   let access = fullAdminAccess();
   if (auth?.role === 'admin') { try { await validateOwnerSession(auth); access = await resolveAdminAccess(auth); } catch { return res.status(403).json({ error: 'حساب المسؤول غير متاح' }); } }
-  const visibleMainData = (value: any) => {
+  const visibleMainData = async (value: any) => {
     if (!auth) return { departments: [], employees: [], shiftTypes: [], schedule: {}, settings: { companyName: 'نظام الدوام' } };
     if (auth.role !== 'employee') return { ...scopedMainData(sanitizeMainData(value, true), access), _adminAccess: access };
-    return employeeMainData(value, auth);
+    const result=employeeMainData(value, auth);
+    const photos=await db.select().from(schema.systemData).where(eq(schema.systemData.key,employeePhotoKey(companyId,String(auth.id)))).limit(1);
+    return {...result,employees:result.employees.map((e:any)=>String(e.id)===String(auth.id)?{...e,photoDataUrl:(photos[0]?.value as any)?.dataUrl || ''}:e)};
   };
   const canSeeSecrets = !!auth && (auth.role === 'superadmin' || (auth.role === 'admin' && auth.companyId === companyId));
 
@@ -866,7 +869,7 @@ app.get('/api/main-data', async (req, res) => {
     
     if (auth?.role === 'employee' && !isActiveEmployee((result[0]?.value as any)?.employees?.find((e: any) => String(e.id) === String(auth.id)))) return res.status(403).json({ error: 'حساب الموظف غير نشط. تواصل مع الإدارة.', code: 'EMPLOYEE_INACTIVE' });
     if (result.length === 0) {
-      if (!auth) return res.json(visibleMainData(defaultMainData));
+      if (!auth) return res.json(await visibleMainData(defaultMainData));
       // Seed initial data directly into PostgreSQL database
       let initialVal = defaultMainData;
       if (companyId !== 'default') {
@@ -881,10 +884,10 @@ app.get('/api/main-data', async (req, res) => {
         value: initialVal,
       }).returning();
       
-      return res.json(visibleMainData({ ...(inserted[0].value as any), _version: mainDataVersion(inserted[0].value) }));
+      return res.json(await visibleMainData({ ...(inserted[0].value as any), _version: mainDataVersion(inserted[0].value) }));
     }
     
-    return res.json(visibleMainData({ ...(result[0].value as any), _version: mainDataVersion(result[0].value) }));
+    return res.json(await visibleMainData({ ...(result[0].value as any), _version: mainDataVersion(result[0].value) }));
   } catch (error: any) {
     console.error('Error fetching main-data from PostgreSQL:', error);
     return res.status(500).json({
@@ -1010,6 +1013,54 @@ app.post('/api/schedule-publication', requireAuth(['admin', 'superadmin']), asyn
 });
 
 // Narrow employee profile update: token identity only, locked row preserves admin changes.
+// Employee self-service never accepts a target employee ID from the client.
+app.get('/api/employee-profile',requireAuth(['employee']),async(req,res)=>{
+  const auth=(req as any).auth as AuthTokenPayload;
+  try{const data=await getMainDataByCompanyId(auth.companyId);const employee=data?.employees?.find((e:any)=>String(e.id)===String(auth.id));if(!employee)return res.status(404).json({error:'الحساب غير موجود'});const photos=await db.select().from(schema.systemData).where(eq(schema.systemData.key,employeePhotoKey(auth.companyId,String(auth.id)))).limit(1);return res.json(selfProfile({...employee,photoDataUrl:(photos[0]?.value as any)?.dataUrl || ''},data.departments));}
+  catch{return res.status(503).json({error:'تعذر تحميل الملف الشخصي'});}
+});
+app.patch('/api/employee-profile',requireAuth(['employee']),async(req,res)=>{
+  const auth=(req as any).auth as AuthTokenPayload;
+  try{
+    const update=selfProfileUpdate(req.body);
+    const {photoDataUrl,...fields}=update;
+    const profile=await db.transaction(async tx=>{
+      await identityLock(tx);const key=getMainDataKey(auth.companyId);
+      const [row]=await tx.select().from(schema.systemData).where(eq(schema.systemData.key,key)).for('update');const data:any=row?.value;
+      const current=data?.employees?.find((e:any)=>String(e.id)===String(auth.id));if(!isActiveEmployee(current))throw attendanceError(403,'الحساب غير نشط');
+      const photoKey=employeePhotoKey(auth.companyId,String(auth.id));
+      const photos=await tx.select().from(schema.systemData).where(eq(schema.systemData.key,photoKey)).limit(1);
+      const previousPhoto=(photos[0]?.value as any)?.dataUrl || '';
+      const photoChanged=photoDataUrl!==undefined && photoDataUrl!==previousPhoto;
+      const employee=preserveEmailVerification([current],[{...current,...fields,...(photoChanged?{photoUpdatedAt:new Date().toISOString()}:{})}])[0];
+      await assertUnique(tx,employeeIdentities(auth.companyId,[employee]),employeeIdentities(auth.companyId,[current]));
+      if(photoChanged){
+        if(photoDataUrl==='')await tx.delete(schema.systemData).where(eq(schema.systemData.key,photoKey));
+        else await tx.insert(schema.systemData).values({key:photoKey,value:{dataUrl:photoDataUrl}}).onConflictDoUpdate({target:schema.systemData.key,set:{value:{dataUrl:photoDataUrl},updatedAt:new Date()}});
+      }
+      if(photoChanged || Object.keys(fields).some(key=>current[key]!==employee[key])){
+        await tx.update(schema.systemData).set({value:{...data,employees:data.employees.map((e:any)=>String(e.id)===String(auth.id)?employee:e)},updatedAt:new Date()}).where(eq(schema.systemData.key,key));
+        await audit(tx,auth,auth.companyId,'employee.self-profile',auth.id,{fields:Object.keys(update),photoChanged});
+      }
+      return selfProfile({...employee,photoDataUrl:photoDataUrl===undefined?previousPhoto:photoDataUrl},data.departments);
+    });return res.json(profile);
+  }catch(error:any){return res.status(error.status || 503).json({error:error.status?error.message:'تعذر حفظ الملف الشخصي'});}
+});
+app.get('/api/employee-attendance',requireAuth(['employee']),async(req,res)=>{
+  const auth=(req as any).auth as AuthTokenPayload;const month=req.query.month || riyadhMonth();
+  if(!validMonth(month))return res.status(400).json({error:'حدد شهرًا صحيحًا'});
+  const from=String(month)+'-01',last=new Date(Date.UTC(Number(String(month).slice(0,4)),Number(String(month).slice(5,7)),0)).getUTCDate(),to=String(month)+'-'+last;
+  try{
+    const data=await getMainDataByCompanyId(auth.companyId);const employee=data?.employees?.find((e:any)=>String(e.id)===String(auth.id));
+    if(!employee)return res.status(404).json({error:'الحساب غير موجود'});
+    const records=await db.select().from(schema.attendance).where(and(eq(schema.attendance.companyId,auth.companyId),eq(schema.attendance.empId,String(auth.id)),sql`${schema.attendance.date} >= ${from}`,sql`${schema.attendance.date} <= ${to}`));
+    const leaves=await db.select().from(schema.requests).where(and(eq(schema.requests.companyId,auth.companyId),eq(schema.requests.empId,String(auth.id)),eq(schema.requests.type,'leave'),eq(schema.requests.status,'approved'),sql`${schema.requests.date} >= ${from}`,sql`${schema.requests.date} <= ${to}`));
+    const published=effectiveScheduleData(data);
+    const days=analyzeAttendance(buildAttendanceDays(records,data.settings),{...published,employees:[employee]},{from,to,empId:String(auth.id),dept:''},leaves).map(privateAttendanceDay).sort((a,b)=>b.date.localeCompare(a.date));
+    return res.json({month,generatedAt:new Date().toISOString(),items:days,totalMinutes:days.reduce((sum,d)=>sum+(d.minutes || 0),0),absentDays:days.filter(d=>d.absent).length,lateDays:days.filter(d=>d.lateMinutes>0).length,reviewDays:days.filter(d=>d.needsReview).length});
+  }catch{return res.status(503).json({error:'تعذر تحميل البصمات والغياب'});}
+});
+
 app.patch('/api/employee-profile/email', requireAuth(['employee']), async (req, res) => {
   const auth = (req as any).auth as AuthTokenPayload;
   const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
@@ -1958,7 +2009,7 @@ app.delete('/api/companies/:id', requireAuth(['superadmin'], false), async (req,
       const data=await tx.select().from(schema.systemData).where(eq(schema.systemData.key,'mainData_'+id));
       const admins=await tx.select({id:schema.admins.id,username:schema.admins.username}).from(schema.admins).where(eq(schema.admins.companyId,id));
       const keys=['mainData_'+id,'companyPrivacy:'+id,'ownerPasswordRevision:'+id,emailVerificationQuotaKey(id),notificationStateKey(id,{role:'admin'}),notificationStateKey(id,{role:'admin',username:companies[0].adminUsername || undefined})];
-      for(const employee of (data[0]?.value as any)?.employees || []) keys.push(welcomeStateKey(id,String(employee.id)),emailVerificationKey(id,String(employee.id)));
+      for(const employee of (data[0]?.value as any)?.employees || []) keys.push(welcomeStateKey(id,String(employee.id)),emailVerificationKey(id,String(employee.id)),employeePhotoKey(id,String(employee.id)));
       for(const admin of admins) keys.push(adminAccessKey(id,admin.id),notificationStateKey(id,{role:'admin',id:admin.id}));
       for(const role of ['superadmin','admin']) for(const username of [undefined, 'admin']) keys.push(notificationStateKey(id,{role,username}));
       for(const table of [schema.attendance,schema.requests,schema.registrationRequests,schema.auditLog,schema.attendanceMonths,schema.admins]) await tx.delete(table).where(eq(table.companyId,id));
