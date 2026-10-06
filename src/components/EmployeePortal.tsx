@@ -844,12 +844,12 @@ export default function EmployeePortal({
   const scheduleData = schedule;
 
   return (
-    <div id="emp-portal" className="min-h-screen pb-12 bg-sky-50 bg-opacity-40">
+    <div id="emp-portal" className="wafr-employee min-h-screen pb-12 bg-sky-50 bg-opacity-40">
       {scheduleChanged && <div className="bg-sky-100 border-b border-sky-200 p-3 text-sm flex flex-wrap justify-center items-center gap-3" dir="rtl"><strong>تم تحديث جدول دوامك أو مواعيد شيفتاتك.</strong><span>راجع الأيام والمواعيد في الجدول أدناه.</span><button onClick={acknowledgeSchedule} className="bg-white border rounded px-3 py-1 text-xs">اطلعت على التحديث</button></div>}
       <div className="bg-[#102C3A] px-4 py-2 flex justify-center"><img src="/brand/logo-dark.svg" alt="وفر دوام | WAFR Dawam" width="1024" height="224" className="w-40 h-auto" /></div>
       {/* Top Navbar */}
-      <header className="sticky top-0 z-50 flex items-center justify-between gap-3 px-3 sm:px-6 py-4 bg-white border-b border-sky-100 shadow-sm">
-        <div className="flex items-center gap-3">
+      <header className="wafr-employee-header sticky top-0 z-30 flex items-center justify-between gap-3 px-3 sm:px-6 py-4 bg-white border-b border-sky-100">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
           {currentProfile.photoDataUrl ? (<img src={currentProfile.photoDataUrl} alt="الصورة الشخصية" className="w-11 h-11 rounded-full object-cover border" />) : appSettings?.logoDataUrl ? (
             <img 
               src={appSettings.logoDataUrl} 
@@ -863,7 +863,7 @@ export default function EmployeePortal({
             </div>
           )}
           <div>
-            <h1 className="font-extrabold text-slate-800 text-sm leading-tight">{currentProfile.displayName || employee.name}</h1>
+            <h1 className="font-extrabold text-slate-800 text-base leading-relaxed break-words">{currentProfile.displayName || employee.name}</h1>
             <p className="text-[11px] text-slate-400 mt-0.5">{dept ? dept.name : 'بدون قسم'}</p>
           </div>
         </div>
@@ -883,7 +883,7 @@ export default function EmployeePortal({
       <main className="max-w-4xl px-4 py-8 mx-auto flex flex-col gap-6">
 
         {!currentProfile.email && <EmployeeEmailVerification employee={currentProfile} companyId={companyId} onSaved={onRefreshSchedule}/>}
-        <nav aria-label="تبويبات بوابة الموظف" className="flex gap-2 overflow-x-auto pb-2 shrink-0" dir="rtl">
+        <nav aria-label="تبويبات بوابة الموظف" className="wafr-employee-tabs flex gap-2 overflow-x-auto pb-2 shrink-0" dir="rtl">
           {([['schedule','الرئيسية'],['attendance','كشف البصمة والغياب'],['profile','ملفي الشخصي'],['requests','طلباتي'],['settings','الإعدادات']] as const).map(([id,label])=><button key={id} type="button" aria-pressed={activeTab===id} onClick={()=>setActiveTab(id)} className={'whitespace-nowrap shrink-0 px-4 py-3 rounded-xl text-sm font-bold border '+(activeTab===id?'bg-sky-600 text-white border-sky-600':'bg-white text-slate-600')}>{label}</button>)}
         </nav>
         <section hidden={activeTab!=='profile'} style={{display:activeTab==='profile'?'block':'none'}}><div key={String(employee.id)}><EmployeeSelfProfile employee={currentProfile} departmentName={dept?.name || 'بدون قسم'} companyId={companyId} onSaved={onRefreshSchedule} /></div></section>
@@ -891,7 +891,7 @@ export default function EmployeePortal({
 
         {/* Missed Shift Alert Banner */}
         {missedShiftAlert && (
-          <div className="p-4 bg-rose-50 border-2 border-rose-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-md animate-bounce z-20">
+          <div className="p-4 bg-rose-50 border-2 border-rose-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm z-20">
             <div className="flex gap-3">
               <span className="p-2.5 bg-rose-100 text-rose-600 rounded-xl h-fit">
                 <AlertCircle size={20} className="animate-pulse" />
@@ -1006,7 +1006,7 @@ export default function EmployeePortal({
         </section>
         <section hidden={activeTab!=='schedule'} style={{display:activeTab==='schedule'?'flex':'none'}} className="flex flex-col gap-6">
         {/* Punch Clock Module */}
-        <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
+        <div className="wafr-punch p-6 bg-white border border-sky-100 rounded-2xl flex flex-col gap-4">
           <div className="flex items-center gap-2 font-bold text-slate-800 text-sm pb-3 border-b border-sky-50">
             <Clock size={16} className="text-sky-500" />
             <span>تسجيل حضور وانصراف اليوم</span>
@@ -1025,7 +1025,7 @@ export default function EmployeePortal({
                 <AlertCircle size={15} className="mt-0.5" />
                 <div>
                   <span className="font-extrabold text-sm block mb-1">لم يتم تسجيل حضورك بعد</span>
-                  يرجى تسليم إحداثيات الموقع (GPS) عند الكبس على تسجيل إذا كان النطاق مطبقاً.
+                  اسمح بالوصول إلى موقعك عند تسجيل الحضور إذا كانت شركتك تشترط التحقق من الموقع.
                 </div>
               </div>
               <div className="flex gap-3 flex-wrap">
@@ -1034,7 +1034,7 @@ export default function EmployeePortal({
                   disabled={actionLoading}
                   className="flex items-center gap-2 px-6 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold shadow-md transition-all text-xs disabled:opacity-75"
                 >
-                  {actionLoading ? <Loader size={14} className="animate-spin" /> : <span>📍 تسجيل حضور</span>}
+                  {actionLoading ? <Loader size={14} className="animate-spin" /> : <><Fingerprint size={18} aria-hidden="true" /><span>تسجيل حضور</span></>}
                 </button>
                 <button
                   onClick={loadAttendanceStatus}
@@ -1062,7 +1062,7 @@ export default function EmployeePortal({
                   disabled={actionLoading}
                   className="flex items-center gap-2 px-6 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold shadow-md transition-all text-xs disabled:opacity-75"
                 >
-                  {actionLoading ? <Loader size={14} className="animate-spin" /> : <span>📍 تسجيل حضور الفترة الثانية</span>}
+                  {actionLoading ? <Loader size={14} className="animate-spin" /> : <><Fingerprint size={18} aria-hidden="true" /><span>تسجيل حضور الفترة الثانية</span></>}
                 </button>
                 <button
                   onClick={loadAttendanceStatus}
@@ -1090,7 +1090,7 @@ export default function EmployeePortal({
                   disabled={actionLoading}
                   className="flex items-center gap-2 px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold shadow-md transition-all text-xs disabled:opacity-75"
                 >
-                  {actionLoading ? <Loader size={14} className="animate-spin" /> : <span>👋 تسجيل انصراف</span>}
+                  {actionLoading ? <Loader size={14} className="animate-spin" /> : <><LogOut size={18} aria-hidden="true" /><span>تسجيل انصراف</span></>}
                 </button>
                 <button
                   onClick={loadAttendanceStatus}
