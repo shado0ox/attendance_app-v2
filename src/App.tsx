@@ -785,20 +785,9 @@ export default function App() {
       {showInstallBanner && (
         <div className="fixed bottom-4 left-4 right-4 z-[999] p-4 bg-white border border-sky-100 rounded-2xl shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-fade-in text-right max-w-lg mx-auto" dir="rtl">
           <div className="flex gap-3 items-center">
-            {appSettings?.logoDataUrl ? (
-              <img 
-                src={appSettings.logoDataUrl} 
-                alt="Logo" 
-                className="w-12 h-12 object-contain rounded-xl bg-slate-50 p-1 border shadow-xs flex-shrink-0"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <div className="w-12 h-12 rounded-xl bg-sky-600/10 flex items-center justify-center text-sky-600 text-lg flex-shrink-0">
-                <Smartphone size={24} />
-              </div>
-            )}
+            <img src="/icons/icon-192.png" alt="أيقونة وفر دوام" width="48" height="48" className="w-12 h-12 rounded-xl flex-shrink-0" />
             <div>
-              <h4 className="text-xs font-bold text-slate-800">تثبيت تطبيق {appSettings?.companyName || 'نظام الدوام'}</h4>
+              <h4 className="text-xs font-bold text-slate-800">تثبيت تطبيق وفر دوام</h4>
               <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
                 تصفح أسرع، استهلاك أقل للبيانات، ووصول مباشر لجدولك والدخول للشاشة الرئيسية!
               </p>

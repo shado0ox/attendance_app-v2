@@ -1,28 +1,19 @@
 @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800;900&display=swap');
 @import "tailwindcss";
 
-/*
-  Brand refresh â€” Nov 2026
-  --------------------------------------------------------------------------
-  The app was built entirely with Tailwind's default `sky` (primary) and
-  `slate` (neutral) palettes. Rather than touching every `bg-sky-*` /
-  `text-sky-*` class across hundreds of components, we re-point those two
-  palettes at a custom deep-teal brand identity here. This re-skins the
-  entire app (Login, Admin, Employee) from one place, safely, with zero
-  risk of missing a spot or breaking a component's logic.
-*/
+/* WAFR Dawam: existing primary utilities share one accessible brand palette. */
 @theme {
   --font-tajawal: "Tajawal", sans-serif;
 
-  /* Primary brand color â€” deep teal instead of generic Tailwind sky-blue */
-  --color-sky-50: #f0fdfa;
+  /* Teal for primary actions; navy for product identity. */
+  --color-sky-50: #F4F8F7;
   --color-sky-100: #ccfbf1;
   --color-sky-200: #99f6e4;
   --color-sky-300: #5eead4;
   --color-sky-400: #2dd4bf;
-  --color-sky-500: #14b8a6;
-  --color-sky-600: #0d9488;
-  --color-sky-700: #0f766e;
+  --color-sky-500: #16B8A6;
+  --color-sky-600: #087F73;
+  --color-sky-700: #076B62;
   --color-sky-800: #115e59;
   --color-sky-900: #134e4a;
   --color-sky-950: #042f2e;

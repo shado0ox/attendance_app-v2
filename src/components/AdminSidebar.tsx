@@ -85,13 +85,14 @@ export default function AdminSidebar({
       )}
 
       <aside
-        className={`fixed top-0 bottom-0 right-0 z-50 flex flex-col w-64 bg-gradient-to-b from-sky-900 via-sky-800 to-sky-900 text-white border-l border-sky-950/40 shadow-2xl transition-all md:sticky md:top-0 md:h-screen md:translate-x-0 flex-shrink-0 ${
+        className={`fixed top-0 bottom-0 right-0 z-50 flex flex-col w-64 bg-gradient-to-b from-[#102C3A] via-[#163A49] to-[#102C3A] text-white border-l border-sky-950/40 shadow-2xl transition-all md:sticky md:top-0 md:h-screen md:translate-x-0 flex-shrink-0 ${
           sidebarOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'
         }`}
       >
-        {/* Slim gold identity strip along the top edge */}
-        <div className="h-1 bg-gradient-to-l from-amber-400 via-amber-300 to-sky-400" />
+        {/* Wafr Dawam identity strip */}
+        <div className="h-1 bg-gradient-to-l from-sky-500 via-sky-400 to-sky-500" />
 
+        <div className="px-6 pt-5"><img src="/brand/logo-dark.svg" alt="وفر دوام | WAFR Dawam" width="1024" height="224" className="w-full h-auto" /></div>
         <div className="flex items-center gap-3 px-6 py-5 border-b border-white/10">
           {appSettings?.logoDataUrl ? (
             <img

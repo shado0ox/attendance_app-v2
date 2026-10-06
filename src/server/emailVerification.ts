@@ -42,6 +42,6 @@ export function verificationPayload(employee: { name: string; email: string }, c
   if (!env.RESEND_API_KEY || !env.RESEND_FROM) throw new Error('خدمة تأكيد البريد غير مفعّلة؛ راجع إعدادات Resend');
   if (!/^\d{6}$/.test(code)) throw new Error('Invalid verification code');
   const text = `مرحبًا ${employee.name}،\nرمز تأكيد بريدك في برنامج الحضور — ${company}: ${code}\nالرمز صالح لمدة 10 دقائق. استخدم أحدث رمز طلبته. لا تشارك الرمز مع أي شخص.\nإذا لم تطلب تأكيد بريدك، تجاهل هذه الرسالة. هذا الرمز لتأكيد البريد فقط، ولا يغيّر كلمة المرور.`;
-  return { from: env.RESEND_FROM, to: [employee.email], subject: 'رمز تأكيد البريد — برنامج الحضور', text,
+  return { from: env.RESEND_FROM, to: [employee.email], subject: 'رمز تأكيد البريد — وفر دوام', text,
     html: `<div lang="ar" dir="rtl" style="font-family:Arial,sans-serif;line-height:1.9;padding:24px;max-width:600px;margin:auto"><h2>تأكيد البريد الإلكتروني</h2><p>مرحبًا ${escape(employee.name)} — ${escape(company)}</p><p>رمز التأكيد:</p><p dir="ltr" style="font-size:32px;font-weight:bold;letter-spacing:6px">${code}</p><p>صالح لمدة 10 دقائق. استخدم أحدث رمز طلبته، ولا تشاركه مع أي شخص.</p><p>إذا لم تطلب تأكيد بريدك، تجاهل هذه الرسالة. الرمز لتأكيد البريد فقط.</p></div>` };
 }
