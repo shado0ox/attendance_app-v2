@@ -39,6 +39,7 @@ function NavItem({
   return (
     <Link
       to={to}
+      aria-current={active ? 'page' : undefined}
       onClick={onNavigate}
       className={`relative flex items-center justify-between gap-3 px-3 py-2.5 text-xs font-bold rounded-xl transition-all w-full ${
         active
@@ -46,7 +47,7 @@ function NavItem({
           : 'text-sky-100/90 hover:bg-white/10 hover:text-white'
       }`}
     >
-      {active && <span className="absolute right-0 top-1.5 bottom-1.5 w-1 rounded-full bg-amber-400" />}
+      {active && <span className="absolute right-0 top-1.5 bottom-1.5 w-1 rounded-full bg-sky-500" />}
       <div className="flex items-center gap-3">
         <span className={active ? 'text-sky-600' : 'text-sky-300'}>{icon}</span>
         <span>{label}</span>
@@ -85,12 +86,12 @@ export default function AdminSidebar({
       )}
 
       <aside
-        className={`fixed top-0 bottom-0 right-0 z-50 flex flex-col w-64 bg-gradient-to-b from-[#102C3A] via-[#163A49] to-[#102C3A] text-white border-l border-sky-950/40 shadow-2xl transition-all md:sticky md:top-0 md:h-screen md:translate-x-0 flex-shrink-0 ${
+        className={`fixed top-0 bottom-0 right-0 z-50 flex flex-col w-64 bg-[#102C3A] text-white border-l border-sky-950/40 shadow-2xl transition-all md:sticky md:top-0 md:h-screen md:translate-x-0 flex-shrink-0 ${
           sidebarOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'
         }`}
       >
         {/* Wafr Dawam identity strip */}
-        <div className="h-1 bg-gradient-to-l from-sky-500 via-sky-400 to-sky-500" />
+        <div className="h-1 bg-sky-500" />
 
         <div className="px-6 pt-5"><img src="/brand/logo-dark.svg" alt="وفر دوام | WAFR Dawam" width="1024" height="224" className="w-full h-auto" /></div>
         <div className="flex items-center gap-3 px-6 py-5 border-b border-white/10">
@@ -102,7 +103,7 @@ export default function AdminSidebar({
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="flex items-center justify-center w-11 h-11 text-lg font-black text-sky-900 bg-gradient-to-br from-amber-300 to-amber-500 rounded-xl shadow-lg ring-2 ring-white/10">
+            <div className="flex items-center justify-center w-11 h-11 text-lg font-black text-white bg-sky-700 rounded-xl shadow-lg ring-2 ring-white/10">
               {(appSettings?.companyName || 'د').charAt(0)}
             </div>
           )}

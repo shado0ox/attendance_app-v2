@@ -868,7 +868,7 @@ export default function AdminPortal({
   };
 
   return (
-    <div className="flex flex-col md:flex-row min-h-screen bg-slate-50">
+    <div className="wafr-admin flex flex-col md:flex-row min-h-screen bg-slate-50">
       
       <AdminSidebar
         appSettings={appSettings}
@@ -893,12 +893,13 @@ export default function AdminPortal({
         <header className="flex items-center justify-between px-6 py-4 bg-white/90 backdrop-blur border-b border-sky-100 shadow-sm">
           <div className="flex items-center gap-3">
             <button
+              aria-label="فتح قائمة الإدارة"
               onClick={() => setSidebarOpen(true)}
               className="p-2 border rounded-lg md:hidden text-slate-500 hover:bg-slate-50"
             >
               <LayoutDashboard size={18} />
             </button>
-            <span className="hidden sm:block w-1 h-8 rounded-full bg-gradient-to-b from-amber-400 to-sky-600" />
+            <span className="hidden sm:block w-1 h-8 rounded-full bg-sky-600" />
             <div>
               <h1 className="text-base font-extrabold text-slate-800 tracking-tight">
                 {activeView === 'dashboard' && 'لوحة التحكم المباشرة'}

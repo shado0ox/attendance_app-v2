@@ -271,8 +271,19 @@ export default function LoginScreen({
 
 
   return (
-    <div id="login-screen" className="flex flex-col items-center justify-center min-h-screen px-4 bg-sky-50 bg-opacity-70">
-      <div className="w-full max-w-md p-8 bg-white border border-sky-100 rounded-2xl shadow-xl transition-all">
+    <div id="login-screen" className="wafr-login" dir="rtl">
+      <aside className="wafr-login-story" aria-label="وفر دوام">
+        <img src="/brand/logo-dark.svg" alt="وفر دوام | WAFR Dawam" width="1024" height="224" />
+        <div>
+          <h1>يوم عمل واضح.<br />من الحضور إلى الانصراف.</h1>
+          <p>سجّل حضورك، راجع دوام الأسبوع، وتابع طلباتك من مكان واحد.</p>
+          <div className="wafr-story-week" aria-hidden="true">
+            {['سبت','أحد','اثنين','ثلاثاء','أربعاء','خميس','جمعة'].map(day => <span key={day}>{day}<i /></span>)}
+          </div>
+        </div>
+        <p className="wafr-story-foot">حضور منظّم، ووقت محسوب</p>
+      </aside>
+      <div className="wafr-login-form">
 
         {sessionExpiredMessage && (
           <div
@@ -294,14 +305,15 @@ export default function LoginScreen({
         )}
 
         {/* Logo and Brand */}
-        <div className="flex flex-col items-center mb-8 text-center">
+        <div className="wafr-login-brand flex flex-col items-center mb-8 text-center">
 <img src="/brand/logo-light.svg" alt="وفر دوام | WAFR Dawam" className="w-full max-w-[280px] h-auto" width="1024" height="224" />
                     <p className="text-xs text-slate-400 mt-1">حضور منظّم، ووقت محسوب</p>
         </div>
 
         {/* Tab Selection */}
-        <div className="flex p-1 mb-6 bg-slate-100 rounded-xl">
+        <div className="wafr-login-tabs flex p-1 mb-6 bg-slate-100 rounded-xl">
           <button
+            aria-pressed={activeTab === 'emp'}
             onClick={() => { setActiveTab('emp'); setEmpError(''); }}
             className={`flex items-center justify-center gap-2 flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'emp' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           >
@@ -310,6 +322,7 @@ export default function LoginScreen({
           </button>
 
           <button
+            aria-pressed={activeTab === 'admin'}
             onClick={() => { setActiveTab('admin'); setAdminError(''); }}
             className={`flex items-center justify-center gap-2 flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'admin' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           >
@@ -318,6 +331,7 @@ export default function LoginScreen({
           </button>
 
           <button
+            aria-pressed={activeTab === 'reg'}
             onClick={() => { setActiveTab('reg'); setRegError(''); }}
             className={`flex items-center justify-center gap-2 flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${activeTab === 'reg' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           >
@@ -337,7 +351,7 @@ export default function LoginScreen({
                 value={empUsername}
                 onChange={(e) => setEmpUsername(e.target.value)}
                 placeholder="أدخل اسم المستخدم أو بريدك المسجل"
-                className="w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none placeholder-slate-300 text-right font-medium"
+                className="w-full px-4 py-2.5 text-sm border rounded-lg placeholder-slate-300 text-right font-medium"
               />
             </div>
 
@@ -348,7 +362,7 @@ export default function LoginScreen({
                 onClick={() => { setEmpLoginMethod('password'); setBiometricScanning(false); setBiometricStatus(''); setEmpError(''); }}
                 className={`flex-1 py-1.5 rounded font-bold transition-all text-center ${empLoginMethod === 'password' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
-                رمز الدخول السري
+                كلمة المرور
               </button>
               <button
                 type="button"
@@ -356,7 +370,7 @@ export default function LoginScreen({
                 className={`flex-1 py-1.5 rounded font-bold transition-all text-center flex items-center justify-center gap-1.5 ${empLoginMethod === 'biometric' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 <ScanFace size={13} />
-                <span>التحقق البيومتري</span>
+                <span>بصمة الجهاز</span>
               </button>
             </div>
 
@@ -364,16 +378,16 @@ export default function LoginScreen({
             {empLoginMethod === 'password' && (
               <div className="flex flex-col gap-4 text-right" dir="rtl">
                 <div className="flex flex-col gap-1.5">
-                  <div className="flex justify-between items-center pr-1">
-                    <span className="text-[10px] text-slate-400 font-normal">أول دخول؟ اكتب كلمة مرور من 6 خانات لتفعيل الحساب</span>
-                    <label className="text-xs font-bold text-slate-600">كلمة المرور</label>
+                  <div className="wafr-password-heading flex justify-between items-start gap-3 pr-1">
+                    <label className="text-xs font-bold text-slate-600 shrink-0">كلمة المرور</label>
+                    <span className="text-[10px] text-slate-500 font-normal">أول دخول؟ اكتب كلمة مرور من 6 خانات لتفعيل الحساب</span>
                   </div>
                   <input
                     type="password"
                     value={empPassword}
                     onChange={(e) => setEmpPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none placeholder-slate-300 text-right"
+                    className="w-full px-4 py-2.5 text-sm border rounded-lg placeholder-slate-300 text-right"
                     onKeyDown={(e) => { if (e.key === 'Enter') handleEmployeeLogin(); }}
                   />
                 </div>
@@ -389,7 +403,7 @@ export default function LoginScreen({
                   className="flex items-center justify-center gap-2 w-full py-3 mt-1 text-sm font-bold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 rounded-lg shadow-md transition-all disabled:opacity-70 disabled:cursor-not-allowed"
                 >
                   {empLoading ? <Loader size={16} className="animate-spin" /> : <LogIn size={16} />}
-                  <span>دخول آمن بالرقم السري</span>
+                  <span>تسجيل الدخول</span>
                 </button>
               </div>
             )}
@@ -491,7 +505,7 @@ export default function LoginScreen({
                 value={adminUsername}
                 onChange={(e) => setAdminUsername(e.target.value)}
                 placeholder="اسم حساب المدير (مثل: admin)"
-                className="w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none placeholder-slate-300 text-right"
+                className="w-full px-4 py-2.5 text-sm border rounded-lg placeholder-slate-300 text-right"
                 onKeyDown={(e) => { if (e.key === 'Enter') handleAdminLogin(); }}
               />
             </div>
@@ -503,7 +517,7 @@ export default function LoginScreen({
                 value={adminPassword}
                 onChange={(e) => setAdminPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none placeholder-slate-300 text-right"
+                className="w-full px-4 py-2.5 text-sm border rounded-lg placeholder-slate-300 text-right"
                 onKeyDown={(e) => { if (e.key === 'Enter') handleAdminLogin(); }}
               />
             </div>
