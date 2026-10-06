@@ -2030,6 +2030,14 @@ async function startServer() {
   await migrateCompanyCodes(db);
   await ensureJwtSecret();
 
+  // Serve only this public association file; Express otherwise ignores dot-directories.
+  app.get('/.well-known/assetlinks.json', (_req, res) => {
+    const assetRoot = process.env.NODE_ENV === 'production' ? 'dist' : 'public';
+    res.set('Cache-Control', 'public, max-age=300');
+    res.type('application/json');
+    res.sendFile(path.join(process.cwd(), assetRoot, '.well-known', 'assetlinks.json'), { dotfiles: 'allow' });
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
