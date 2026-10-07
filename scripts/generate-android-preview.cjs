@@ -22,9 +22,10 @@ ImageHelper.prototype.fetchIcon = async function(url) {
   manifest.packageId = release ? 'com.xshadox.wafrdawam' : 'com.xshadox.wafrdawam.preview';
   manifest.name = 'وفر دوام';
   manifest.launcherName = release ? 'وفر دوام' : 'وفر دوام تجريبي';
-  manifest.appVersionName = release ? '1.0.0' : '0.1.0-preview';
-  manifest.appVersionCode = 1;
-  manifest.minSdkVersion = 23;
+  manifest.appVersionName = release ? '1.0.1' : '0.1.0-preview';
+  manifest.appVersionCode = release ? 2 : 1;
+  // Play automatic protection requires API 24 or higher for the release bundle.
+  manifest.minSdkVersion = release ? 24 : 23;
   manifest.enableNotifications = true;
   manifest.signingKey = release ? { path: 'upload.keystore', alias: 'wafr-upload' } : { path: 'preview.keystore', alias: 'wafr-preview' };
   manifest.shortcuts = [];
