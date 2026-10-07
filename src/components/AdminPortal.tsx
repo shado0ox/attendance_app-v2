@@ -916,7 +916,7 @@ export default function AdminPortal({
                 {activeView === 'companies' && 'إدارة مساحات عمل الشركات والاشتراكات الشهرية'}
               </h1>
               <p className="hidden sm:block text-[10px] text-slate-400 font-bold mt-0.5">
-                {new Date().toLocaleDateString('ar-SA-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                {new Date().toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
               </p>
             </div>
           </div>
@@ -2276,7 +2276,7 @@ export default function AdminPortal({
                           fontSize: '9px', 
                           color: '#475569' 
                         }}>
-                          <div>تاريخ الطباعة والحفظ: <strong style={{ color: '#0c2340' }}>{new Date().toLocaleDateString('ar-SA')}</strong></div>
+                          <div>تاريخ الطباعة والحفظ: <strong style={{ color: '#0c2340' }}>{new Date().toLocaleDateString('ar-SA-u-ca-gregory-nu-latn')}</strong></div>
                           <div>شؤون الموظفين • {appSettings?.companyName || 'نظام الرعاية والدوام الذكي'}</div>
                         </div>
                       </>

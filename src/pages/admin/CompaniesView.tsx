@@ -124,7 +124,7 @@ export default function CompaniesView({
                       <div>
                         <span className="block text-slate-400">تاريخ انتهاء الاشتراك:</span>
                         <span className="font-bold text-slate-700">
-                          {comp.subscriptionExpiresAt ? new Date(comp.subscriptionExpiresAt).toLocaleDateString('ar-EG') : 'غير محدد'}
+                          {comp.subscriptionExpiresAt ? new Date(comp.subscriptionExpiresAt).toLocaleDateString('ar-SA-u-ca-gregory-nu-latn') : 'غير محدد'}
                         </span>
                       </div>
                     </div>

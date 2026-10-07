@@ -51,7 +51,7 @@ export default function RequestsView({ adminRequests, requestsLoading, onReview,
                       </span>
                       <span className="text-slate-300">|</span>
                       <span>
-                        وقت الإجراء: <strong className="font-extrabold text-slate-700">{req.reviewedAt ? new Date(req.reviewedAt).toLocaleString('ar-SA-u-ca-gregory', { timeZone: 'Asia/Riyadh' }) : '-'}</strong>
+                        وقت الإجراء: <strong className="font-extrabold text-slate-700">{req.reviewedAt ? new Date(req.reviewedAt).toLocaleString('ar-SA-u-ca-gregory-nu-latn', { timeZone: 'Asia/Riyadh' }) : '-'}</strong>
                       </span>
                     </div>
                   )}

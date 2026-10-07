@@ -25,6 +25,12 @@ try{
  assert.equal((await request(profileUrl,'PATCH',edit)).status,200);
  const value=(await pool.query('SELECT value FROM shift_app.system_data WHERE key=$1',['mainData_'+companyId])).rows[0].value;
  assert.deepEqual(value.employees[1],data.employees[1]);assert.deepEqual(value.schedule,data.schedule);assert.equal(value.employees[0].name,'Official name');assert.equal(value.employees[0].password,'private-password');assert.equal(value.employees[0].emailVerifiedAt,undefined);assert.equal(value.employees[0].email,'self-updated@example.com');assert.equal(value.employees[0].photoDataUrl,undefined);assert.equal((await pool.query('SELECT value FROM shift_app.system_data WHERE key=$1',[employeePhotoKey(companyId,id)])).rows[0].value.dataUrl,image);
+ const manager={'Content-Type':'application/json',Authorization:'Bearer '+jwt.sign({role:'admin',companyId,username:'self-master'},secret)};
+ const adminProfile='/api/employees/'+id+'/profile?companyId='+companyId+'&section=overview';
+ const adminPhoto=await request(adminProfile,'GET',undefined,manager);assert.equal(adminPhoto.status,200);assert.equal((await adminPhoto.json()).employee.photoDataUrl,image);
+ assert.equal((await request(adminProfile)).status,403,'employees cannot read admin profile');
+ assert.equal((await request(adminProfile,'GET',undefined,root)).status,403,'platform operator cannot read subscriber photos');
+ const otherPhoto=await request(adminProfile.replace(id,'other-self-employee'),'GET',undefined,manager);assert.equal((await otherPhoto.json()).employee.photoDataUrl,'','photos are scoped to the requested employee');
  const audited=await pool.query("SELECT details FROM shift_app.audit_log WHERE company_id=$1 AND action='employee.self-profile'",[companyId]);assert.equal(audited.rows.length,1);assert.ok(!JSON.stringify(audited.rows).includes(image));
  assert.equal((await request(profileUrl,'PATCH',edit)).status,200);assert.equal((await pool.query("SELECT count(*)::int AS count FROM shift_app.audit_log WHERE company_id=$1 AND action='employee.self-profile'",[companyId])).rows[0].count,1,'unchanged profile saves create no extra audit writes');
  assert.equal((await request(profileUrl,'PATCH',{photoDataUrl:'data:image/svg+xml;base64,PHN2Zz4='})).status,400);
@@ -36,5 +42,6 @@ try{
  const after=(await pool.query('SELECT value FROM shift_app.system_data WHERE key=$1',['mainData_'+companyId])).rows[0].value;assert.deepEqual(after,value,'reading report never rewrites schedule or profile');
  const main:any=await (await request('/api/main-data?companyId='+companyId)).json();assert.equal(main.employees.find((e:any)=>e.id===id).photoDataUrl,image);assert.equal(main.employees.find((e:any)=>e.id==='other-self-employee').email,undefined);
  assert.equal((await request(profileUrl,'PATCH',{photoDataUrl:''})).status,200);assert.equal((await pool.query('SELECT count(*)::int AS count FROM shift_app.system_data WHERE key=$1',[employeePhotoKey(companyId,id)])).rows[0].count,0);
+ assert.equal((await (await request(adminProfile,'GET',undefined,manager)).json()).employee.photoDataUrl,'','deleted image is absent from admin profile');
  console.log('PASS: self-only profile and report, protected HR fields, atomic/global email checks and verification invalidation, bounded raster images and deletion, no-op writes, isolated first/last punches and locations, absence excludes leave/rest, read-only reports.');
 }finally{child.kill('SIGTERM');await pool.end();await new Promise(r=>child.exitCode!==null?r(null):child.once('exit',r));}

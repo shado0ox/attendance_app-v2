@@ -5,7 +5,7 @@ const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => 
 const chunk = <T,>(items: T[], size: number): T[][] => Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size));
 const time = (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value || '') ? Number(value.slice(0, 2)) * 60 + Number(value.slice(3)) : null;
 const hoursLabel = (minutes: number) => `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`;
-const weekday = (date: string) => new Date(date + 'T12:00:00Z').toLocaleDateString('ar-SA', { weekday: 'long', timeZone: 'Asia/Riyadh' });
+const weekday = (date: string) => new Date(date + 'T12:00:00Z').toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { weekday: 'long', timeZone: 'Asia/Riyadh' });
 function period(start: string, end: string) {
   const a = time(start), b = time(end);
   return a === null || b === null || a === b ? null : { minutes: (b - a + 1440) % 1440, overnight: b < a };
@@ -31,7 +31,7 @@ export function schedulePrintHtml(o: SchedulePrintOptions) {
   const dates = planningDates(o.month + '-01', last);
   if (!o.departments.length) throw new Error('اختر قسماً للتصدير');
   const title = `${o.companyName || 'الشركة'} - جدول الدوام ${o.month}`;
-  const stamp = (o.exportedAt || new Date()).toLocaleString('ar-SA', { timeZone: 'Asia/Riyadh', numberingSystem: 'latn' });
+  const stamp = (o.exportedAt || new Date()).toLocaleString('ar-SA-u-ca-gregory-nu-latn', { timeZone: 'Asia/Riyadh', numberingSystem: 'latn' });
   const logo = /^data:image\/(png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(o.logoDataUrl || '') ? `<img class="logo" src="${o.logoDataUrl}" alt="شعار الشركة">` : '';
   const pages: string[] = [];
   const byId = new Map(o.shiftTypes.map(s => [s.id, s]));

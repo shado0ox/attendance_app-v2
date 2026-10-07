@@ -1172,7 +1172,7 @@ export default function EmployeePortal({
         <EmployeeWeekSchedule employeeId={String(employee.id)} schedule={scheduleData} shiftTypes={shiftTypes} />
         <div className="wafr-schedule-sync flex flex-wrap items-center gap-3 p-3 rounded-xl bg-white border border-sky-100 text-xs">
           <button type="button" disabled={scheduleRefreshing} onClick={() => { void onRefreshSchedule(); }} className="px-3 py-2 rounded-lg bg-sky-100 text-sky-800 font-bold disabled:opacity-50">{scheduleRefreshing ? 'جارٍ تحديث الجدول…' : 'تحديث جدول الدوام'}</button>
-          <span>آخر مزامنة مع السيرفر: {scheduleSyncedAt ? new Date(scheduleSyncedAt).toLocaleString('ar-SA', {timeZone:'Asia/Riyadh',numberingSystem:'latn'}) : 'لم يتم التحقق بعد'}</span>
+          <span>آخر مزامنة مع السيرفر: {scheduleSyncedAt ? new Date(scheduleSyncedAt).toLocaleString('ar-SA-u-ca-gregory-nu-latn', {timeZone:'Asia/Riyadh',numberingSystem:'latn'}) : 'لم يتم التحقق بعد'}</span>
           <span className="text-slate-500">يتحدث تلقائياً خلال دقيقة أثناء فتح التطبيق، وعند العودة إليه أو رجوع الإنترنت.</span>
           {scheduleSyncError && <p role="alert" className="w-full text-amber-800">{scheduleSyncError}</p>}
         </div>

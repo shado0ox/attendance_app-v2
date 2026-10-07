@@ -1868,7 +1868,11 @@ app.get('/api/employees/:id/profile', requireAuth(['admin', 'superadmin']), asyn
     const employee = mainData?.employees?.find((e: any) => String(e.id) === req.params.id);
     if (!employee || !ownsEmployee(requestAccess(req), mainData, employee.id)) return res.status(404).json({ error: 'الموظف غير موجود أو خارج أقسامك' });
     if (requestAccess(req).departmentIds !== null && ['history', 'requests', 'overview'].includes(query.section)) return res.status(403).json({ error: 'ملف الموظف الكامل لإدارة الشركة؛ راجع يوم الحضور أو الطلب من القائمة' });
-    if (query.section === 'overview') return res.json({ employee: employeeProfileData(employee, mainData.departments || []) });
+    if (query.section === 'overview') {
+      // Fetch only this authorized employee's photo; never include photos in bulk main-data.
+      const photos = await db.select().from(schema.systemData).where(eq(schema.systemData.key, employeePhotoKey(companyId, String(employee.id)))).limit(1);
+      return res.json({ employee: { ...employeeProfileData(employee, mainData.departments || []), photoDataUrl: (photos[0]?.value as any)?.dataUrl || '' } });
+    }
     if (query.section === 'schedule') { const report = employeeProfileSchedule(scopedMainData(mainData, requestAccess(req)), employee, query); return res.json({ ...report, items: report.items.filter(day => ownsDay(requestAccess(req), mainData, { empId: employee.id, date: day.date })) }); }
     if (query.section === 'history') {
       const items = await db.select().from(schema.auditLog).where(and(eq(schema.auditLog.companyId, companyId), eq(schema.auditLog.entityId, String(employee.id)), sql`${schema.auditLog.action} LIKE 'employee.%'`)).orderBy(desc(schema.auditLog.createdAt), desc(schema.auditLog.id)).limit(100);
