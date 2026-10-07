@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-const time = (value?: string) => value ? new Date(value).toLocaleString('ar-SA', { timeZone:'Asia/Riyadh',calendar:'gregory' }) : 'غير مسجل';
+const time = (value?: string) => value ? new Date(value).toLocaleString('ar-SA-u-ca-gregory-nu-latn', { timeZone:'Asia/Riyadh',calendar:'gregory' }) : 'غير مسجل';
 const statusLabel:Record<string,string>={ok:'سليم',unavailable:'تعذر الاتصال',incomplete:'جداول ناقصة',missing:'لا توجد نسخة مسجلة',invalid:'ملف النسخة يحتاج مراجعة',stale:'نسخة قديمة',success:'ناجح',failed:'فشل',running:'جارٍ التنفيذ',accepted:'مقبولة لدى Resend',pending:'غير مؤكد / جارٍ الإرسال'};
 export default function SystemHealthView({companyId}:{companyId:string}) {
   const [report,setReport]=useState<any>(null),[loading,setLoading]=useState(false),[action,setAction]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[refresh,setRefresh]=useState(0);

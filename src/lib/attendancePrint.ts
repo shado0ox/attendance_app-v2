@@ -15,10 +15,10 @@ export function attendancePrintHtml({ companyName, days, period, approvedAt, app
   const analysisTotals = analyzed ? `<span>غياب: ${days.filter(day => day.analysis?.absent).length}</span><span>أيام تأخير: ${days.filter(day => day.analysis?.lateMinutes > 0).length}</span><span>دقائق التأخير: ${days.reduce((sum, day) => sum + (day.analysis?.lateMinutes || 0), 0)}</span><span>إضافي محتمل بالدقائق: ${days.reduce((sum, day) => sum + (day.analysis?.overtimeMinutes || 0), 0)}</span>` : '';
   const employees = new Set(days.map(day => day.empId)).size;
   const rows = days.map(day => {
-    const weekday = new Date(day.date + 'T12:00:00Z').toLocaleDateString('ar-SA', { weekday: 'long', timeZone: 'Asia/Riyadh' });
+    const weekday = new Date(day.date + 'T12:00:00Z').toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { weekday: 'long', timeZone: 'Asia/Riyadh' });
     return `<tr>${[day.date, weekday, day.empName, day.departmentName || day.dept, formatPunch(day.first), formatPunch(day.last), formatMinutes(day.minutes), day.first?.location || 'غير مسجل', day.last?.location || 'غير مسجل', day.reportStatus, day.note || '', ...(analyzed ? [day.analysis ? `${day.analysis.status}؛ تأخير: ${day.analysis.lateMinutes ?? '—'} د؛ مبكر: ${day.analysis.earlyMinutes ?? '—'} د؛ إضافي محتمل: ${day.analysis.overtimeMinutes ?? '—'} د` : 'غير محلل'] : [])].map(value => `<td>${escapeHtml(value)}</td>`).join('')}</tr>`;
   }).join('');
-  const approval = approvedAt ? `<p>نسخة معتمدة — المسؤول: ${escapeHtml(approvedBy)} — تاريخ الاعتماد: ${escapeHtml(new Date(approvedAt).toLocaleString('ar-SA', { timeZone: 'Asia/Riyadh' }))}</p>` : '<p>كشف للمراجعة — غير معتمد</p>';
+  const approval = approvedAt ? `<p>نسخة معتمدة — المسؤول: ${escapeHtml(approvedBy)} — تاريخ الاعتماد: ${escapeHtml(new Date(approvedAt).toLocaleString('ar-SA-u-ca-gregory-nu-latn', { timeZone: 'Asia/Riyadh' }))}</p>` : '<p>كشف للمراجعة — غير معتمد</p>';
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${escapeHtml(companyName)} — كشف الحضور</title><style>
   @page { size: A4 landscape; margin: 12mm; }
   * { box-sizing: border-box; } body { margin: 0; color: #172b3a; font-family: Tahoma, Arial, sans-serif; font-size: 12px; }

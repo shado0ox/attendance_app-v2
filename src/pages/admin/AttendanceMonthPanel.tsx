@@ -55,7 +55,7 @@ export default function AttendanceMonthPanel({ companyId, employeeId, requestCon
       }} className="px-4 py-2 border border-sky-200 rounded-lg text-xs disabled:opacity-50">طباعة / PDF النسخة المعتمدة</button>}
     </div>
     {state?.status === 'approved' && <>
-      <p className="text-xs text-slate-500">اعتمد بواسطة {state.approvedBy} في {new Date(state.approvedAt).toLocaleString('ar-SA', { timeZone: 'Asia/Riyadh' })} — إجمالي {formatMinutes(state.snapshot.totalMinutes)}</p>
+      <p className="text-xs text-slate-500">اعتمد بواسطة {state.approvedBy} في {new Date(state.approvedAt).toLocaleString('ar-SA-u-ca-gregory-nu-latn', { timeZone: 'Asia/Riyadh' })} — إجمالي {formatMinutes(state.snapshot.totalMinutes)}</p>
       <div className="flex flex-wrap gap-2 min-w-0">
         <input aria-label="سبب إعادة فتح الشهر" placeholder="سبب إعادة الفتح (5 أحرف على الأقل)" maxLength={1000} value={reason} disabled={busy} onChange={event => setReason(event.target.value)} className="p-2 border rounded-lg text-xs flex-1 min-w-0 basis-64" />
         <button disabled={busy || reason.trim().length < 5} onClick={() => requestConfirm(`إعادة فتح شهر ${month} للتعديل؟ سيتم تسجيل السبب.`, () => { void change('reopen'); })} className="px-4 py-2 border border-amber-300 text-amber-800 rounded-lg text-xs disabled:opacity-50">إعادة فتح الشهر</button>

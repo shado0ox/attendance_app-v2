@@ -104,7 +104,7 @@ export default function AttendanceView({
     const rows = [['التاريخ', 'اليوم', 'الموظف', 'القسم', 'أول حضور', 'آخر انصراف', 'مدة العمل', 'الساعات العشرية', 'مكان أول حضور', 'مكان آخر انصراف', 'الحالة', 'بصمات مستبعدة', 'حالة التحليل', 'دقائق الدوام المجدول', 'دقائق التأخير بعد السماح', 'دقائق الخروج المبكر', 'دقائق إضافي محتمل']];
     filteredRecords.forEach(r => {
       const department = { name: r.departmentName || r.dept };
-      rows.push([r.date, new Date(r.date + 'T12:00:00').toLocaleDateString('ar-SA', { weekday: 'long' }), r.empName, department?.name || r.dept,
+      rows.push([r.date, new Date(r.date + 'T12:00:00').toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { weekday: 'long' }), r.empName, department?.name || r.dept,
         formatPunch(r.first), formatPunch(r.last), formatMinutes(r.minutes), r.minutes === null ? '' : (r.minutes / 60).toFixed(2),
         r.first?.location || 'غير مسجل', r.last?.location || 'غير مسجل', r.reportStatus, String(r.ignored), r.analysis?.status || '', r.analysis?.scheduledMinutes ?? '', r.analysis?.lateMinutes ?? '', r.analysis?.earlyMinutes ?? '', r.analysis?.overtimeMinutes ?? '']);
     });
@@ -295,7 +295,7 @@ export default function AttendanceView({
 
                 return (
                   <tr key={rec.id} className="border-b last:border-0 hover:bg-sky-50/20 text-slate-700 text-xs">
-                    <td className="p-3 font-bold">{rec.date}<div className="text-slate-400 mt-1">{new Date(rec.date + 'T12:00:00').toLocaleDateString('ar-SA', { weekday: 'long' })}</div></td>
+                    <td className="p-3 font-bold">{rec.date}<div className="text-slate-400 mt-1">{new Date(rec.date + 'T12:00:00').toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { weekday: 'long' })}</div></td>
                     <td className="p-3 font-black text-slate-800">{rec.empName}</td>
                     <td className="p-3 text-slate-500 font-medium">{deptObj ? deptObj.name : rec.dept}</td>
                     <td className="p-3">

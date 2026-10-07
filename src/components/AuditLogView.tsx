@@ -13,7 +13,7 @@ export default function AuditLogView({ companyId }: { companyId: string }) {
     <p className="text-xs text-slate-500">يبدأ التسجيل بعد التحديث. السجل يحتفظ بالبصمة الأصلية وبالبيانات قبل وبعد التصحيح أو الحذف.</p>
     {message && <p role="status">{message}</p>}
     <div className="overflow-auto max-h-96"><table className="w-full text-xs text-right"><thead><tr><th>الوقت</th><th>المستخدم</th><th>العملية</th><th>السجل</th><th>التفاصيل</th></tr></thead>
-      <tbody>{rows.map(row => <tr key={row.id} className="border-b"><td className="p-2">{new Date(row.createdAt).toLocaleString('ar-SA', { timeZone:'Asia/Riyadh' })}</td><td>{row.actorId} ({row.actorRole})</td><td>{labels[row.action] || row.action}</td><td>{row.entityId}</td><td><details><summary>عرض</summary><pre className="whitespace-pre-wrap" dir="ltr">{JSON.stringify(row.details, null, 2)}</pre></details></td></tr>)}</tbody>
+      <tbody>{rows.map(row => <tr key={row.id} className="border-b"><td className="p-2">{new Date(row.createdAt).toLocaleString('ar-SA-u-ca-gregory-nu-latn', { timeZone:'Asia/Riyadh' })}</td><td>{row.actorId} ({row.actorRole})</td><td>{labels[row.action] || row.action}</td><td>{row.entityId}</td><td><details><summary>عرض</summary><pre className="whitespace-pre-wrap" dir="ltr">{JSON.stringify(row.details, null, 2)}</pre></details></td></tr>)}</tbody>
     </table></div>
   </section>;
 }
