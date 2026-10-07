@@ -1,0 +1,9 @@
+# Wafr Dawam mobile refinement
+
+Design source: https://sleek.design/project/JPblj8OXP1A, run swGygbhv9sS, active component versions 1 for o86vm8k4S2P, NI7n1v5K3Ai and dMarWLw9FUF. Retrieved component HTML and individual user/full-height review screenshots before implementation.
+
+Adapted the generated mobile layouts to the existing approved Wafr navy/teal palette, Tajawal font and real React state. Employee navigation is one shared five-button bar: fixed with safe-area clearance on phones and inline on desktop. Home keeps punch actions, all seven Saturday–Friday days, both periods, notes, refresh errors and the expandable monthly view. Profile and settings remain distinct destinations. All authentication, request, enrollment, photo and persistence handlers are preserved. Sample names, dates, device keys, location claims and settings in the mockups are not shipped.
+
+Forms use readable 16px inputs, 44px minimum actions, wrapped official identity values and clear section headings. Registration now uses document scrolling instead of a nested 480px scroller. Employee privacy remains in Settings; the redundant floating global privacy link is hidden only for employees to avoid the bottom bar. The installation banner clears employee navigation.
+
+Validation: TypeScript, production build, 88 existing unit tests and diff whitespace checks passed. Generated Sleek screenshots were reviewed. Local browser interaction review was attempted at 360/390/1440px but Chromium was blocked by the execution environment's socket restrictions before rendering; actual rendered React layout, keyboard avoidance, native safe areas and device interactions remain unverified. No production data or geolocation actions were exercised. Verify on phones before release. No database/schema or Android package changes.

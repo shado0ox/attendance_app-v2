@@ -24,15 +24,15 @@ export default function EmployeeSelfProfile({employee,departmentName,companyId,o
       const next={displayName:data.displayName,phone:data.phone,email:data.email,photoDataUrl:data.photoDataUrl};setForm(next);setBaseline(next);setMessage('تم حفظ ملفك الشخصي');await onSaved();
     }catch(e:any){setError(e.message || 'تعذر الاتصال بالخادم');}finally{setBusy(false);}
   };
-  return <form onSubmit={save} className="bg-white p-5 rounded-2xl border flex flex-col gap-5" dir="rtl">
+  return <form onSubmit={save} className="wafr-self-profile bg-white p-5 rounded-2xl border flex flex-col gap-5" dir="rtl">
     <h2 className="text-lg font-bold">ملفي الشخصي</h2>
     <div className="flex flex-wrap items-center gap-4"><div className="w-24 h-24 rounded-full border bg-sky-50 overflow-hidden flex items-center justify-center text-3xl text-sky-700">{form.photoDataUrl?<img src={form.photoDataUrl} alt="صورتك الشخصية" className="w-full h-full object-cover" />:employee.name?.charAt(0)}</div><div><label className="block cursor-pointer rounded-lg bg-sky-100 text-sky-800 p-3 text-sm">{processing?'جاري تجهيز الصورة…':'رفع صورة شخصية'}<input aria-label="اختيار صورة شخصية" type="file" accept="image/jpeg,image/png,image/webp" onChange={selectPhoto} disabled={busy||processing} className="sr-only" /></label>{form.photoDataUrl && <button type="button" disabled={busy||processing} onClick={()=>setForm({...form,photoDataUrl:''})} className="text-sm text-rose-700 mt-2">إزالة الصورة ثم حفظ</button>}</div></div>
     <p className="text-xs text-slate-500">صورتك خاصة بحسابك داخل شركتك. تُقص إلى مربع وتُضغط قبل رفعها؛ لا تُرسل الصورة الأصلية أو بياناتها الوصفية.</p>
     <dl className="grid sm:grid-cols-2 gap-3 bg-slate-50 p-4 rounded-xl text-sm"><div><dt className="text-slate-500">الاسم الرسمي</dt><dd className="font-bold">{employee.name}</dd></div><div><dt className="text-slate-500">القسم</dt><dd>{departmentName}</dd></div><div><dt className="text-slate-500">اسم المستخدم</dt><dd>{employee.username || 'غير محدد'}</dd></div><div><dt className="text-slate-500">رقم الموظف</dt><dd>{employee.id}</dd></div></dl>
     <p className="text-xs text-slate-500">تعديل الاسم الرسمي أو القسم يتم عن طريق الإدارة.</p>
     <label className="flex flex-col gap-2">الاسم الظاهر<input maxLength={100} value={form.displayName} onChange={e=>setForm({...form,displayName:e.target.value})} className="border p-3 rounded-lg" /></label>
-    <label className="flex flex-col gap-2">رقم الجوال<input type="tel" maxLength={30} value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} className="border p-3 rounded-lg" /></label>
-    <label className="flex flex-col gap-2">البريد الإلكتروني<input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} className="border p-3 rounded-lg" /></label>
+    <label className="flex flex-col gap-2">رقم الجوال<input dir="ltr" type="tel" maxLength={30} value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} className="border p-3 rounded-lg" /></label>
+    <label className="flex flex-col gap-2">البريد الإلكتروني<input dir="ltr" type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} className="border p-3 rounded-lg" /></label>
     <p className="text-xs text-slate-500">تغيير البريد يلغي التحقق السابق؛ يمكنك التحقق من البريد الجديد في الإعدادات.</p>
     <button disabled={busy||processing} className="bg-sky-600 text-white p-3 rounded-xl disabled:opacity-50">{busy?'جاري حفظ البيانات…':'حفظ الملف الشخصي'}</button>{message&&<p role="status" className="text-emerald-700">{message}</p>}{error&&<p role="alert" className="text-rose-700">{error}</p>}
   </form>;
