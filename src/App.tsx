@@ -582,7 +582,7 @@ export default function App() {
   return (
     <div dir="rtl" className="font-tajawal text-slate-800 transition-all select-none">
       
-      <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="fixed bottom-2 left-2 z-40 px-2 py-1 rounded bg-white/90 border text-xs">الخصوصية</a>
+      {session.role !== 'employee' && <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="fixed bottom-2 left-2 z-40 px-2 py-1 rounded bg-white/90 border text-xs">الخصوصية</a>}
       <SystemUpdateNotice blocked={saving || !!saveError || saveConflict || unsaved.current}/>
       {(saving || saveError) && (
         <div role="status" className="sticky top-0 z-[120] p-3 bg-amber-50 border-b border-amber-200 text-sm text-center">
@@ -783,7 +783,7 @@ export default function App() {
 
       {/* PWA Mobile Installation First-Time Banner */}
       {showInstallBanner && (
-        <div className="fixed bottom-4 left-4 right-4 z-[999] p-4 bg-white border border-sky-100 rounded-2xl shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-fade-in text-right max-w-lg mx-auto" dir="rtl">
+        <div style={session.role === 'employee' ? {bottom: 'calc(104px + env(safe-area-inset-bottom))'} : undefined} className="fixed bottom-4 left-4 right-4 z-[999] p-4 bg-white border border-sky-100 rounded-2xl shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-fade-in text-right max-w-lg mx-auto" dir="rtl">
           <div className="flex gap-3 items-center">
             <img src="/icons/icon-192.png" alt="أيقونة وفر دوام" width="48" height="48" className="w-12 h-12 rounded-xl flex-shrink-0" />
             <div>

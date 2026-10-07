@@ -310,6 +310,8 @@ export default function LoginScreen({
                     <p className="text-xs text-slate-400 mt-1">حضور منظّم، ووقت محسوب</p>
         </div>
 
+        <div className="wafr-login-welcome"><h2>أهلًا بك في وفر دوام</h2><p>حضورك وجدولك وطلباتك، من مكان واحد.</p></div>
+
         {/* Tab Selection */}
         <div className="wafr-login-tabs flex p-1 mb-6 bg-slate-100 rounded-xl">
           <button
@@ -539,7 +541,7 @@ export default function LoginScreen({
 
         {/* ── Register Account Panel (Employees Only) ── */}
         {activeTab === 'reg' && (
-          <div className="flex flex-col gap-3.5 max-h-[480px] overflow-y-auto pr-1">
+          <div className="flex flex-col gap-3.5 pr-1">
 
             <div className="flex flex-col gap-1"><label className="text-xs font-bold text-slate-600">رمز الشركة لطلب حساب جديد فقط</label><input inputMode="numeric" value={regCompanyCode} onChange={e=>setRegCompanyCode(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg" /><p className="text-[10px] text-slate-500">احصل عليه من الإدارة؛ الدخول لحساب قائم لا يحتاج رمز الشركة.</p></div>
             {/* Info banner: employees only */}

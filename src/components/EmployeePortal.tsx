@@ -7,7 +7,7 @@ import { autoPeriodWindow } from '../lib/autoPunch';
 import { showPwaNotification } from '../lib/pwaNotification';
 import { getEmployeeLocations as getApprovedLocations, matchAttendanceLocation } from '../lib/attendanceLocations';
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle, Fingerprint, ScanFace, ShieldCheck } from 'lucide-react';
+import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle, Fingerprint, ScanFace, ShieldCheck, House, CalendarCheck, ClipboardList, UserRound, Settings } from 'lucide-react';
 interface EmployeePortalProps {
   scheduleNotice?: { revision: string; publishedAt: string | null };
   onRefreshSchedule: () => Promise<boolean>;
@@ -844,9 +844,9 @@ export default function EmployeePortal({
   const scheduleData = schedule;
 
   return (
-    <div id="emp-portal" className="wafr-employee min-h-screen pb-12 bg-sky-50 bg-opacity-40">
+    <div id="emp-portal" dir="rtl" className="wafr-employee min-h-screen pb-12 bg-sky-50 bg-opacity-40">
       {scheduleChanged && <div className="bg-sky-100 border-b border-sky-200 p-3 text-sm flex flex-wrap justify-center items-center gap-3" dir="rtl"><strong>تم تحديث جدول دوامك أو مواعيد شيفتاتك.</strong><span>راجع الأيام والمواعيد في الجدول أدناه.</span><button onClick={acknowledgeSchedule} className="bg-white border rounded px-3 py-1 text-xs">اطلعت على التحديث</button></div>}
-      <div className="bg-[#102C3A] px-4 py-2 flex justify-center"><img src="/brand/logo-dark.svg" alt="وفر دوام | WAFR Dawam" width="1024" height="224" className="w-40 h-auto" /></div>
+      <div className="wafr-employee-brand bg-[#102C3A] px-4 py-2 flex justify-center"><img src="/brand/logo-dark.svg" alt="وفر دوام | WAFR Dawam" width="1024" height="224" className="w-40 h-auto" /></div>
       {/* Top Navbar */}
       <header className="wafr-employee-header sticky top-0 z-30 flex items-center justify-between gap-3 px-3 sm:px-6 py-4 bg-white border-b border-sky-100">
         <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -883,11 +883,18 @@ export default function EmployeePortal({
       <main className="max-w-4xl px-4 py-8 mx-auto flex flex-col gap-6">
 
         {!currentProfile.email && <EmployeeEmailVerification employee={currentProfile} companyId={companyId} onSaved={onRefreshSchedule}/>}
-        <nav aria-label="تبويبات بوابة الموظف" className="wafr-employee-tabs flex gap-2 overflow-x-auto pb-2 shrink-0" dir="rtl">
-          {([['schedule','الرئيسية'],['attendance','كشف البصمة والغياب'],['profile','ملفي الشخصي'],['requests','طلباتي'],['settings','الإعدادات']] as const).map(([id,label])=><button key={id} type="button" aria-pressed={activeTab===id} onClick={()=>setActiveTab(id)} className={'whitespace-nowrap shrink-0 px-4 py-3 rounded-xl text-sm font-bold border '+(activeTab===id?'bg-sky-600 text-white border-sky-600':'bg-white text-slate-600')}>{label}</button>)}
+        <nav aria-label="تبويبات بوابة الموظف" className="wafr-employee-tabs" dir="rtl">
+          {([
+            { id: 'schedule', label: 'الرئيسية', title: 'الرئيسية والجدول', icon: House },
+            { id: 'attendance', label: 'الحضور', title: 'كشف البصمة والغياب', icon: CalendarCheck },
+            { id: 'requests', label: 'الطلبات', title: 'طلباتي', icon: ClipboardList },
+            { id: 'profile', label: 'الملف', title: 'ملفي الشخصي', icon: UserRound },
+            { id: 'settings', label: 'الإعدادات', title: 'الإعدادات', icon: Settings },
+          ] as const).map(({id,label,title,icon:Icon}) => <button key={id} type="button" aria-label={title} aria-pressed={activeTab===id} onClick={()=>{setActiveTab(id); window.requestAnimationFrame(()=>document.getElementById('emp-portal')?.scrollIntoView({block:'start'}));}}><Icon size={21} aria-hidden="true" /><span>{label}</span></button>)}
         </nav>
+        <div className="wafr-page-heading"><p>بوابة الموظف</p><h2>{activeTab === 'schedule' ? 'يومك في مكان واحد' : activeTab === 'attendance' ? 'بصماتي وأيام الغياب' : activeTab === 'requests' ? 'متابعة طلباتي' : activeTab === 'profile' ? 'ملفي الشخصي' : 'الأمان والإعدادات'}</h2></div>
         <section hidden={activeTab!=='profile'} style={{display:activeTab==='profile'?'block':'none'}}><div key={String(employee.id)}><EmployeeSelfProfile employee={currentProfile} departmentName={dept?.name || 'بدون قسم'} companyId={companyId} onSaved={onRefreshSchedule} /></div></section>
-        {activeTab==='settings' && <div className="bg-white border p-4 rounded-xl flex flex-wrap gap-3"><button onClick={onOpenChangePassword} className="bg-sky-100 text-sky-800 rounded-lg px-4 py-2 text-sm">تغيير كلمة المرور</button><a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="text-sm underline p-2">سياسة الخصوصية</a><a href="/account-deletion.html" target="_blank" rel="noopener noreferrer" className="text-sm underline p-2">طلب حذف الحساب والبيانات</a>{currentProfile.email && <EmployeeEmailVerification employee={currentProfile} companyId={companyId} onSaved={onRefreshSchedule} />}</div>}
+        {activeTab==='settings' && <div className="wafr-settings-links bg-white border p-4 rounded-xl flex flex-wrap gap-3"><button onClick={onOpenChangePassword} className="bg-sky-100 text-sky-800 rounded-lg px-4 py-2 text-sm">تغيير كلمة المرور</button><a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="text-sm underline p-2">سياسة الخصوصية</a><a href="/account-deletion.html" target="_blank" rel="noopener noreferrer" className="text-sm underline p-2">طلب حذف الحساب والبيانات</a>{currentProfile.email && <EmployeeEmailVerification employee={currentProfile} companyId={companyId} onSaved={onRefreshSchedule} />}</div>}
 
         {/* Missed Shift Alert Banner */}
         {missedShiftAlert && (
@@ -1163,13 +1170,13 @@ export default function EmployeePortal({
         </div>
 
         <EmployeeWeekSchedule employeeId={String(employee.id)} schedule={scheduleData} shiftTypes={shiftTypes} />
-        <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-white border border-sky-100 text-xs">
+        <div className="wafr-schedule-sync flex flex-wrap items-center gap-3 p-3 rounded-xl bg-white border border-sky-100 text-xs">
           <button type="button" disabled={scheduleRefreshing} onClick={() => { void onRefreshSchedule(); }} className="px-3 py-2 rounded-lg bg-sky-100 text-sky-800 font-bold disabled:opacity-50">{scheduleRefreshing ? 'جارٍ تحديث الجدول…' : 'تحديث جدول الدوام'}</button>
           <span>آخر مزامنة مع السيرفر: {scheduleSyncedAt ? new Date(scheduleSyncedAt).toLocaleString('ar-SA', {timeZone:'Asia/Riyadh',numberingSystem:'latn'}) : 'لم يتم التحقق بعد'}</span>
           <span className="text-slate-500">يتحدث تلقائياً خلال دقيقة أثناء فتح التطبيق، وعند العودة إليه أو رجوع الإنترنت.</span>
           {scheduleSyncError && <p role="alert" className="w-full text-amber-800">{scheduleSyncError}</p>}
         </div>
-        <button type="button" aria-expanded={showFullMonth} onClick={()=>setShowFullMonth(!showFullMonth)} className="bg-white border rounded-xl p-3 text-sm text-sky-800">{showFullMonth?'إخفاء الجدول الشهري':'عرض جدول الشهر كاملًا'}</button>
+        <button type="button" aria-expanded={showFullMonth} onClick={()=>setShowFullMonth(!showFullMonth)} className="wafr-month-toggle bg-white border rounded-xl p-3 text-sm text-sky-800">{showFullMonth?'إخفاء الجدول الشهري':'عرض جدول الشهر كاملًا'}</button>
         <div hidden={!showFullMonth} style={{display:showFullMonth?'block':'none'}} className="space-y-6">
         {/* Month Selector */}
         <div className="flex items-center justify-between px-4 py-3 bg-white border border-sky-100 rounded-2xl shadow-sm">

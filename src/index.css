@@ -142,3 +142,86 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+/* Sleek mobile design, adapted to the existing Wafr identity and real workflows. */
+:root {
+  --wafr-surface: #ffffff;
+  --wafr-soft: #e8f3f1;
+  --wafr-muted: #536b73;
+  --wafr-radius: 16px;
+  --wafr-shadow: 0 2px 6px rgb(16 44 58 / 5%);
+}
+.wafr-employee { background: var(--wafr-paper); color: var(--wafr-ink); }
+.wafr-employee-brand { padding: 12px; }
+.wafr-employee-header { background: var(--wafr-paper); border-color: var(--wafr-line); max-width: 1120px; margin-inline: auto; }
+.wafr-employee-header p { color: var(--wafr-muted); font-size: 13px; }
+.wafr-employee main { gap: 20px; }
+.wafr-page-heading p { font-size: 12px; color: var(--wafr-muted); margin-bottom: 4px; }
+.wafr-page-heading h2 { font-size: 24px; line-height: 1.5; font-weight: 800; }
+.wafr-employee-tabs { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 4px; padding: 8px; border: 1px solid var(--wafr-line); border-radius: var(--wafr-radius); background: var(--wafr-surface); overflow: visible; }
+.wafr-employee-tabs button { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; border: 0; border-radius: 12px; padding: 12px 8px; color: var(--wafr-muted); font-size: 14px; font-weight: 700; }
+.wafr-employee-tabs button[aria-pressed="true"] { color: var(--wafr-action); background: var(--wafr-soft); }
+.wafr-employee-tabs button:hover { background: var(--wafr-soft); }
+.wafr-punch { border: 1px solid var(--wafr-line); border-radius: var(--wafr-radius); padding: 22px; box-shadow: var(--wafr-shadow); }
+.wafr-punch > div:first-child { font-size: 20px; color: var(--wafr-ink); }
+.wafr-punch button { min-height: 52px; font-size: 15px; justify-content: center; border-radius: 12px; }
+.wafr-punch button:disabled { cursor: wait; }
+.wafr-punch > div:last-child { line-height: 1.8; overflow-wrap: anywhere; }
+.wafr-week { border-radius: var(--wafr-radius); box-shadow: var(--wafr-shadow); padding-bottom: 20px; }
+.wafr-week-heading { padding: 20px; }
+.wafr-week-heading h2 { font-size: 21px; }
+.wafr-week-controls button { background: var(--wafr-surface); }
+.wafr-week-controls button:hover { background: var(--wafr-soft); }
+.wafr-week-days { border-top: 0; padding: 0 20px; gap: 10px; }
+.wafr-week-day { display: block; border: 1px solid var(--wafr-line); border-radius: 12px; padding: 14px; }
+.wafr-week-day:last-child { border-inline-end: 1px solid var(--wafr-line); }
+.wafr-week-day[data-today="true"] { border: 2px solid var(--wafr-action); background: var(--wafr-soft); box-shadow: none; padding: 13px; }
+.wafr-week-day[data-rest="true"] { background: var(--wafr-paper); border-style: dashed; }
+.wafr-week-date span { border-radius: 20px; padding: 2px 8px; background: var(--wafr-action); color: var(--wafr-surface); }
+.wafr-week-shift { margin-top: 14px; }
+.wafr-week-shift .wafr-week-time { font-size: 13px; color: var(--wafr-muted); }
+.wafr-schedule-sync { border-color: var(--wafr-line); color: var(--wafr-muted); line-height: 1.8; padding: 16px; }
+.wafr-month-toggle { min-height: 52px; font-weight: 700; border-color: var(--wafr-line); }
+.wafr-settings-links { padding: 20px; border-color: var(--wafr-line); border-radius: var(--wafr-radius); }
+.wafr-settings-links > a, .wafr-settings-links > button { min-height: 44px; display: inline-flex; align-items: center; }
+.wafr-self-profile { padding: 24px; border-color: var(--wafr-line); box-shadow: var(--wafr-shadow); }
+.wafr-self-profile h2 { font-size: 21px; color: var(--wafr-ink); }
+.wafr-self-profile label { font-size: 14px; font-weight: 700; color: var(--wafr-muted); }
+.wafr-self-profile input:not([type="file"]), .wafr-employee select, .wafr-employee textarea { border: 1px solid var(--wafr-line); border-radius: 12px; background: var(--wafr-paper); font-size: 16px; min-height: 48px; max-width: 100%; }
+.wafr-self-profile input[dir="ltr"] { text-align: left; }
+.wafr-self-profile button { min-height: 44px; }
+.wafr-self-profile dd { overflow-wrap: anywhere; }
+.wafr-self-profile .sr-only:focus-visible { position: static; width: 100%; height: auto; clip: auto; }
+.wafr-attendance-history h2 { font-size: 18px; }
+.wafr-attendance-history button, .wafr-attendance-history select, .wafr-attendance-history input { min-height: 44px; }
+.wafr-attendance-history article { border-radius: var(--wafr-radius); box-shadow: var(--wafr-shadow); }
+.wafr-login-welcome { margin-bottom: 24px; }
+.wafr-login-welcome h2 { font-size: 24px; font-weight: 800; color: var(--wafr-ink); }
+.wafr-login-welcome p { font-size: 14px; line-height: 1.8; color: var(--wafr-muted); margin-top: 6px; }
+.wafr-login-form input { background: var(--wafr-paper); border-radius: 12px; }
+.wafr-login-form > a { min-height: 44px; display: flex; align-items: center; justify-content: center; }
+.wafr-login-form button { border-radius: 12px; }
+.wafr-login-form > div:last-child { color: var(--wafr-muted); line-height: 1.8; }
+.wafr-login-form > div:last-child strong { color: var(--wafr-ink); }
+@media (max-width: 899px) {
+  .wafr-employee { padding-bottom: calc(120px + env(safe-area-inset-bottom)); }
+  .wafr-employee main { padding-inline: 16px; padding-top: 20px; }
+  .wafr-employee-tabs { position: fixed; z-index: 45; inset-inline: 12px; bottom: max(12px,env(safe-area-inset-bottom)); max-width: 650px; margin-inline: auto; box-shadow: 0 4px 20px rgb(16 44 58 / 10%); }
+  .wafr-employee-tabs button { flex-direction: column; gap: 5px; padding: 10px 2px; font-size: 11px; line-height: 1.5; min-height: 58px; }
+  .wafr-week-days { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .wafr-week-day { min-height: 125px; }
+  .wafr-week-heading { align-items: flex-start; }
+  .wafr-week-controls { flex-wrap: wrap; }
+  .wafr-punch { padding: 20px; }
+  .wafr-punch > div > div.flex.gap-3 > button:first-child { flex: 1; }
+  .wafr-self-profile { padding: 20px; }
+  .wafr-employee input:not([type="checkbox"]):not([type="file"]), .wafr-employee textarea { font-size: 16px; scroll-margin-block: 100px; }
+  .wafr-login { padding-top: max(24px,env(safe-area-inset-top)); }
+}
+@media (max-width: 380px) {
+  .wafr-week-days { padding-inline: 16px; gap: 8px; }
+  .wafr-week-day { padding: 12px; }
+  .wafr-week-day[data-today="true"] { padding: 11px; }
+  .wafr-week-controls button { padding-inline: 8px; }
+  .wafr-login-tabs button { gap: 4px; font-size: 12px; }
+}

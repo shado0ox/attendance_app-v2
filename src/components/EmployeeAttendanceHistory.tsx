@@ -8,7 +8,7 @@ export default function EmployeeAttendanceHistory({companyId,refreshKey}:{compan
     return()=>controller.abort();
   },[companyId,month,reload,refreshKey]);
   const items=(report?.items || []).filter((day:any)=>filter==='absent'?day.absent:filter==='review'?day.needsReview:true);
-  return <section dir="rtl" className="flex flex-col gap-4">
+  return <section dir="rtl" className="wafr-attendance-history flex flex-col gap-4">
     <div className="bg-white p-4 rounded-xl border flex flex-wrap items-center gap-3"><h2 className="font-bold flex-1">بصماتي وأيام الغياب</h2><label className="text-sm">الشهر<input aria-label="شهر كشف البصمات" type="month" value={month} onChange={e=>{if(e.target.value)setMonth(e.target.value);}} className="border p-2 rounded mr-2" /></label><button disabled={loading} onClick={()=>setReload(n=>n+1)} className="text-sm p-2 rounded bg-sky-100 text-sky-800 disabled:opacity-50">تحديث الكشف</button></div>
     <p className="text-xs text-slate-500">الغياب محسوب من جدولك المنشور بعد انتهاء الشيفت، مع استبعاد الإجازات المعتمدة والراحة. النتائج للمراجعة ولا تعد قرار خصم. الساعات بين أول حضور وآخر انصراف؛ الفترات المزدوجة والبصمات الناقصة تحتاج مراجعة.</p>
     {loading&&<p role="status">جاري تحميل كشفك…</p>}{error&&<p role="alert" className="p-4 bg-rose-50 text-rose-700 rounded">{error}</p>}
