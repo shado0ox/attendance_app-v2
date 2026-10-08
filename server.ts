@@ -1,3 +1,5 @@
+import {approvedPermissionMarkers} from './src/server/permissionMarkers';
+import {attachPermissionMarkers} from './src/lib/permissionMarkers';
 import { selfProfile, selfProfileUpdate, privateAttendanceDay, employeePhotoKey } from './src/server/employeeSelfService';
 import { businessCompany, canReadCompany, subscriptionMetadata, subscriptionUpdate } from './src/server/tenantPrivacy';
 import { identityValue, employeeIdentities, adminIdentity, masterIdentity, identityLock, allIdentities, assertUnique, resolveIdentity, migrateCompanyCodes, nextCompanyCode } from './src/server/companyIdentity';
@@ -860,10 +862,11 @@ app.get('/api/main-data', async (req, res) => {
   if (auth?.role === 'admin') { try { await validateOwnerSession(auth); access = await resolveAdminAccess(auth); } catch { return res.status(403).json({ error: 'حساب المسؤول غير متاح' }); } }
   const visibleMainData = async (value: any) => {
     if (!auth) return { departments: [], employees: [], shiftTypes: [], schedule: {}, settings: { companyName: 'نظام الدوام' } };
-    if (auth.role !== 'employee') return { ...scopedMainData(sanitizeMainData(value, true), access), _adminAccess: access };
+    const markers=await approvedPermissionMarkers(companyId);
+    if (auth.role !== 'employee') return { ...scopedMainData(sanitizeMainData(value, true), access), _adminAccess: access, _permissionDays:markers.filter(marker=>ownsEmployee(access,value,marker.employeeId)) };
     const result=employeeMainData(value, auth);
     const photos=await db.select().from(schema.systemData).where(eq(schema.systemData.key,employeePhotoKey(companyId,String(auth.id)))).limit(1);
-    return {...result,employees:result.employees.map((e:any)=>String(e.id)===String(auth.id)?{...e,photoDataUrl:(photos[0]?.value as any)?.dataUrl || ''}:e)};
+    return {...result,_permissionDays:markers.filter(marker=>marker.employeeId===String(auth.id)),employees:result.employees.map((e:any)=>String(e.id)===String(auth.id)?{...e,photoDataUrl:(photos[0]?.value as any)?.dataUrl || ''}:e)};
   };
   const canSeeSecrets = !!auth && (auth.role === 'superadmin' || (auth.role === 'admin' && auth.companyId === companyId));
 
@@ -1059,8 +1062,9 @@ app.get('/api/employee-attendance',requireAuth(['employee']),async(req,res)=>{
     const records=await db.select().from(schema.attendance).where(and(eq(schema.attendance.companyId,auth.companyId),eq(schema.attendance.empId,String(auth.id)),sql`${schema.attendance.date} >= ${from}`,sql`${schema.attendance.date} <= ${to}`));
     const leaves=await db.select().from(schema.requests).where(and(eq(schema.requests.companyId,auth.companyId),eq(schema.requests.empId,String(auth.id)),eq(schema.requests.type,'leave'),eq(schema.requests.status,'approved'),sql`${schema.requests.date} >= ${from}`,sql`${schema.requests.date} <= ${to}`));
     const published=effectiveScheduleData(data);
+    const permissions=(await approvedPermissionMarkers(auth.companyId,from,to)).filter(marker=>marker.employeeId===String(auth.id));
     const days=analyzeAttendance(buildAttendanceDays(records,data.settings),{...published,employees:[employee]},{from,to,empId:String(auth.id),dept:''},leaves).map(privateAttendanceDay).sort((a,b)=>b.date.localeCompare(a.date));
-    return res.json({month,generatedAt:new Date().toISOString(),items:days,totalMinutes:days.reduce((sum,d)=>sum+(d.minutes || 0),0),absentDays:days.filter(d=>d.absent).length,lateDays:days.filter(d=>d.lateMinutes>0).length,reviewDays:days.filter(d=>d.needsReview).length});
+    return res.json({month,generatedAt:new Date().toISOString(),items:days.map(day=>({...day,permissions:permissions.filter(marker=>marker.date===day.date)})),totalMinutes:days.reduce((sum,d)=>sum+(d.minutes || 0),0),absentDays:days.filter(d=>d.absent).length,lateDays:days.filter(d=>d.lateMinutes>0).length,reviewDays:days.filter(d=>d.needsReview).length});
   }catch{return res.status(503).json({error:'تعذر تحميل البصمات والغياب'});}
 });
 
@@ -1349,6 +1353,7 @@ app.get('/api/attendance-report', requireAuth(['admin', 'superadmin']), async (r
       const leaves = await db.select().from(schema.requests).where(and(eq(schema.requests.companyId, companyId), eq(schema.requests.type, 'leave'), eq(schema.requests.status, 'approved'), sql`${schema.requests.date} >= ${query.from}`, sql`${schema.requests.date} <= ${query.to}`));
       reportDays = analyzeAttendance(reportDays, effectiveScheduleData(mainData), query, leaves);
     }
+    reportDays=attachPermissionMarkers(reportDays,await approvedPermissionMarkers(companyId,query.from,query.to));
     const days = reportDays.map(day => ({ ...day, departmentName: mainData?.departments?.find((dept: any) => dept.id === day.dept)?.name || day.dept }));
     return res.json({ ...attendanceReportPage(days.filter(day => ownsDay(requestAccess(req), mainData, day)), query), companyName: mainData?.settings?.companyName || companyId, from: query.from, to: query.to });
   } catch (error) { console.error('Attendance report query failed', error); return res.status(500).json({ error: 'تعذر تحميل كشف الحضور' }); }

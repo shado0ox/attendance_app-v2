@@ -6,6 +6,7 @@ import SchedulePlanner from './SchedulePlanner';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
 
 interface ScheduleViewProps {
+  permissionDays?:any[];
   publishedSchedule: any;
   publishedShiftTypes: any[];
   canPublish?: boolean;
@@ -30,6 +31,7 @@ interface ScheduleViewProps {
 }
 
 export default function ScheduleView({
+  permissionDays=[],
   canPublish = true, companyId, onPublished, publishedSchedule, publishedShiftTypes,
   companyName,
   logoDataUrl,
@@ -212,6 +214,7 @@ export default function ScheduleView({
                         <span className={`inline-block px-2.5 py-1 rounded-full font-bold text-[10px] ${badgeStyle}`}>
                           {badgeLabel}
                         </span>
+                        {permissionDays.some(marker=>marker.date===dateStr&&marker.employeeId===String(emp.id))&&<div className="text-[10px] text-sky-700 font-bold">استئذان معتمد</div>}
                         {entry?.note && (
                           <span className="block text-[8px] text-slate-400 mt-0.5 truncate max-w-[80px] mx-auto">
                             {entry.note}

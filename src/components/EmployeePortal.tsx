@@ -10,6 +10,7 @@ import { getEmployeeLocations as getApprovedLocations, matchAttendanceLocation }
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle, Fingerprint, ScanFace, ShieldCheck, House, CalendarCheck, ClipboardList, UserRound, Settings } from 'lucide-react';
 interface EmployeePortalProps {
+  permissionDays?: any[];
   scheduleNotice?: { revision: string; publishedAt: string | null };
   onRefreshSchedule: () => Promise<boolean>;
   scheduleRefreshing: boolean;
@@ -27,6 +28,7 @@ interface EmployeePortalProps {
 }
 
 export default function EmployeePortal({
+  permissionDays=[],
   scheduleNotice,
   onRefreshSchedule,
   scheduleRefreshing,
@@ -1170,7 +1172,7 @@ export default function EmployeePortal({
           )}
         </div>
 
-        <EmployeeWeekSchedule employeeId={String(employee.id)} schedule={scheduleData} shiftTypes={shiftTypes} />
+        <EmployeeWeekSchedule employeeId={String(employee.id)} schedule={scheduleData} shiftTypes={shiftTypes} permissionDays={permissionDays} />
         <div className="wafr-schedule-sync flex flex-wrap items-center gap-3 p-3 rounded-xl bg-white border border-sky-100 text-xs">
           <button type="button" disabled={scheduleRefreshing} onClick={() => { void onRefreshSchedule(); }} className="px-3 py-2 rounded-lg bg-sky-100 text-sky-800 font-bold disabled:opacity-50">{scheduleRefreshing ? 'جارٍ تحديث الجدول…' : 'تحديث جدول الدوام'}</button>
           <span>آخر مزامنة مع السيرفر: {scheduleSyncedAt ? new Date(scheduleSyncedAt).toLocaleString('ar-SA-u-ca-gregory-nu-latn', {timeZone:'Asia/Riyadh',numberingSystem:'latn'}) : 'لم يتم التحقق بعد'}</span>
@@ -1235,6 +1237,7 @@ export default function EmployeePortal({
 
                     // Read shift configuration
                     const assigned = scheduleData[dateStr]?.[employee.id];
+                    const permissionNotice=permissionDays.some(marker=>marker.date===dateStr&&marker.employeeId===String(employee.id));
                     const stType = assigned?.shiftType || 'A';
 
                     let cellBg = 'bg-white';
@@ -1310,6 +1313,7 @@ export default function EmployeePortal({
                             ) : (
                               <span className="text-[8px] text-slate-300">-</span>
                             )}
+                            {permissionNotice&&<div className="text-[9px] text-sky-700 font-bold">استئذان معتمد</div>}
                           </div>
                         </div>
                       </td>

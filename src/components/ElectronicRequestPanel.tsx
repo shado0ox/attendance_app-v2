@@ -1,6 +1,5 @@
-import DocumentPrintDialog, { useDocumentPrint } from './DocumentPrintDialog';
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
-import { Ban, Plus, Printer, RefreshCw, Link2 } from 'lucide-react';
+import { Plus, RefreshCw, Link2 } from 'lucide-react';
 
 type FormState = {
   date: string;
@@ -133,8 +132,8 @@ function SignaturePad({
 
 const statusLabel = (status: string) =>
   ({
-    employee_signed: 'بانتظار موافقة الإدارة',
-    manager_ready: 'وافقت الإدارة — أرسل الرابط للمدير',
+    employee_signed: 'اعتمده الموظف — جاهز لمشاركة رابط المدير',
+    manager_ready: 'جاهز لمشاركة رابط المدير',
     admin_rejected: 'مرفوض من الإدارة',
     pending_manager: 'بانتظار اعتماد المدير',
     approved: 'معتمد',
@@ -170,8 +169,7 @@ export default function ElectronicRequestPanel({
   appSettings: any;
   departmentName: string;
 }) {
-  const {html,printDocument:print,closePrint}=useDocumentPrint(companyId);
-  const [link,setLink]=useState<{url:string;expiresAt:string}|null>(null);
+  const [link,setLink]=useState<{id:number;url:string;expiresAt:string}|null>(null);
   const [loadError,setLoadError]=useState('');
   const [docs, setDocs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -189,7 +187,8 @@ export default function ElectronicRequestPanel({
         '/api/electronic-documents?companyId=' + encodeURIComponent(companyId),
       );
       if(!response.ok) throw new Error('تعذر تحديث حالة الطلبات');
-      setDocs(await response.json());setLoadError('');
+      const rows=await response.json();setDocs(rows);setLoadError('');
+      setLink(current=>current&&rows.some((doc:any)=>doc.id===current.id&&['employee_signed','manager_ready','pending_manager'].includes(doc.status))?current:null);
     } catch(error:any){setLoadError(error.message||'تعذر الاتصال بالسيرفر');
     } finally {
       setLoading(false);
@@ -215,6 +214,7 @@ export default function ElectronicRequestPanel({
       return;
     }
 
+    if(!confirm('بعد اعتماد الطلب لن تستطيع تعديل النموذج أو فتحه مرة أخرى. هل تريد الاعتماد وإرسال رابط المدير للتوقيع؟'))return;
     setSaving(true);
     try {
       const response = await fetch('/api/electronic-documents', {
@@ -229,6 +229,7 @@ export default function ElectronicRequestPanel({
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'تعذر إنشاء الطلب');
 
+      setLink({id:result.id,url:result.url,expiresAt:result.expiresAt});
       setOpen(false);
       setForm(initialForm());
       setSignature('');
@@ -240,47 +241,26 @@ export default function ElectronicRequestPanel({
     }
   };
 
-  const cancel = async (id: number) => {
-    if (!confirm('هل تريد إلغاء هذا الطلب؟ لن يمكن استخدام رابط المدير بعد الإلغاء.')) return;
-
-    setCancelBusy(id);
-    try {
-      const response = await fetch('/api/electronic-documents/' + id + '/cancel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyId }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'تعذر إلغاء الطلب');
-      await load();
-    } catch (error: any) {
-      alert(error.message);
-    } finally {
-      setCancelBusy(null);
-    }
-  };
-
   const share = async(id:number)=>{
     setShareBusy(id);
     try {
       const response=await fetch('/api/electronic-documents/'+id+'/share',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({companyId})});
       const result=await response.json();
       if(!response.ok)throw new Error(result.error||'تعذر إنشاء الرابط');
-      setLink(result);await load();
+      setLink({...result,id});await load();
     } catch(error:any){alert(error.message);}finally{setShareBusy(null);}
   };
 
   return (
     <div className="flex flex-col gap-5">
-      {html&&<DocumentPrintDialog html={html} onClose={closePrint}/>}
       {loadError&&<p role="alert" className="text-xs text-rose-600">{loadError}</p>}
       <button disabled={loading} onClick={()=>void load()} className="self-start border rounded-lg px-3 py-2 text-xs flex items-center gap-2"><RefreshCw size={14}/> تحديث حالة الطلبات</button>
-      {link&&<div className="border rounded-xl bg-sky-50 p-4 text-xs space-y-3"><b>رابط المدير للتوقيع</b><input readOnly value={link.url} dir="ltr" className="w-full border rounded-lg p-2" onFocus={event=>event.target.select()}/><p>صالح حتى {new Date(link.expiresAt).toLocaleString('ar-SA-u-ca-gregory-nu-latn')}</p><div className="flex gap-2 flex-wrap"><button onClick={()=>{void navigator.clipboard?.writeText(link.url).then(()=>alert('تم نسخ الرابط')).catch(()=>alert('حدد الرابط وانسخه يدويًا'));}} className="border rounded-lg p-2">نسخ الرابط</button><a target="_blank" rel="noopener noreferrer" href={'https://wa.me/?text='+encodeURIComponent('يرجى مراجعة طلب الاستئذان والتوقيع: '+link.url)} className="bg-emerald-600 text-white rounded-lg p-2">إرسال عبر واتساب</a><button onClick={()=>setLink(null)} className="border rounded-lg p-2">إغلاق</button></div></div>}
+      {link&&<div className="border rounded-xl bg-sky-50 p-4 text-xs space-y-3"><b>رابط المدير للتوقيع</b><input readOnly value={link.url} dir="ltr" className="w-full border rounded-lg p-2" onFocus={event=>event.target.select()}/><p>صالح حتى {new Date(link.expiresAt).toLocaleString('ar-SA-u-ca-gregory-nu-latn')}</p><div className="flex gap-2 flex-wrap"><button onClick={async()=>{try{if(navigator.share)await navigator.share({title:'طلب استئذان للتوقيع',text:'يرجى مراجعة طلب الاستئذان والتوقيع',url:link.url});else if(navigator.clipboard){await navigator.clipboard.writeText(link.url);alert('تم نسخ الرابط؛ أرسله عبر البرنامج المطلوب');}}catch(error:any){if(error.name!=='AbortError')alert('تعذرت المشاركة؛ انسخ الرابط أو استخدم واتساب');}}} className="bg-sky-600 text-white rounded-lg p-2">مشاركة عبر تطبيقات الهاتف</button><button onClick={()=>{void navigator.clipboard?.writeText(link.url).then(()=>alert('تم نسخ الرابط')).catch(()=>alert('حدد الرابط وانسخه يدويًا'));}} className="border rounded-lg p-2">نسخ الرابط</button><a target="_blank" rel="noopener noreferrer" href={'https://wa.me/?text='+encodeURIComponent('يرجى مراجعة طلب الاستئذان والتوقيع: '+link.url)} className="bg-emerald-600 text-white rounded-lg p-2">إرسال عبر واتساب</a><button onClick={()=>setLink(null)} className="border rounded-lg p-2">إغلاق</button></div></div>}
       <div className="flex items-center justify-between gap-3">
         <div>
           <h3 className="font-extrabold text-slate-800 text-sm">المستندات والطلبات الإلكترونية</h3>
           <p className="text-[10px] text-slate-400 mt-1">
-            يُرسل الطلب للإدارة أولًا، وبعد موافقتها يظهر لك رابط لإرساله للمدير للتوقيع. الاعتماد يحفظ المستند ولا يغيّر حساب الحضور أو الخصومات تلقائيًا.
+            بعد توقيعك واعتماد الطلب يتاح رابط مشاركته مع المدير مباشرة، وتتابع الإدارة جميع المراحل. الاعتماد يحفظ المستند ولا يغيّر حساب الحضور أو الخصومات تلقائيًا.
           </p>
         </div>
         <button
@@ -442,7 +422,7 @@ export default function ElectronicRequestPanel({
                 onClick={create}
                 className="px-5 py-2 bg-sky-600 text-white rounded-lg text-xs font-bold"
               >
-                {saving ? 'جاري الحفظ...' : 'توقيع وحفظ الطلب'}
+                {saving ? 'جاري الاعتماد...' : 'اعتماد الطلب'}
               </button>
             </div>
           </div>
@@ -461,7 +441,7 @@ export default function ElectronicRequestPanel({
                 <div>
                   <div className="font-extrabold text-xs text-slate-800">نموذج استئذان — #{doc.id}</div>
                   <div className="text-[10px] text-slate-400 mt-1">
-                    {doc.formData?.date || doc.createdAt?.slice(0, 10)} · {requestTypeLabel(doc.formData?.requestType)}
+                    {doc.date || doc.formData?.date || doc.createdAt?.slice(0, 10)} · {requestTypeLabel(doc.requestType||doc.formData?.requestType)}
                   </div>
                   {doc.status === 'approved' && doc.managerName && (
                     <div className="text-[10px] text-emerald-700 mt-1">اعتمد بواسطة: {doc.managerName}</div>
@@ -479,26 +459,8 @@ export default function ElectronicRequestPanel({
                     {statusLabel(doc.status)}
                   </span>
 
-                  {(doc.status === 'employee_signed' || doc.status === 'manager_ready' || doc.status === 'pending_manager') && (
-                    <button
-                      onClick={() => void cancel(doc.id)}
-                      disabled={cancelBusy === doc.id}
-                      className="px-3 py-1.5 border border-rose-200 text-rose-600 rounded-lg text-[10px] font-bold"
-                    >
-                      <Ban size={12} className="inline ml-1" />
-                      {cancelBusy === doc.id ? '...' : 'إلغاء'}
-                    </button>
-                  )}
+                  {(doc.status==='employee_signed'||doc.status==='manager_ready'||doc.status==='pending_manager')&&<button disabled={shareBusy===doc.id} onClick={()=>void share(doc.id)} className="px-3 py-1.5 border border-sky-200 text-sky-700 rounded-lg text-[10px] font-bold"><Link2 size={12} className="inline ml-1"/>{shareBusy===doc.id?'جاري التحميل…':'رابط المدير / مشاركة'}</button>}
 
-                  {(doc.status==='manager_ready'||doc.status==='pending_manager')&&<button disabled={shareBusy===doc.id} onClick={()=>void share(doc.id)} className="px-3 py-1.5 border border-sky-200 text-sky-700 rounded-lg text-[10px] font-bold"><Link2 size={12} className="inline ml-1"/>{shareBusy===doc.id?'جاري التحميل…':'رابط المدير / مشاركة'}</button>}
-                  {doc.status === 'approved' && (
-                    <button
-                      onClick={() => print(doc)}
-                      className="px-3 py-1.5 border rounded-lg text-[10px] font-bold"
-                    >
-                      <Printer size={12} className="inline ml-1" /> طباعة
-                    </button>
-                  )}
                 </div>
               </div>
             ))}

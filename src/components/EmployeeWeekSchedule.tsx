@@ -4,7 +4,7 @@ import { employeeWeekDates } from '../lib/employeeWeek';
 
 const dayNames = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
 
-export default function EmployeeWeekSchedule({ employeeId, schedule, shiftTypes }: { employeeId: string; schedule: any; shiftTypes: any[] }) {
+export default function EmployeeWeekSchedule({ employeeId, schedule, shiftTypes, permissionDays=[] }: { employeeId: string; schedule: any; shiftTypes: any[]; permissionDays?: any[] }) {
   const [offset, setOffset] = useState(0);
   const dates = employeeWeekDates(Date.now(), offset);
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
@@ -31,7 +31,7 @@ export default function EmployeeWeekSchedule({ employeeId, schedule, shiftTypes 
           return (
             <article key={date} className="wafr-week-day" data-today={date === today} data-rest={rest} aria-current={date === today ? 'date' : undefined}>
               <div className="wafr-week-date"><strong>{dayNames[i]}</strong><time dateTime={date} dir="ltr">{date.slice(5)}</time>{date === today && <span>اليوم</span>}</div>
-              <div className="wafr-week-shift"><p>{label}</p>{shift && !rest && <><p className="wafr-week-time" dir="ltr">{shift.start || '—'} – {shift.end || '—'}</p>{shift.type === 'double' && <p className="wafr-week-time" dir="ltr">{shift.start2 || '—'} – {shift.end2 || '—'}</p>}</>}{assigned?.note && <p className="wafr-week-note">{assigned.note}</p>}</div>
+              <div className="wafr-week-shift"><p>{label}</p>{shift && !rest && <><p className="wafr-week-time" dir="ltr">{shift.start || '—'} – {shift.end || '—'}</p>{shift.type === 'double' && <p className="wafr-week-time" dir="ltr">{shift.start2 || '—'} – {shift.end2 || '—'}</p>}</>}{permissionDays.some(marker=>marker.date===date&&marker.employeeId===employeeId)&&<p className="wafr-week-note text-sky-700 font-bold">استئذان معتمد</p>}{assigned?.note && <p className="wafr-week-note">{assigned.note}</p>}</div>
             </article>
           );
         })}

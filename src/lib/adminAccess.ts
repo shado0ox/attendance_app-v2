@@ -67,7 +67,9 @@ export function allowedAdminRoute(access: AdminAccess, method: string, route: st
   if (route === '/api/schedule-publication') return access.departmentIds === null && access.permissions.canEditSchedule;
   if (route === '/api/requests' || /^\/api\/requests\/\d+$/.test(route)) return read ? access.permissions.canApproveRequests || access.permissions.canViewReports : method === 'PUT' && access.permissions.canApproveRequests;
   if (route === '/api/electronic-documents') return read ? access.permissions.canApproveRequests || access.permissions.canViewReports : access.permissions.canApproveRequests;
-  if (/^\/api\/electronic-documents\/\d+\/(review|status)$/.test(route)) return method === 'POST' && access.permissions.canApproveRequests;
+  if (/^\/api\/electronic-documents\/\d+\/status$/.test(route)) return method === 'POST' && access.permissions.canApproveRequests;
+  if (/^\/api\/electronic-documents\/\d+\/audit$/.test(route)) return read && (access.permissions.canApproveRequests || access.permissions.canViewReports);
+  if (/^\/api\/electronic-documents\/\d+$/.test(route)) return method==='DELETE' && access.permissions.canApproveRequests;
   if (/^\/api\/electronic-documents\/\d+\/print$/.test(route)) return read && access.permissions.canPrint;
   if (['/api/attendance-report','/api/attendance-exceptions'].includes(route)) return read && access.permissions.canViewReports;
   if (route === '/api/attendance-months') return access.departmentIds === null && access.permissions.canViewReports;
