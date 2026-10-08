@@ -23,6 +23,7 @@ import { validMonth, validAttendanceDate, riyadhMonth } from './src/lib/attendan
 import { mainDataVersion } from './src/lib/mainDataVersion';
 import { punchFields, validatePunchTransition, checkPunchLocation } from './src/lib/punchPolicy';
 import { matchAttendanceLocation } from './src/lib/attendanceLocations';
+import { registerElectronicDocumentRoutes } from './src/server/electronicDocuments';
 import dotenv from 'dotenv';
 import path from 'path';
 dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
@@ -311,6 +312,8 @@ function consumeStoredChallenge(companyId: string, empId: string | number, type:
 function bufferFromBase64url(value: string) {
   return Buffer.from(value, 'base64url');
 }
+
+registerElectronicDocumentRoutes(app, requireAuth, getMainDataByCompanyId);
 
 // Debug DB route (development only — leaks connection details, never expose in production)
 app.get('/api/debug-db', (req, res) => {
