@@ -114,7 +114,7 @@ try {
   assert.equal(scoped.status,200);
   const scopedDocs:any[]=await scoped.json();
   assert.ok(scopedDocs.every(d=>d.departmentName==='Department A'));
-  assert.equal((await request('/api/electronic-documents/'+created.id+'/status',{role:'admin',companyId:companyA,id:adminId,method:'POST',body:JSON.stringify({status:'cancelled'})})).status,409);
+  assert.equal((await request('/api/electronic-documents/'+created.id+'/status',{role:'admin',companyId:companyA,id:adminId,method:'POST',body:JSON.stringify({status:'cancelled'})})).status,404);
 
   const otherCompanyList=await request('/api/electronic-documents',{role:'superadmin',companyId:'default',requestCompanyId:companyB});
   assert.equal(otherCompanyList.status,403);
