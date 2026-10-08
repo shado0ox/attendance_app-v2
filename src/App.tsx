@@ -6,6 +6,7 @@ import LoginScreen from './components/LoginScreen';
 import AdminPortal from './components/AdminPortal';
 import SystemUpdateNotice from './components/SystemUpdateNotice';
 import EmployeePortal from './components/EmployeePortal';
+import DocumentApprovalPage from './pages/DocumentApprovalPage';
 import { SESSION_EXPIRED_EVENT } from './lib/authFetch';
 
 // Default initial datasets to seed if Firestore is blank
@@ -58,6 +59,11 @@ for (const [empId, cfg] of Object.entries(empShifts)) {
       defaultSchedule[dateStr][empId] = { shiftType: 'A', note: '' };
     }
   }
+}
+
+function DocumentApprovalRoute() {
+  const token = new URLSearchParams(window.location.search).get('token') || window.location.pathname.split('/').pop() || '';
+  return <DocumentApprovalPage token={token} />;
 }
 
 export default function App() {
@@ -606,6 +612,7 @@ export default function App() {
         doesn't match what the route requires.
       */}
       <Routes>
+        <Route path="/document-approval/:token" element={<DocumentApprovalRoute />} />
         <Route
           path="/login"
           element={
