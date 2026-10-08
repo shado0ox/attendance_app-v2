@@ -14,7 +14,7 @@ const typeLabel = (v:string) => ({temporary_exit:'استئذان (خروج مؤ�
 const statusLabel = (v:string) => ({employee_signed:'موقّع من الموظف',pending_manager:'بانتظار اعتماد المدير',approved:'معتمد',rejected:'مرفوض',cancelled:'ملغي'}[v] || v);
 
 const safeImageSrc = (value:unknown) =>
-  typeof value === 'string' && /^data:image\\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(value)
+  typeof value === 'string' && /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(value)
     ? value
     : '';
 
