@@ -225,12 +225,17 @@ export function registerElectronicDocumentRoutes(
         return res.status(404).json({error:'المستند غير موجود أو لا يمكن إلغاؤه'});
       }
 
-      await db.update(schema.electronicDocuments)
+      const [updated]=await db.update(schema.electronicDocuments)
         .set({status:'cancelled',shareTokenHash:null,shareExpiresAt:null,shareUsedAt:null,updatedAt:new Date()})
-        .where(eq(schema.electronicDocuments.id,id));
+        .where(and(
+          eq(schema.electronicDocuments.id,id),
+          ne(schema.electronicDocuments.status,'approved'),
+        ))
+        .returning();
+      if(!updated) return res.status(409).json({error:'تعذر الإلغاء لأن المستند تم اعتماده أثناء العملية'});
 
       await db.insert(schema.electronicDocumentAudit).values({
-        companyId:String(doc.companyId),
+        companyId:String(updated.companyId),
         documentId:id,
         actorId:String(auth.id || auth.username || 'employee'),
         actorRole:auth.role,

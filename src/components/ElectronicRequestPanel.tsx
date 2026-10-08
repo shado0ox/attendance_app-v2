@@ -448,6 +448,15 @@ export default function ElectronicRequestPanel({
                   <div className="text-[10px] text-slate-400 mt-1">
                     {doc.formData?.date || doc.createdAt?.slice(0, 10)} · {requestTypeLabel(doc.formData?.requestType)}
                   </div>
+                  {doc.status === 'approved' && doc.managerName && (
+                    <div className="text-[10px] text-emerald-700 mt-1">اعتمد بواسطة: {doc.managerName}</div>
+                  )}
+                  {doc.status === 'rejected' && (
+                    <div className="text-[10px] text-rose-700 mt-1">
+                      {doc.managerName ? 'المدير: ' + doc.managerName + ' · ' : ''}
+                      سبب الرفض: {doc.reviewReason || 'لم يتم تسجيل سبب.'}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap">
