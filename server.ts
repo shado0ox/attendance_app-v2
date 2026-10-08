@@ -1364,7 +1364,7 @@ app.get('/api/system-health', requireAuth(['admin', 'superadmin']), async (req,r
   try {
     const started=Date.now();client=await pool.connect();await client.query({text:'SELECT 1',query_timeout:3000});
     const tables=await client.query({text:'SELECT table_name FROM information_schema.tables WHERE table_schema=$1',values:[getDbSchemaName()],query_timeout:3000});
-    const expected=['system_data','attendance','requests','admins','companies','audit_log','attendance_months','registration_requests'];
+    const expected=['system_data','attendance','requests','admins','companies','audit_log','attendance_months','registration_requests','electronic_documents','electronic_document_audit'];
     const missing=expected.filter(name=>!tables.rows.some((r:any)=>r.table_name===name));
     database={status:missing.length?'incomplete':'ok',latencyMs:Date.now()-started,tables:expected.map(name=>({name,present:!missing.includes(name)})),message:missing.length?'جداول مطلوبة غير موجودة':'الاتصال والجداول الأساسية سليمة'};
     client.release();client=undefined;
