@@ -18,12 +18,12 @@ const validDate = (value:unknown) => {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 };
 
-const validTime = (value:unknown) => typeof value === 'string' && /^([01]\\d|2[0-3]):[0-5]\\d$/.test(value);
+const validTime = (value:unknown) => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 
 const validPngDataUrl = (value:unknown) =>
   typeof value === 'string' &&
   value.length <= 500000 &&
-  /^data:image\\/png;base64,[A-Za-z0-9+/=]+$/.test(value);
+  /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(value);
 
 const normalizeForm = (form:any) => {
   if (!form || typeof form !== 'object' || Array.isArray(form)) return { error: 'بيانات الطلب غير صالحة' };
