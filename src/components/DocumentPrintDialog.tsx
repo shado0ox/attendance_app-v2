@@ -17,10 +17,11 @@ export function useDocumentPrint(companyId:string) {
 export default function DocumentPrintDialog({html,onClose}:{html:string;onClose:()=>void}) {
   const frame=useRef<HTMLIFrameElement>(null);
   const [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const requestClose=()=>{if(history.state?.documentPreview)history.back();else onClose();};
   useEffect(()=>{
     const previous=document.body.style.overflow;
     document.body.style.overflow='hidden';
-    const close=(event:KeyboardEvent)=>{if(event.key==='Escape')onClose();};
+    const close=(event:KeyboardEvent)=>{if(event.key==='Escape'){if(history.state?.documentPreview)history.back();else onClose();}};
     // Android/TWA back closes the preview instead of leaving an orphan print window.
     history.pushState({documentPreview:true},'',location.href);
     const back=()=>onClose();
@@ -30,7 +31,6 @@ export default function DocumentPrintDialog({html,onClose}:{html:string;onClose:
       document.body.style.overflow=previous;
       window.removeEventListener('popstate',back);
       document.removeEventListener('keydown',close);
-      if(history.state?.documentPreview)history.back();
     };
   },[onClose]);
   const download=async()=>{
@@ -57,7 +57,7 @@ export default function DocumentPrintDialog({html,onClose}:{html:string;onClose:
   };
   return <div role="dialog" aria-modal="true" aria-label="معاينة وطباعة المستند" dir="rtl" className="fixed inset-0 z-[150] bg-slate-100 flex flex-col">
     <header className="shrink-0 bg-white border-b p-3 flex flex-wrap items-center gap-2" style={{paddingTop:'max(12px, env(safe-area-inset-top))'}}>
-      <button onClick={onClose} className="border rounded-lg px-4 py-2 text-sm">رجوع / إغلاق</button>
+      <button onClick={requestClose} className="border rounded-lg px-4 py-2 text-sm">رجوع / إغلاق</button>
       <button disabled={!ready||busy} onClick={()=>{frame.current?.contentWindow?.focus();frame.current?.contentWindow?.print();}} className="bg-sky-600 text-white rounded-lg px-4 py-2 text-sm disabled:opacity-50">طباعة</button>
       <button disabled={!ready||busy} onClick={()=>void download()} className="border rounded-lg px-4 py-2 text-sm disabled:opacity-50">{busy?'جاري إنشاء PDF…':'حفظ PDF'}</button>
       <span className="text-xs text-slate-500">لو الطباعة لا تفتح داخل التطبيق، احفظ PDF ثم اطبعه من الهاتف.</span>
