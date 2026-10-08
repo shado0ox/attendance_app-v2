@@ -163,13 +163,19 @@ export function registerElectronicDocumentRoutes(
     } catch(error:any){console.error('electronic document create failed',error);return res.status(500).json({error:'تعذر حفظ المستند'});}
   });
 
-  app.post('/api/electronic-documents/:id/share', employeeOrAdmin, async (req:Request,res:Response)=>{
+  app.post('/api/electronic-documents/:id/share', adminOnly, async (req:Request,res:Response)=>{
     const auth=(req as any).auth as Auth;
     const id=Number(req.params.id);
     try {
       const rows=await db.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.id,id)).limit(1);
       const doc=rows[0];
-      if(!doc || String(doc.companyId)!==String(auth.companyId) || (auth.role==='employee' && String(doc.employeeId)!==String(auth.id))) return res.status(404).json({error:'المستند غير موجود'});
+      if(!doc || String(doc.companyId)!==String(auth.companyId)) return res.status(404).json({error:'المستند غير موجود'});
+      const access=(req as any).adminAccess;
+      if(access?.departmentIds !== null && Array.isArray(access?.departmentIds)) {
+        const data=await getMainDataByCompanyId(String(doc.companyId));
+        const employee=(data?.employees || []).find((e:any)=>String(e.id)===String(doc.employeeId));
+        if(!employee || !access.departmentIds.includes(employee.dept)) return res.status(404).json({error:'المستند غير موجود'});
+      }
       if(doc.status!=='employee_signed' && doc.status!=='pending_manager') return res.status(409).json({error:'المستند غير جاهز للإرسال للمدير'});
       const wasPending=doc.status==='pending_manager';
       const token=makeToken(), hash=tokenHash(token), expires=new Date(Date.now()+72*60*60*1000);

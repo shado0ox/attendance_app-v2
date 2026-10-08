@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
-import { Ban, Link2, Plus, Printer } from 'lucide-react';
+import { Ban, Plus, Printer } from 'lucide-react';
 
 type FormState = {
   date: string;
@@ -129,7 +129,7 @@ function SignaturePad({
 
 const statusLabel = (status: string) =>
   ({
-    employee_signed: 'موقّع من الموظف',
+    employee_signed: 'بانتظار إرسال المدير من الإدارة',
     pending_manager: 'بانتظار اعتماد المدير',
     approved: 'معتمد',
     rejected: 'مرفوض',
@@ -222,39 +222,6 @@ export default function ElectronicRequestPanel({
     }
   };
 
-  const share = async (id: number) => {
-    setShareBusy(id);
-    try {
-      const response = await fetch('/api/electronic-documents/' + id + '/share', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyId }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'تعذر إنشاء الرابط');
-
-      let copied = false;
-      try {
-        if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
-        await navigator.clipboard.writeText(result.url);
-        copied = true;
-      } catch {
-        copied = false;
-      }
-
-      await load();
-      if (copied) {
-        alert('تم إنشاء رابط المدير ونسخه. الرابط صالح لمدة 72 ساعة ويُستخدم مرة واحدة.');
-      } else {
-        window.prompt('تم إنشاء الرابط. انسخه يدويًا:', result.url);
-      }
-    } catch (error: any) {
-      alert(error.message);
-    } finally {
-      setShareBusy(null);
-    }
-  };
-
   const cancel = async (id: number) => {
     if (!confirm('هل تريد إلغاء هذا الطلب؟ لن يمكن استخدام رابط المدير بعد الإلغاء.')) return;
 
@@ -290,7 +257,7 @@ export default function ElectronicRequestPanel({
         <div>
           <h3 className="font-extrabold text-slate-800 text-sm">المستندات والطلبات الإلكترونية</h3>
           <p className="text-[10px] text-slate-400 mt-1">
-            نموذج استئذان إلكتروني بتوقيع الموظف واعتماد المدير.
+            نموذج استئذان إلكتروني بتوقيع الموظف، ثم إرساله للمدير من الإدارة.
           </p>
         </div>
         <button
@@ -452,7 +419,7 @@ export default function ElectronicRequestPanel({
                 onClick={create}
                 className="px-5 py-2 bg-sky-600 text-white rounded-lg text-xs font-bold"
               >
-                {saving ? 'جاري الحفظ...' : 'توقيع وإرسال للمدير'}
+                {saving ? 'جاري الحفظ...' : 'توقيع وحفظ الطلب'}
               </button>
             </div>
           </div>
@@ -479,28 +446,6 @@ export default function ElectronicRequestPanel({
                   <span className={'px-2.5 py-1 rounded-full text-[9px] font-bold ' + statusClass(doc.status)}>
                     {statusLabel(doc.status)}
                   </span>
-
-                  {doc.status === 'employee_signed' && (
-                    <button
-                      onClick={() => share(doc.id)}
-                      disabled={shareBusy === doc.id}
-                      className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-[10px] font-bold"
-                    >
-                      <Link2 size={12} className="inline ml-1" />
-                      {shareBusy === doc.id ? '...' : 'إرسال للمدير'}
-                    </button>
-                  )}
-
-                  {doc.status === 'pending_manager' && (
-                    <button
-                      onClick={() => share(doc.id)}
-                      disabled={shareBusy === doc.id}
-                      className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-[10px] font-bold"
-                    >
-                      <Link2 size={12} className="inline ml-1" />
-                      {shareBusy === doc.id ? '...' : 'إعادة إصدار الرابط'}
-                    </button>
-                  )}
 
                   {(doc.status === 'employee_signed' || doc.status === 'pending_manager') && (
                     <button
