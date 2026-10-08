@@ -235,7 +235,8 @@ export default function ElectronicRequestPanel({
 
       let copied = false;
       try {
-        await navigator.clipboard?.writeText(result.url);
+        if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+        await navigator.clipboard.writeText(result.url);
         copied = true;
       } catch {
         copied = false;
