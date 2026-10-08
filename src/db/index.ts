@@ -221,6 +221,7 @@ export const initializeSchemaAndTables = async () => {
           "created_at" timestamp DEFAULT NOW(),
           "updated_at" timestamp DEFAULT NOW()
         );
+        ALTER TABLE "${dbSchema}"."electronic_documents" ADD COLUMN IF NOT EXISTS "share_token_encrypted" text;
         CREATE INDEX IF NOT EXISTS electronic_documents_company_employee ON "${dbSchema}"."electronic_documents" ("company_id","employee_id","created_at");
         CREATE INDEX IF NOT EXISTS electronic_documents_share_token ON "${dbSchema}"."electronic_documents" ("share_token_hash");
       `);

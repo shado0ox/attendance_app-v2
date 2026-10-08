@@ -147,6 +147,7 @@ export const electronicDocuments = pgTable('electronic_documents', {
   managerDecision: text('manager_decision'),
   reviewReason: text('review_reason'),
   shareTokenHash: text('share_token_hash'),
+  shareTokenEncrypted: text('share_token_encrypted'),
   shareExpiresAt: timestamp('share_expires_at'),
   shareUsedAt: timestamp('share_used_at'),
   finalHtml: text('final_html'),

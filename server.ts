@@ -313,7 +313,7 @@ function bufferFromBase64url(value: string) {
   return Buffer.from(value, 'base64url');
 }
 
-registerElectronicDocumentRoutes(app, requireAuth, getMainDataByCompanyId);
+registerElectronicDocumentRoutes(app, requireAuth, getMainDataByCompanyId, () => JWT_SECRET);
 
 // Debug DB route (development only — leaks connection details, never expose in production)
 app.get('/api/debug-db', (req, res) => {

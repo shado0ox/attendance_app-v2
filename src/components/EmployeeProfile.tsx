@@ -1,3 +1,4 @@
+import DocumentPrintDialog, { useDocumentPrint } from './DocumentPrintDialog';
 import { useEffect, useRef, useState } from 'react';
 import { formatMinutes, formatPunch } from '../lib/attendanceReport';
 import { statusLabels } from '../lib/employeeLifecycle';
@@ -9,6 +10,7 @@ const requestStatuses: Record<string, string> = { pending: 'بانتظار ال�
 const dayName = (date: string) => new Date(date + 'T12:00:00Z').toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { weekday: 'long', timeZone: 'Asia/Riyadh' });
 const dateTime = (date?: string) => date ? new Date(date).toLocaleString('ar-SA-u-ca-gregory-nu-latn', { timeZone: 'Asia/Riyadh', numberingSystem: 'latn' }) : 'غير مسجل';
 export default function EmployeeProfile({ employee, companyId, departments, onClose, onEdit }: { employee: any; companyId: string; departments: any[]; onClose: () => void; onEdit: () => void }) {
+  const {html,printDocument:printElectronicDocument,closePrint}=useDocumentPrint(companyId);
   const [section, setSection] = useState<ProfileSection>('overview');
   const [month, setMonth] = useState(() => new Date(Date.now() + 3 * 3600000).toISOString().slice(0, 7));
   const [page, setPage] = useState(1);
@@ -66,25 +68,9 @@ export default function EmployeeProfile({ employee, companyId, departments, onCl
     return () => controller.abort();
   }, [key, refresh, companyId, employee.id, section, month, page]);
   const retry = () => { cache.current.delete(key); setRefresh(n => n + 1); };
-  const printElectronicDocument = async (doc: any) => {
-    const w = window.open('', '_blank', 'width=900,height=1000');
-    if (!w) return;
-    try {
-      const response = await fetch('/api/electronic-documents/' + doc.id + '/print?companyId=' + encodeURIComponent(companyId));
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'تعذر تحميل نسخة الطباعة');
-      w.document.write(result.finalHtml || '<p>لا توجد نسخة قابلة للطباعة.</p>');
-      w.document.close();
-      w.focus();
-      setTimeout(() => w.print(), 300);
-    } catch (error:any) {
-      w.close();
-      alert(error.message);
-    }
-  };
   const tableClass = 'w-full min-w-[650px] text-xs text-right';
   return <div className="fixed inset-0 z-[100] bg-black/40 p-2 sm:p-5 flex items-center justify-center" dir="rtl"><section ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="employee-profile-title" className="bg-white rounded-2xl w-full max-w-5xl max-h-[94dvh] flex flex-col min-h-0 outline-none">
-    <header className="p-4 border-b shrink-0"><div className="flex items-start justify-between gap-3"><div><h2 id="employee-profile-title" className="font-bold text-lg">ملف {profile?.name || employee.name}</h2><p className="text-xs text-slate-500 mt-1">{profile?.departmentName || departments.find(d => d.id === employee.dept)?.name || 'بدون قسم'} · {statusLabels[(profile?.status || employee.status || 'active') as keyof typeof statusLabels]}</p></div><div className="flex gap-2 shrink-0"><button onClick={onEdit} className="border rounded-lg px-3 py-2 text-xs">تعديل البيانات</button><button onClick={onClose} className="border rounded-lg px-3 py-2 text-xs">إغلاق</button></div></div>
+    {html&&<DocumentPrintDialog html={html} onClose={closePrint}/>}<header className="p-4 border-b shrink-0"><div className="flex items-start justify-between gap-3"><div><h2 id="employee-profile-title" className="font-bold text-lg">ملف {profile?.name || employee.name}</h2><p className="text-xs text-slate-500 mt-1">{profile?.departmentName || departments.find(d => d.id === employee.dept)?.name || 'بدون قسم'} · {statusLabels[(profile?.status || employee.status || 'active') as keyof typeof statusLabels]}</p></div><div className="flex gap-2 shrink-0"><button onClick={onEdit} className="border rounded-lg px-3 py-2 text-xs">تعديل البيانات</button><button onClick={onClose} className="border rounded-lg px-3 py-2 text-xs">إغلاق</button></div></div>
       <nav aria-label="أقسام ملف الموظف" className="flex gap-2 flex-wrap mt-4">{sections.map(tab => <button key={tab.id} aria-pressed={section === tab.id} onClick={() => { setSection(tab.id); setPage(1); }} className={`rounded-lg px-3 py-2 text-xs ${section === tab.id ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-700'}`}>{tab.label}</button>)}</nav>
     </header>
     <div className="p-4 overflow-y-auto min-h-0 overscroll-contain"><div className="flex flex-wrap items-center justify-between gap-3 mb-4">{monthly ? <label className="text-xs flex items-center gap-2">الشهر <input aria-label="شهر ملف الموظف" type="month" min="2000-01" value={month} onChange={e => { if (e.target.value) { setMonth(e.target.value); setPage(1); } }} className="border rounded-lg p-2" /></label> : <span className="text-xs text-slate-500">{section === 'history' ? 'آخر 100 تعديل مسجل' : 'بيانات الموظف الحالية'}</span>}<button disabled={loading} onClick={retry} className="text-sky-700 text-xs border rounded-lg px-3 py-2 disabled:opacity-50">تحديث هذا القسم</button></div>

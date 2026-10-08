@@ -1505,7 +1505,7 @@ export default function EmployeePortal({
         {/* Requests Management Buttons */}
         </section>
         <section hidden={activeTab!=='requests'} style={{display:activeTab==='requests'?'flex':'none'}} className="flex flex-col gap-6">
-        <ElectronicRequestPanel employee={currentProfile} companyId={companyId} appSettings={companySettings} departmentName={departments.find(d => d.id === currentProfile?.dept)?.name || ''} />
+        <ElectronicRequestPanel active={activeTab==='requests'} employee={currentProfile} companyId={companyId} appSettings={companySettings} departmentName={departments.find(d => d.id === currentProfile?.dept)?.name || ''} />
         <div className="flex gap-2.5 flex-wrap">
           <button
             onClick={() => { setRequestType('leave'); setRequestModalOpen(true); }}
