@@ -1,4 +1,4 @@
-import { pgTable, serial, text, doublePrecision, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, serial, integer, text, doublePrecision, jsonb, timestamp } from 'drizzle-orm/pg-core';
 
 // 0. Companies / Tenants (for subscription/multi-tenancy)
 export const companies = pgTable('companies', {
@@ -157,7 +157,7 @@ export const electronicDocuments = pgTable('electronic_documents', {
 export const electronicDocumentAudit = pgTable('electronic_document_audit', {
   id: serial('id').primaryKey(),
   companyId: text('company_id').notNull(),
-  documentId: serial('document_id').notNull(),
+  documentId: integer('document_id').notNull(),
   actorId: text('actor_id').notNull(),
   actorRole: text('actor_role').notNull(),
   action: text('action').notNull(),
