@@ -58,7 +58,15 @@ export function registerElectronicDocumentRoutes(
         .where(eq(schema.electronicDocuments.companyId,companyId))
         .orderBy(desc(schema.electronicDocuments.createdAt),desc(schema.electronicDocuments.id));
       if(auth.role==='employee') rows=rows.filter(r=>String(r.employeeId)===String(auth.id));
-      else if(requestedEmployee) rows=rows.filter(r=>String(r.employeeId)===requestedEmployee);
+      else {
+        if(requestedEmployee) rows=rows.filter(r=>String(r.employeeId)===requestedEmployee);
+        const access=(req as any).adminAccess;
+        if(access?.departmentIds !== null && Array.isArray(access?.departmentIds)) {
+          const mainData=await getMainDataByCompanyId(companyId);
+          const allowed=new Set((mainData?.employees||[]).filter((e:any)=>access.departmentIds.includes(e.dept)).map((e:any)=>String(e.id)));
+          rows=rows.filter(r=>allowed.has(String(r.employeeId)));
+        }
+      }
       return res.json(rows);
     } catch(error:any){return res.status(500).json({error:'تعذر تحميل المستندات الإلكترونية'});}
   });
@@ -126,8 +134,9 @@ export function registerElectronicDocumentRoutes(
           await tx.insert(schema.electronicDocumentAudit).values({companyId:String(doc.companyId),documentId:doc.id,actorId:managerName,actorRole:'manager',action:'rejected',details:{reason}});
           return updated;
         }
-        const updatedBase={...doc,status:'approved',managerName,managerSignature,managerSignedAt:new Date(),managerDecision:'approved',reviewReason:null,shareUsedAt:new Date(),updatedAt:new Date()};
-        const html=finalHtml(updatedBase,company);
+        const updatedBase={status:'approved',managerName,managerSignature,managerSignedAt:new Date(),managerDecision:'approved',reviewReason:null,shareUsedAt:new Date(),updatedAt:new Date()};
+        const preview={...doc,...updatedBase};
+        const html=finalHtml(preview,company);
         const [updated]=await tx.update(schema.electronicDocuments).set({...updatedBase,finalHtml:html}).where(eq(schema.electronicDocuments.id,doc.id)).returning();
         await tx.insert(schema.electronicDocumentAudit).values({companyId:String(doc.companyId),documentId:doc.id,actorId:managerName,actorRole:'manager',action:'approved',details:{}});
         return updated;
