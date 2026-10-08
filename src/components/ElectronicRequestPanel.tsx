@@ -242,13 +242,21 @@ export default function ElectronicRequestPanel({
     }
   };
 
-  const print = (doc: any) => {
+  const print = async (doc: any) => {
     const windowRef = window.open('', '_blank', 'width=900,height=1000');
     if (!windowRef) return;
-    windowRef.document.write(doc.finalHtml || '<p>لا توجد نسخة قابلة للطباعة.</p>');
-    windowRef.document.close();
-    windowRef.focus();
-    setTimeout(() => windowRef.print(), 300);
+    try {
+      const response = await fetch('/api/electronic-documents/' + doc.id + '/print?companyId=' + encodeURIComponent(companyId));
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'تعذر تحميل نسخة الطباعة');
+      windowRef.document.write(result.finalHtml || '<p>لا توجد نسخة قابلة للطباعة.</p>');
+      windowRef.document.close();
+      windowRef.focus();
+      setTimeout(() => windowRef.print(), 300);
+    } catch (error:any) {
+      windowRef.close();
+      alert(error.message);
+    }
   };
 
   return (
