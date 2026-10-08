@@ -94,6 +94,8 @@ try {
   assert.equal((await fetch(origin+'/api/document-approval/'+encodeURIComponent(tokenValue)+'?companyId='+encodeURIComponent(companyA))).status,404);
   assert.equal((await request('/api/electronic-documents/'+created.id+'/cancel',{role:'employee',companyId:companyA,id:employeeA,method:'POST',body:'{}'})).status,404);
   assert.equal((await request('/api/electronic-documents/'+created.id+'/status',{role:'admin',companyId:companyA,id:adminId,method:'POST',body:JSON.stringify({status:'cancelled'})})).status,409);
+  await put('adminAccess:'+companyA+':'+adminId,{...fullAdminAccess(),departmentIds:[departmentA]});
+
   const employeeBCreate=await request('/api/electronic-documents',{role:'employee',companyId:companyA,id:employeeB,method:'POST',body:JSON.stringify({companyId:companyA,formData:form,employeeSignature:signature})});
   assert.equal(employeeBCreate.status,201);
   const createdB:any=await employeeBCreate.json();
@@ -108,7 +110,6 @@ try {
   assert.equal(list[0].managerSignature,undefined);
   assert.equal(list[0].shareTokenHash,undefined);
 
-  await put('adminAccess:'+companyA+':'+adminId,{...fullAdminAccess(),departmentIds:[departmentA]});
   const scoped=await request('/api/electronic-documents',{role:'admin',companyId:companyA,id:adminId});
   assert.equal(scoped.status,200);
   const scopedDocs:any[]=await scoped.json();
