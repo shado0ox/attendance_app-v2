@@ -262,6 +262,12 @@ export function registerElectronicDocumentRoutes(
       const rows=await db.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.id,id)).limit(1), doc=rows[0];
       const auth=(req as any).auth as Auth;
       if(!doc || String(doc.companyId)!==String(auth.companyId) || doc.status==='approved') return res.status(404).json({error:'المستند غير موجود أو لا يمكن تعديله'});
+      const access=(req as any).adminAccess;
+      if(access?.departmentIds !== null && Array.isArray(access?.departmentIds)) {
+        const data=await getMainDataByCompanyId(String(doc.companyId));
+        const employee=(data?.employees || []).find((e:any)=>String(e.id)===String(doc.employeeId));
+        if(!employee || !access.departmentIds.includes(employee.dept)) return res.status(404).json({error:'المستند غير موجود أو لا يمكن تعديله'});
+      }
       const [updated]=await db.update(schema.electronicDocuments)
         .set({status,shareTokenHash:null,shareExpiresAt:null,shareUsedAt:null,updatedAt:new Date()})
         .where(and(eq(schema.electronicDocuments.id,id),ne(schema.electronicDocuments.status,'approved')))
