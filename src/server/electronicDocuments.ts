@@ -116,7 +116,9 @@ export function registerElectronicDocumentRoutes(
 
   app.get('/api/electronic-documents', employeeOrAdmin, async (req:Request,res:Response)=>{
     const auth=(req as any).auth as Auth;
-    const companyId=String(auth.companyId || 'default');
+    const companyId=auth.role==='superadmin'
+      ? String(req.query.companyId || 'default')
+      : String(auth.companyId || 'default');
     const requestedEmployee=clean(req.query.employeeId,100);
     try {
       let rows=await db.select().from(schema.electronicDocuments)
