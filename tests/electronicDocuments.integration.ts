@@ -93,7 +93,12 @@ try {
 
   assert.equal((await fetch(origin+'/api/document-approval/'+encodeURIComponent(tokenValue)+'?companyId='+encodeURIComponent(companyA))).status,404);
   assert.equal((await request('/api/electronic-documents/'+created.id+'/cancel',{role:'employee',companyId:companyA,id:employeeA,method:'POST',body:'{}'})).status,404);
-  assert.equal((await request('/api/electronic-documents/'+created.id+'/status',{role:'admin',companyId:companyA,id:adminId,method:'POST',body:JSON.stringify({status:'cancelled'})})).status,404);
+  const adminPrint=await request('/api/electronic-documents/'+created.id+'/print',{role:'admin',companyId:companyA,id:adminId});
+  assert.equal(adminPrint.status,200);
+  const printPayload:any=await adminPrint.json();
+  assert.ok(typeof printPayload.finalHtml==='string' && printPayload.finalHtml.includes('نموذج استئذان'));
+  await put('adminAccess:'+companyA+':'+adminId,{...fullAdminAccess(),permissions:{...fullAdminAccess().permissions,canPrint:false}});
+  assert.equal((await request('/api/electronic-documents/'+created.id+'/print',{role:'admin',companyId:companyA,id:adminId})).status,403);
   await put('adminAccess:'+companyA+':'+adminId,{...fullAdminAccess(),departmentIds:[departmentA]});
 
   const employeeBCreate=await request('/api/electronic-documents',{role:'employee',companyId:companyA,id:employeeB,method:'POST',body:JSON.stringify({companyId:companyA,formData:form,employeeSignature:signature})});
