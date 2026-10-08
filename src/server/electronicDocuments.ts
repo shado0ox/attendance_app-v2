@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index.ts';
 
 type Auth = { role: 'superadmin'|'admin'|'employee'; companyId: string; id?: string|number; name?: string; username?: string };
@@ -261,8 +261,12 @@ export function registerElectronicDocumentRoutes(
       const rows=await db.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.id,id)).limit(1), doc=rows[0];
       const auth=(req as any).auth as Auth;
       if(!doc || String(doc.companyId)!==String(auth.companyId) || doc.status==='approved') return res.status(404).json({error:'المستند غير موجود أو لا يمكن تعديله'});
-      await db.update(schema.electronicDocuments).set({status,shareTokenHash:null,shareExpiresAt:null,shareUsedAt:null,updatedAt:new Date()}).where(eq(schema.electronicDocuments.id,id));
-      await db.insert(schema.electronicDocumentAudit).values({companyId:String(doc.companyId),documentId:id,actorId:String(auth.id || auth.username || 'admin'),actorRole:auth.role,action:'status_changed',details:{status}});
+      const [updated]=await db.update(schema.electronicDocuments)
+        .set({status,shareTokenHash:null,shareExpiresAt:null,shareUsedAt:null,updatedAt:new Date()})
+        .where(and(eq(schema.electronicDocuments.id,id),ne(schema.electronicDocuments.status,'approved')))
+        .returning();
+      if(!updated) return res.status(409).json({error:'تعذر الإلغاء لأن المستند تم اعتماده أو تغيّرت حالته أثناء العملية'});
+      await db.insert(schema.electronicDocumentAudit).values({companyId:String(updated.companyId),documentId:id,actorId:String(auth.id || auth.username || 'admin'),actorRole:auth.role,action:'status_changed',details:{status}});
       return res.json({success:true});
     } catch(error:any){return res.status(500).json({error:'تعذر تحديث حالة المستند'});}
   });
