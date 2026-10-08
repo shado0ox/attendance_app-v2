@@ -32,7 +32,20 @@ const headers=(role:string,companyId:string,id?:string|number)=>({
   Authorization:'Bearer '+token({role,companyId,...(id===undefined?{}:{id}),name:role==='employee'?'Employee CI':'Admin CI'}),
   'Content-Type':'application/json',
 });
-const request=async(endpoint:string,opts:any={})=>fetch(origin+endpoint,{...opts,headers:{...headers(opts.role||'admin',opts.companyId||companyA,opts.id),...(opts.headers||{})}});
+const request=async(endpoint:string,opts:any={})=>{
+  const authCompanyId=opts.companyId||companyA;
+  const requestedCompanyId=opts.requestCompanyId||authCompanyId;
+  const method=opts.method||'GET';
+  const separator=endpoint.includes('?')?'&':'?';
+  const url=origin+endpoint+separator+'companyId='+encodeURIComponent(requestedCompanyId);
+  let body=opts.body;
+  if(method!=='GET'){
+    const payload=body ? JSON.parse(body) : {};
+    payload.companyId=authCompanyId;
+    body=JSON.stringify(payload);
+  }
+  return fetch(url,{...opts,method,body,headers:{...headers(opts.role||'admin',authCompanyId,opts.id),...(opts.headers||{})}});
+};
 const put=async(key:string,value:any)=>pool.query('INSERT INTO shift_app.system_data (key,value) VALUES ($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',[key,JSON.stringify(value)]);
 const form={date:'2026-10-09',requestType:'temporary_exit',absenceType:'annual',exitTime:'10:30',expectedReturnTime:'12:00',actualAttendanceTime:'',absenceFrom:'',absenceTo:'',reason:'اختبار مستند إلكتروني',employeeCommitment:true};
 const signature='data:image/png;base64,AAAA';
@@ -69,16 +82,16 @@ try {
   const tokenValue=shared.url.split('/document-approval/')[1];
   assert.ok(tokenValue);
 
-  const opened=await fetch(origin+'/api/document-approval/'+encodeURIComponent(tokenValue));
+  const opened=await fetch(origin+'/api/document-approval/'+encodeURIComponent(tokenValue)+'?companyId='+encodeURIComponent(companyA));
   assert.equal(opened.status,200);
   const publicDoc:any=await opened.json();
   assert.equal(publicDoc.employeeName,'Employee A');
   assert.equal(publicDoc.managerSignature,undefined);
 
-  const approved=await fetch(origin+'/api/document-approval/'+encodeURIComponent(tokenValue),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerName:'Manager A',managerSignature:signature,decision:'approved',reason:''})});
+  const approved=await fetch(origin+'/api/document-approval/'+encodeURIComponent(tokenValue),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({companyId:companyA,managerName:'Manager A',managerSignature:signature,decision:'approved',reason:''})});
   assert.equal(approved.status,200);
 
-  assert.equal((await fetch(origin+'/api/document-approval/'+encodeURIComponent(tokenValue))).status,404);
+  assert.equal((await fetch(origin+'/api/document-approval/'+encodeURIComponent(tokenValue)+'?companyId='+encodeURIComponent(companyA))).status,404);
   assert.equal((await request('/api/electronic-documents/'+created.id+'/cancel',{role:'employee',companyId:companyA,id:employeeA,method:'POST',body:'{}'})).status,404);
   assert.equal((await request('/api/electronic-documents/'+created.id+'/status',{role:'admin',companyId:companyA,id:adminId,method:'POST',body:JSON.stringify({status:'cancelled'})})).status,409);
   const employeeBCreate=await request('/api/electronic-documents',{role:'employee',companyId:companyA,id:employeeB,method:'POST',body:JSON.stringify({companyId:companyA,formData:form,employeeSignature:signature})});
@@ -102,7 +115,7 @@ try {
   assert.ok(scopedDocs.every(d=>d.departmentName==='Department A'));
   assert.equal((await request('/api/electronic-documents/'+created.id+'/status',{role:'admin',companyId:companyA,id:adminId,method:'POST',body:JSON.stringify({status:'cancelled'})})).status,409);
 
-  const otherCompanyList=await request('/api/electronic-documents?companyId='+encodeURIComponent(companyB),{role:'superadmin',companyId:'default'});
+  const otherCompanyList=await request('/api/electronic-documents',{role:'superadmin',companyId:'default',requestCompanyId:companyB});
   assert.equal(otherCompanyList.status,200);
   const otherDocs:any[]=await otherCompanyList.json();
   assert.equal(otherDocs.length,0);
