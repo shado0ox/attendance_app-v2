@@ -195,6 +195,49 @@ export const initializeSchemaAndTables = async () => {
         );
       `);
 
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS "${dbSchema}"."electronic_documents" (
+          "id" serial PRIMARY KEY,
+          "company_id" text NOT NULL,
+          "employee_id" text NOT NULL,
+          "employee_name" text NOT NULL,
+          "department_name" text DEFAULT '',
+          "document_type" text NOT NULL DEFAULT 'permission',
+          "status" text NOT NULL DEFAULT 'employee_signed',
+          "version" text NOT NULL DEFAULT '1',
+          "parent_document_id" text,
+          "form_data" jsonb NOT NULL,
+          "employee_signature" text NOT NULL,
+          "employee_signed_at" timestamp,
+          "manager_name" text,
+          "manager_signature" text,
+          "manager_signed_at" timestamp,
+          "manager_decision" text,
+          "review_reason" text,
+          "share_token_hash" text,
+          "share_expires_at" timestamp,
+          "share_used_at" timestamp,
+          "final_html" text,
+          "created_at" timestamp DEFAULT NOW(),
+          "updated_at" timestamp DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS electronic_documents_company_employee ON "${dbSchema}"."electronic_documents" ("company_id","employee_id","created_at");
+        CREATE INDEX IF NOT EXISTS electronic_documents_share_token ON "${dbSchema}"."electronic_documents" ("share_token_hash");
+      `);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS "${dbSchema}"."electronic_document_audit" (
+          "id" serial PRIMARY KEY,
+          "company_id" text NOT NULL,
+          "document_id" integer NOT NULL,
+          "actor_id" text NOT NULL,
+          "actor_role" text NOT NULL,
+          "action" text NOT NULL,
+          "details" jsonb DEFAULT '{}'::jsonb,
+          "created_at" timestamp DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS electronic_document_audit_doc ON "${dbSchema}"."electronic_document_audit" ("company_id","document_id","created_at");
+      `);
+
       await client.query(`CREATE TABLE IF NOT EXISTS "${dbSchema}".audit_log (
         id serial PRIMARY KEY, company_id text NOT NULL, actor_id text NOT NULL,
         actor_role text NOT NULL, action text NOT NULL, entity_id text,
