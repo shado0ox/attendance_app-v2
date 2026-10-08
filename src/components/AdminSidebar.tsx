@@ -199,6 +199,10 @@ export default function AdminSidebar({
               />
             )}
 
+            {hasPermission('canApproveRequests') && (
+              <NavItem to="/admin/documents" active={activeView === 'documents'} icon={<FileText size={15} />} label="المستندات الإلكترونية" onNavigate={closeMobileSidebar} />
+            )}
+
             {hasPermission('canManageSettings') && !Array.isArray(admin.departmentIds) && <NavItem to="/admin/health" active={activeView === 'health'} icon={<ShieldCheck size={15} />} label="صحة النظام" onNavigate={closeMobileSidebar} />}
             {hasPermission('canManageSettings') && (
               <NavItem
