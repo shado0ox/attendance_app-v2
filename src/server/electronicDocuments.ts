@@ -1,7 +1,8 @@
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
-import { and, desc, eq, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import { db, schema } from '../db/index.ts';
+import { normalizeForm, validateSignature } from './electronicDocumentValidation.ts';
 
 type Auth = { role: 'superadmin'|'admin'|'employee'; companyId: string; id?: string|number; name?: string; username?: string };
 
@@ -11,66 +12,6 @@ const clean = (v:unknown, max=5000) => typeof v === 'string' ? v.trim().slice(0,
 const escapeHtml = (v:unknown) => String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch] as string));
 const typeLabel = (v:string) => ({temporary_exit:'استئذان (خروج مؤقت)',early_exit:'خروج مبكر',late_arrival:'تأخير عن الدوام',absence:'غياب عن الدوام'}[v] || v);
 const statusLabel = (v:string) => ({employee_signed:'موقّع من الموظف',pending_manager:'بانتظار اعتماد المدير',approved:'معتمد',rejected:'مرفوض',cancelled:'ملغي'}[v] || v);
-
-const validDate = (value:unknown) => {
-  if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return false;
-  const date = new Date(value + 'T00:00:00.000Z');
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-};
-
-const validTime = (value:unknown) => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
-
-const validPngDataUrl = (value:unknown) =>
-  typeof value === 'string' &&
-  value.length <= 500000 &&
-  /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(value);
-
-const normalizeForm = (form:any) => {
-  if (!form || typeof form !== 'object' || Array.isArray(form)) return { error: 'بيانات الطلب غير صالحة' };
-
-  const requestType = clean(form.requestType, 30);
-  const absenceType = clean(form.absenceType, 20);
-  const date = clean(form.date, 10);
-  const reason = clean(form.reason, 2000);
-  const exitTime = clean(form.exitTime, 5);
-  const expectedReturnTime = clean(form.expectedReturnTime, 5);
-  const actualAttendanceTime = clean(form.actualAttendanceTime, 5);
-  const absenceFrom = clean(form.absenceFrom, 10);
-  const absenceTo = clean(form.absenceTo, 10);
-
-  if (!validDate(date) || !reason) return { error: 'التاريخ وسبب الطلب مطلوبان وبصيغة صحيحة' };
-  if (!['temporary_exit', 'early_exit', 'late_arrival', 'absence'].includes(requestType)) return { error: 'نوع الطلب غير صالح' };
-
-  if (requestType === 'temporary_exit' || requestType === 'early_exit') {
-    if (!validTime(exitTime) || !validTime(expectedReturnTime)) return { error: 'وقت الخروج ووقت العودة المتوقع مطلوبان وبصيغة صحيحة' };
-  }
-
-  if (requestType === 'late_arrival' && !validTime(actualAttendanceTime)) {
-    return { error: 'وقت الحضور الفعلي مطلوب وبصيغة صحيحة' };
-  }
-
-  if (requestType === 'absence') {
-    if (!['annual', 'sick', 'other'].includes(absenceType)) return { error: 'نوع الغياب غير صالح' };
-    if (!validDate(absenceFrom) || !validDate(absenceTo) || absenceTo < absenceFrom) {
-      return { error: 'فترة الغياب مطلوبة ويجب أن تكون صحيحة' };
-    }
-  }
-
-  return {
-    value: {
-      date,
-      requestType,
-      absenceType: requestType === 'absence' ? absenceType : '',
-      expectedReturnTime: requestType === 'temporary_exit' || requestType === 'early_exit' ? expectedReturnTime : '',
-      exitTime: requestType === 'temporary_exit' || requestType === 'early_exit' ? exitTime : '',
-      actualAttendanceTime: requestType === 'late_arrival' ? actualAttendanceTime : '',
-      absenceFrom: requestType === 'absence' ? absenceFrom : '',
-      absenceTo: requestType === 'absence' ? absenceTo : '',
-      reason,
-      employeeCommitment: true,
-    },
-  };
-};
 
 const safeImageSrc = (value:unknown) =>
   typeof value === 'string' && /^data:image\\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(value)
@@ -121,21 +62,69 @@ export function registerElectronicDocumentRoutes(
       : String(auth.companyId || 'default');
     const requestedEmployee=clean(req.query.employeeId,100);
     try {
-      let rows=await db.select().from(schema.electronicDocuments)
-        .where(eq(schema.electronicDocuments.companyId,companyId))
+      const conditions=[eq(schema.electronicDocuments.companyId,companyId)];
+      if(auth.role==='employee') conditions.push(eq(schema.electronicDocuments.employeeId,String(auth.id)));
+      else if(requestedEmployee) conditions.push(eq(schema.electronicDocuments.employeeId,requestedEmployee));
+
+      const access=(req as any).adminAccess;
+      if(auth.role!=='employee' && access?.departmentIds !== null && Array.isArray(access?.departmentIds)) {
+        const mainData=await getMainDataByCompanyId(companyId);
+        const allowedIds=(mainData?.employees || [])
+          .filter((e:any)=>access.departmentIds.includes(e.dept))
+          .map((e:any)=>String(e.id));
+        if(!allowedIds.length) return res.json([]);
+        conditions.push(inArray(schema.electronicDocuments.employeeId,allowedIds));
+      }
+
+      const rows=await db.select({
+        id:schema.electronicDocuments.id,
+        companyId:schema.electronicDocuments.companyId,
+        employeeId:schema.electronicDocuments.employeeId,
+        employeeName:schema.electronicDocuments.employeeName,
+        departmentName:schema.electronicDocuments.departmentName,
+        documentType:schema.electronicDocuments.documentType,
+        status:schema.electronicDocuments.status,
+        version:schema.electronicDocuments.version,
+        parentDocumentId:schema.electronicDocuments.parentDocumentId,
+        formData:schema.electronicDocuments.formData,
+        managerName:schema.electronicDocuments.managerName,
+        managerDecision:schema.electronicDocuments.managerDecision,
+        reviewReason:schema.electronicDocuments.reviewReason,
+        createdAt:schema.electronicDocuments.createdAt,
+        updatedAt:schema.electronicDocuments.updatedAt,
+      }).from(schema.electronicDocuments)
+        .where(and(...conditions))
         .orderBy(desc(schema.electronicDocuments.createdAt),desc(schema.electronicDocuments.id));
-      if(auth.role==='employee') rows=rows.filter(r=>String(r.employeeId)===String(auth.id));
+      return res.json(rows);
+    } catch(error:any){return res.status(500).json({error:'تعذر تحميل المستندات الإلكترونية'});}
+  });
+
+  app.get('/api/electronic-documents/:id/print', employeeOrAdmin, async (req:Request,res:Response)=>{
+    const auth=(req as any).auth as Auth;
+    const id=Number(req.params.id);
+    if(!Number.isInteger(id) || id<=0) return res.status(400).json({error:'معرف المستند غير صالح'});
+    const companyId=auth.role==='superadmin'
+      ? String(req.query.companyId || 'default')
+      : String(auth.companyId || 'default');
+    try {
+      const conditions=[eq(schema.electronicDocuments.id,id),eq(schema.electronicDocuments.companyId,companyId),eq(schema.electronicDocuments.status,'approved')];
+      if(auth.role==='employee') conditions.push(eq(schema.electronicDocuments.employeeId,String(auth.id)));
       else {
-        if(requestedEmployee) rows=rows.filter(r=>String(r.employeeId)===requestedEmployee);
         const access=(req as any).adminAccess;
         if(access?.departmentIds !== null && Array.isArray(access?.departmentIds)) {
           const mainData=await getMainDataByCompanyId(companyId);
-          const allowed=new Set((mainData?.employees||[]).filter((e:any)=>access.departmentIds.includes(e.dept)).map((e:any)=>String(e.id)));
-          rows=rows.filter(r=>allowed.has(String(r.employeeId)));
+          const allowedIds=(mainData?.employees || [])
+            .filter((e:any)=>access.departmentIds.includes(e.dept))
+            .map((e:any)=>String(e.id));
+          if(!allowedIds.length) return res.status(404).json({error:'المستند غير موجود'});
+          conditions.push(inArray(schema.electronicDocuments.employeeId,allowedIds));
         }
       }
-      return res.json(rows);
-    } catch(error:any){return res.status(500).json({error:'تعذر تحميل المستندات الإلكترونية'});}
+      const [doc]=await db.select({finalHtml:schema.electronicDocuments.finalHtml})
+        .from(schema.electronicDocuments).where(and(...conditions)).limit(1);
+      if(!doc?.finalHtml) return res.status(404).json({error:'المستند غير موجود أو لا توجد نسخة قابلة للطباعة'});
+      return res.json({finalHtml:doc.finalHtml});
+    } catch(error:any){return res.status(500).json({error:'تعذر تحميل نسخة الطباعة'});}
   });
 
   app.post('/api/electronic-documents', employeeOrAdmin, async (req:Request,res:Response)=>{
@@ -146,8 +135,8 @@ export function registerElectronicDocumentRoutes(
     const employee=(data?.employees || []).find((e:any)=>String(e.id)===String(auth.id));
     if(!employee) return res.status(404).json({error:'الموظف غير موجود'});
     const parsed=normalizeForm(req.body?.formData);
-    const signature=clean(req.body?.employeeSignature,500000);
-    if ('error' in parsed || !validPngDataUrl(signature) || req.body?.formData?.employeeCommitment!==true) {
+    const signature=req.body?.employeeSignature;
+    if ('error' in parsed || !validateSignature(signature) || req.body?.formData?.employeeCommitment!==true) {
       return res.status(400).json({error: 'error' in parsed ? parsed.error : 'التوقيع الإلكتروني غير صالح'});
     }
     const form=parsed.value;
@@ -199,8 +188,8 @@ export function registerElectronicDocumentRoutes(
   });
 
   app.post('/api/document-approval/:token', async (req:Request,res:Response)=>{
-    const hash=tokenHash(String(req.params.token||'')), managerName=clean(req.body?.managerName,200), managerSignature=clean(req.body?.managerSignature,500000), decision=clean(req.body?.decision,20), reason=clean(req.body?.reason,2000);
-    if(!managerName || !validPngDataUrl(managerSignature) || !['approved','rejected'].includes(decision)) return res.status(400).json({error:'أدخل اسم المدير والتوقيع والقرار بصيغة صحيحة'});
+    const hash=tokenHash(String(req.params.token||'')), managerName=clean(req.body?.managerName,200), managerSignature=req.body?.managerSignature, decision=clean(req.body?.decision,20), reason=typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if(!managerName || !validateSignature(managerSignature) || !['approved','rejected'].includes(decision)) return res.status(400).json({error:'أدخل اسم المدير والتوقيع والقرار بصيغة صحيحة'});
     if(decision==='rejected' && !reason) return res.status(400).json({error:'سبب الرفض مطلوب'});
     try {
       const result=await db.transaction(async tx=>{
