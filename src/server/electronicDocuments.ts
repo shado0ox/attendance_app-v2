@@ -12,10 +12,75 @@ const escapeHtml = (v:unknown) => String(v ?? '').replace(/[&<>"']/g, ch => ({'&
 const typeLabel = (v:string) => ({temporary_exit:'استئذان (خروج مؤقت)',early_exit:'خروج مبكر',late_arrival:'تأخير عن الدوام',absence:'غياب عن الدوام'}[v] || v);
 const statusLabel = (v:string) => ({employee_signed:'موقّع من الموظف',pending_manager:'بانتظار اعتماد المدير',approved:'معتمد',rejected:'مرفوض',cancelled:'ملغي'}[v] || v);
 
+const validDate = (value:unknown) => {
+  if (typeof value !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return false;
+  const date = new Date(value + 'T00:00:00.000Z');
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
+
+const validTime = (value:unknown) => typeof value === 'string' && /^([01]\\d|2[0-3]):[0-5]\\d$/.test(value);
+
+const validPngDataUrl = (value:unknown) =>
+  typeof value === 'string' &&
+  value.length <= 500000 &&
+  /^data:image\\/png;base64,[A-Za-z0-9+/=]+$/.test(value);
+
+const normalizeForm = (form:any) => {
+  if (!form || typeof form !== 'object' || Array.isArray(form)) return { error: 'بيانات الطلب غير صالحة' };
+
+  const requestType = clean(form.requestType, 30);
+  const absenceType = clean(form.absenceType, 20);
+  const date = clean(form.date, 10);
+  const reason = clean(form.reason, 2000);
+  const exitTime = clean(form.exitTime, 5);
+  const expectedReturnTime = clean(form.expectedReturnTime, 5);
+  const actualAttendanceTime = clean(form.actualAttendanceTime, 5);
+  const absenceFrom = clean(form.absenceFrom, 10);
+  const absenceTo = clean(form.absenceTo, 10);
+
+  if (!validDate(date) || !reason) return { error: 'التاريخ وسبب الطلب مطلوبان وبصيغة صحيحة' };
+  if (!['temporary_exit', 'early_exit', 'late_arrival', 'absence'].includes(requestType)) return { error: 'نوع الطلب غير صالح' };
+
+  if (requestType === 'temporary_exit' || requestType === 'early_exit') {
+    if (!validTime(exitTime) || !validTime(expectedReturnTime)) return { error: 'وقت الخروج ووقت العودة المتوقع مطلوبان وبصيغة صحيحة' };
+  }
+
+  if (requestType === 'late_arrival' && !validTime(actualAttendanceTime)) {
+    return { error: 'وقت الحضور الفعلي مطلوب وبصيغة صحيحة' };
+  }
+
+  if (requestType === 'absence') {
+    if (!['annual', 'sick', 'other'].includes(absenceType)) return { error: 'نوع الغياب غير صالح' };
+    if (!validDate(absenceFrom) || !validDate(absenceTo) || absenceTo < absenceFrom) {
+      return { error: 'فترة الغياب مطلوبة ويجب أن تكون صحيحة' };
+    }
+  }
+
+  return {
+    value: {
+      date,
+      requestType,
+      absenceType: requestType === 'absence' ? absenceType : '',
+      expectedReturnTime: requestType === 'temporary_exit' || requestType === 'early_exit' ? expectedReturnTime : '',
+      exitTime: requestType === 'temporary_exit' || requestType === 'early_exit' ? exitTime : '',
+      actualAttendanceTime: requestType === 'late_arrival' ? actualAttendanceTime : '',
+      absenceFrom: requestType === 'absence' ? absenceFrom : '',
+      absenceTo: requestType === 'absence' ? absenceTo : '',
+      reason,
+      employeeCommitment: true,
+    },
+  };
+};
+
+const safeImageSrc = (value:unknown) =>
+  typeof value === 'string' && /^data:image\\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(value)
+    ? value
+    : '';
+
 function finalHtml(doc:any, company:any) {
   const f=doc.formData || {};
   const companyName=company?.settings?.companyName || company?.name || 'الشركة';
-  const logo=company?.settings?.logoDataUrl || company?.logoUrl || '';
+  const logo=safeImageSrc(company?.settings?.logoDataUrl);
   const rows=[
     ['التاريخ',f.date],
     ['اسم الموظف',doc.employeeName],
@@ -78,9 +143,12 @@ export function registerElectronicDocumentRoutes(
     const data=await getMainDataByCompanyId(companyId);
     const employee=(data?.employees || []).find((e:any)=>String(e.id)===String(auth.id));
     if(!employee) return res.status(404).json({error:'الموظف غير موجود'});
-    const form=req.body?.formData;
+    const parsed=normalizeForm(req.body?.formData);
     const signature=clean(req.body?.employeeSignature,500000);
-    if(!form || typeof form!=='object' || !clean(form.date,20) || !clean(form.reason,2000) || !signature || req.body?.formData?.employeeCommitment!==true) return res.status(400).json({error:'أكمل بيانات الطلب والتوقيع والإقرار'});
+    if (parsed.error || !validPngDataUrl(signature) || req.body?.formData?.employeeCommitment!==true) {
+      return res.status(400).json({error: parsed.error || 'التوقيع الإلكتروني غير صالح'});
+    }
+    const form=parsed.value!;
     const departmentName=(data?.departments || []).find((d:any)=>String(d.id)===String(employee.dept))?.name || 'بدون قسم';
     try {
       const [doc]=await db.insert(schema.electronicDocuments).values({
@@ -101,9 +169,10 @@ export function registerElectronicDocumentRoutes(
       const doc=rows[0];
       if(!doc || String(doc.companyId)!==String(auth.companyId) || (auth.role==='employee' && String(doc.employeeId)!==String(auth.id))) return res.status(404).json({error:'المستند غير موجود'});
       if(doc.status!=='employee_signed' && doc.status!=='pending_manager') return res.status(409).json({error:'المستند غير جاهز للإرسال للمدير'});
+      const wasPending=doc.status==='pending_manager';
       const token=makeToken(), hash=tokenHash(token), expires=new Date(Date.now()+72*60*60*1000);
       await db.update(schema.electronicDocuments).set({shareTokenHash:hash,shareExpiresAt:expires,shareUsedAt:null,status:'pending_manager',updatedAt:new Date()}).where(eq(schema.electronicDocuments.id,id));
-      await db.insert(schema.electronicDocumentAudit).values({companyId:String(doc.companyId),documentId:id,actorId:String(auth.id || auth.username || 'employee'),actorRole:auth.role,action:'shared_with_manager',details:{expiresAt:expires.toISOString()}});
+      await db.insert(schema.electronicDocumentAudit).values({companyId:String(doc.companyId),documentId:id,actorId:String(auth.id || auth.username || 'employee'),actorRole:auth.role,action:'shared_with_manager',details:{expiresAt:expires.toISOString(),reissued:wasPending}});
       const base=process.env.PUBLIC_APP_URL || `${req.protocol}://${req.get('host')}`;
       return res.json({url:`${base.replace(/\/$/,'')}/document-approval/${token}`,expiresAt:expires.toISOString()});
     } catch(error:any){return res.status(500).json({error:'تعذر إنشاء رابط المدير'});}
@@ -145,6 +214,37 @@ export function registerElectronicDocumentRoutes(
     } catch(error:any){return res.status(error?.status || 500).json({error:error?.status?error.message:'تعذر اعتماد المستند'});}
   });
 
+  app.post('/api/electronic-documents/:id/cancel', employeeOrAdmin, async (req:Request,res:Response)=>{
+    const auth=(req as any).auth as Auth;
+    const id=Number(req.params.id);
+    try {
+      const rows=await db.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.id,id)).limit(1);
+      const doc=rows[0];
+      const ownsDocument=doc && String(doc.companyId)===String(auth.companyId) &&
+        (auth.role!=='employee' || String(doc.employeeId)===String(auth.id));
+      if(!ownsDocument || !['employee_signed','pending_manager'].includes(doc.status)) {
+        return res.status(404).json({error:'المستند غير موجود أو لا يمكن إلغاؤه'});
+      }
+
+      await db.update(schema.electronicDocuments)
+        .set({status:'cancelled',shareTokenHash:null,shareExpiresAt:null,shareUsedAt:null,updatedAt:new Date()})
+        .where(eq(schema.electronicDocuments.id,id));
+
+      await db.insert(schema.electronicDocumentAudit).values({
+        companyId:String(doc.companyId),
+        documentId:id,
+        actorId:String(auth.id || auth.username || 'employee'),
+        actorRole:auth.role,
+        action:'cancelled',
+        details:{},
+      });
+
+      return res.json({success:true});
+    } catch(error:any) {
+      return res.status(500).json({error:'تعذر إلغاء المستند'});
+    }
+  });
+
   app.post('/api/electronic-documents/:id/status', adminOnly, async (req:Request,res:Response)=>{
     const id=Number(req.params.id), status=clean(req.body?.status,30);
     if(!['cancelled'].includes(status)) return res.status(400).json({error:'الحالة المتاحة بعد الحفظ هي الإلغاء فقط'});
@@ -152,7 +252,7 @@ export function registerElectronicDocumentRoutes(
       const rows=await db.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.id,id)).limit(1), doc=rows[0];
       const auth=(req as any).auth as Auth;
       if(!doc || String(doc.companyId)!==String(auth.companyId) || doc.status==='approved') return res.status(404).json({error:'المستند غير موجود أو لا يمكن تعديله'});
-      await db.update(schema.electronicDocuments).set({status,updatedAt:new Date()}).where(eq(schema.electronicDocuments.id,id));
+      await db.update(schema.electronicDocuments).set({status,shareTokenHash:null,shareExpiresAt:null,shareUsedAt:null,updatedAt:new Date()}).where(eq(schema.electronicDocuments.id,id));
       await db.insert(schema.electronicDocumentAudit).values({companyId:String(doc.companyId),documentId:id,actorId:String(auth.id || auth.username || 'admin'),actorRole:auth.role,action:'status_changed',details:{status}});
       return res.json({success:true});
     } catch(error:any){return res.status(500).json({error:'تعذر تحديث حالة المستند'});}
