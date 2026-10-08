@@ -23,7 +23,7 @@ const pool=new pg.Pool({
   database:process.env.SQL_DB_NAME,
 });
 const child=spawn(process.execPath,['--import','./tests/mockResend.mjs','dist/server.cjs'],{
-  env:{...process.env,NODE_ENV:'production',JWT_SECRET:secret,BACKUP_ENABLED:'false',APP_URL:'https://attendance.example.com',RESEND_API_KEY:'mock-key',RESEND_FROM:'Attendance <attendance@example.com>',BACKUP_DIR:directory},
+  env:{...process.env,NODE_ENV:'production',JWT_SECRET:secret,BACKUP_ENABLED:'false',APP_URL:'https://attendance.example.com',RESEND_API_KEY:'mock-key',RESEND_FROM:'Attendance <attendance@example.com>',BACKUP_DIR:directory,ATTENDANCE_TEST_EMAIL_CAPTURE:path.join(directory,'mail.jsonl')},
   stdio:'inherit',
 });
 const origin='http://127.0.0.1:3011';
