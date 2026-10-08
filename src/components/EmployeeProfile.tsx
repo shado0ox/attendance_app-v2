@@ -30,7 +30,7 @@ export default function EmployeeProfile({ employee, companyId, departments, onCl
     fetch('/api/electronic-documents?companyId='+encodeURIComponent(companyId)+'&employeeId='+encodeURIComponent(String(employee.id))+'&scope=admin')
       .then(r=>r.ok?r.json():[]).then(rows=>{if(!cancelled)setElectronicDocs(Array.isArray(rows)?rows:[]);}).catch(()=>{if(!cancelled)setElectronicDocs([]);}).finally(()=>{if(!cancelled)setElectronicDocsLoading(false);});
     return ()=>{cancelled=true;};
-  },[companyId,employee.id]);
+  },[companyId,employee.id,refresh]);
 
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;

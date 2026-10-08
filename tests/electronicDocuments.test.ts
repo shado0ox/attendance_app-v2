@@ -1,3 +1,4 @@
+import { signatureFixture } from './electronicDocumentFixtures';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeForm, validateDate, validateTime, validateSignature } from '../src/server/electronicDocumentValidation';
@@ -25,7 +26,7 @@ test('validates dates and times strictly', () => {
 });
 
 test('accepts only PNG data URLs within the size limit', () => {
-  assert.equal(validateSignature('data:image/png;base64,AAAA'), true);
+  assert.equal(validateSignature(signatureFixture()), true);
   assert.equal(validateSignature('data:image/jpeg;base64,AAAA'), false);
   assert.equal(validateSignature('data:image/png;base64,not valid'), false);
   assert.equal(validateSignature('x'.repeat(500001)), false);
@@ -68,4 +69,12 @@ test('rejects missing or oversized reasons and missing commitment', () => {
   assert.ok('error' in normalizeForm({...base, reason: ''}));
   assert.ok('error' in normalizeForm({...base, reason: 'x'.repeat(2001)}));
   assert.ok('error' in normalizeForm({...base, employeeCommitment: false}));
+});
+
+test('rejects blank and corrupt PNG signatures', () => {
+  assert.equal(validateSignature(signatureFixture(true)), false);
+  assert.equal(validateSignature('data:image/png;base64,AAAA'), false);
+  const bytes=Buffer.from(signatureFixture().split(',')[1], 'base64');
+  bytes[bytes.length-8] ^= 1;
+  assert.equal(validateSignature('data:image/png;base64,'+bytes.toString('base64')), false);
 });

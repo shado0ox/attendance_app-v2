@@ -46,6 +46,7 @@ function SignaturePad({
 }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const drawing = useRef(false);
+  const moved = useRef(false);
   const [empty, setEmpty] = useState(!value);
 
   const position = (event: PointerEvent<HTMLCanvasElement>) => {
@@ -67,6 +68,7 @@ function SignaturePad({
     context.lineWidth = 2.5;
     context.lineCap = 'round';
     drawing.current = true;
+    moved.current = false;
   };
 
   const move = (event: PointerEvent<HTMLCanvasElement>) => {
@@ -75,13 +77,14 @@ function SignaturePad({
     const context = ref.current!.getContext('2d')!;
     context.lineTo(point.x, point.y);
     context.stroke();
+    moved.current = true;
     setEmpty(false);
   };
 
   const end = () => {
     if (!drawing.current) return;
     drawing.current = false;
-    onChange(ref.current!.toDataURL('image/png'));
+    if (moved.current) onChange(ref.current!.toDataURL('image/png'));
   };
 
   const clear = () => {
@@ -265,7 +268,7 @@ export default function ElectronicRequestPanel({
         <div>
           <h3 className="font-extrabold text-slate-800 text-sm">المستندات والطلبات الإلكترونية</h3>
           <p className="text-[10px] text-slate-400 mt-1">
-            نموذج استئذان إلكتروني بتوقيع الموظف، ثم إرساله للمدير من الإدارة.
+            نموذج استئذان بتوقيع الموظف واعتماد المدير. الاعتماد يحفظ المستند ولا يغيّر حساب الحضور أو الخصومات تلقائيًا.
           </p>
         </div>
         <button

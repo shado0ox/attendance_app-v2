@@ -1,3 +1,5 @@
+import { PNG } from 'pngjs';
+
 const MAX_SIGNATURE_LENGTH = 500000;
 const MAX_REASON_LENGTH = 2000;
 const REQUEST_TYPES = ['temporary_exit', 'early_exit', 'late_arrival', 'absence'] as const;
@@ -25,11 +27,23 @@ export const validateDate = (value: unknown) => {
 export const validateTime = (value: unknown) =>
   typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 
-export const validateSignature = (value: unknown) =>
-  typeof value === 'string' &&
-  value.length > 0 &&
-  value.length <= MAX_SIGNATURE_LENGTH &&
-  /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(value);
+export function validateSignature(value: unknown): boolean {
+  if (typeof value !== 'string' || value.length > MAX_SIGNATURE_LENGTH ||
+      !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
+  try {
+    const bytes = Buffer.from(value.split(',')[1], 'base64');
+    // Bound dimensions before decoding untrusted compressed image data.
+    if (bytes.length < 33 || bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') return false;
+    const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20);
+    if (!width || !height || width > 2048 || height > 2048 || width * height > 1048576) return false;
+    const png = PNG.sync.read(bytes, { checkCRC: true });
+    let ink = 0;
+    for (let i = 0; i < png.data.length; i += 4) {
+      if (png.data[i + 3] > 32 && Math.min(png.data[i], png.data[i + 1], png.data[i + 2]) < 240 && ++ink >= 8) return true;
+    }
+    return false;
+  } catch { return false; }
+}
 
 const stringField = (value: unknown, max: number) =>
   typeof value === 'string' && value.length <= max ? value.trim() : '';

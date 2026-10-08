@@ -2019,7 +2019,7 @@ app.delete('/api/companies/:id', requireAuth(['superadmin'], false), async (req,
       for(const employee of (data[0]?.value as any)?.employees || []) keys.push(welcomeStateKey(id,String(employee.id)),emailVerificationKey(id,String(employee.id)),employeePhotoKey(id,String(employee.id)));
       for(const admin of admins) keys.push(adminAccessKey(id,admin.id),notificationStateKey(id,{role:'admin',id:admin.id}));
       for(const role of ['superadmin','admin']) for(const username of [undefined, 'admin']) keys.push(notificationStateKey(id,{role,username}));
-      for(const table of [schema.attendance,schema.requests,schema.registrationRequests,schema.auditLog,schema.attendanceMonths,schema.admins]) await tx.delete(table).where(eq(table.companyId,id));
+      for(const table of [schema.electronicDocumentAudit,schema.electronicDocuments,schema.attendance,schema.requests,schema.registrationRequests,schema.auditLog,schema.attendanceMonths,schema.admins]) await tx.delete(table).where(eq(table.companyId,id));
       await tx.delete(schema.systemData).where(inArray(schema.systemData.key,keys));
       await tx.delete(schema.companies).where(eq(schema.companies.id,id));
       // Reserve the old namespace so old JWTs cannot access a newly created company's data.
