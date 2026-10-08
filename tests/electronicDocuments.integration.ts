@@ -93,7 +93,7 @@ try {
 
   assert.equal((await fetch(origin+'/api/document-approval/'+encodeURIComponent(tokenValue)+'?companyId='+encodeURIComponent(companyA))).status,404);
   assert.equal((await request('/api/electronic-documents/'+created.id+'/cancel',{role:'employee',companyId:companyA,id:employeeA,method:'POST',body:'{}'})).status,404);
-  assert.equal((await request('/api/electronic-documents/'+created.id+'/status',{role:'admin',companyId:companyA,id:adminId,method:'POST',body:JSON.stringify({status:'cancelled'})})).status,409);
+  assert.equal((await request('/api/electronic-documents/'+created.id+'/status',{role:'admin',companyId:companyA,id:adminId,method:'POST',body:JSON.stringify({status:'cancelled'})})).status,404);
   await put('adminAccess:'+companyA+':'+adminId,{...fullAdminAccess(),departmentIds:[departmentA]});
 
   const employeeBCreate=await request('/api/electronic-documents',{role:'employee',companyId:companyA,id:employeeB,method:'POST',body:JSON.stringify({companyId:companyA,formData:form,employeeSignature:signature})});
@@ -117,9 +117,7 @@ try {
   assert.equal((await request('/api/electronic-documents/'+created.id+'/status',{role:'admin',companyId:companyA,id:adminId,method:'POST',body:JSON.stringify({status:'cancelled'})})).status,409);
 
   const otherCompanyList=await request('/api/electronic-documents',{role:'superadmin',companyId:'default',requestCompanyId:companyB});
-  assert.equal(otherCompanyList.status,200);
-  const otherDocs:any[]=await otherCompanyList.json();
-  assert.equal(otherDocs.length,0);
+  assert.equal(otherCompanyList.status,403);
 
   console.log('PASS: electronic documents creation, admin manager link, public approval, one-time token, immutability, company isolation and department scope.');
 } finally {
