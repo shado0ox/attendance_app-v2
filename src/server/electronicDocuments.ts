@@ -116,7 +116,7 @@ export function registerElectronicDocumentRoutes(
 
   app.get('/api/electronic-documents', employeeOrAdmin, async (req:Request,res:Response)=>{
     const auth=(req as any).auth as Auth;
-    const companyId=String(req.query.companyId || auth.companyId || 'default');
+    const companyId=String(auth.companyId || 'default');
     const requestedEmployee=clean(req.query.employeeId,100);
     try {
       let rows=await db.select().from(schema.electronicDocuments)
@@ -145,10 +145,10 @@ export function registerElectronicDocumentRoutes(
     if(!employee) return res.status(404).json({error:'الموظف غير موجود'});
     const parsed=normalizeForm(req.body?.formData);
     const signature=clean(req.body?.employeeSignature,500000);
-    if (parsed.error || !validPngDataUrl(signature) || req.body?.formData?.employeeCommitment!==true) {
-      return res.status(400).json({error: parsed.error || 'التوقيع الإلكتروني غير صالح'});
+    if ('error' in parsed || !validPngDataUrl(signature) || req.body?.formData?.employeeCommitment!==true) {
+      return res.status(400).json({error: 'error' in parsed ? parsed.error : 'التوقيع الإلكتروني غير صالح'});
     }
-    const form=parsed.value!;
+    const form=parsed.value;
     const departmentName=(data?.departments || []).find((d:any)=>String(d.id)===String(employee.dept))?.name || 'بدون قسم';
     try {
       const [doc]=await db.insert(schema.electronicDocuments).values({
@@ -191,7 +191,8 @@ export function registerElectronicDocumentRoutes(
 
   app.post('/api/document-approval/:token', async (req:Request,res:Response)=>{
     const hash=tokenHash(String(req.params.token||'')), managerName=clean(req.body?.managerName,200), managerSignature=clean(req.body?.managerSignature,500000), decision=clean(req.body?.decision,20), reason=clean(req.body?.reason,2000);
-    if(!managerName || !managerSignature || !['approved','rejected'].includes(decision)) return res.status(400).json({error:'أدخل اسم المدير والتوقيع والقرار'});
+    if(!managerName || !validPngDataUrl(managerSignature) || !['approved','rejected'].includes(decision)) return res.status(400).json({error:'أدخل اسم المدير والتوقيع والقرار بصيغة صحيحة'});
+    if(decision==='rejected' && !reason) return res.status(400).json({error:'سبب الرفض مطلوب'});
     try {
       const result=await db.transaction(async tx=>{
         const rows=await tx.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.shareTokenHash,hash)).limit(1).for('update');
