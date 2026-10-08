@@ -46,3 +46,4 @@ jobs:
       - run: node --import tsx tests/companyIdentity.integration.ts
       - run: node --import tsx tests/tenantPrivacy.integration.ts
       - run: node --import tsx tests/employeeSelfService.integration.ts
+      - run: node --import tsx tests/electronicDocuments.integration.ts
