@@ -29,6 +29,7 @@ import ShiftTypesView from '../pages/admin/ShiftTypesView';
 import SettingsView from '../pages/admin/SettingsView';
 import SystemHealthView from '../pages/admin/SystemHealthView';
 import CompaniesView from '../pages/admin/CompaniesView';
+import ElectronicDocumentsView from '../pages/admin/ElectronicDocumentsView';
 
 interface AdminPortalProps {
   onRefreshData: () => Promise<boolean>;
@@ -911,6 +912,7 @@ export default function AdminPortal({
                 {activeView === 'shifttypes' && 'نوع ومدة الشيفت'}
                 {activeView === 'departments' && 'الأقسام والشيفتات'}
                 {activeView === 'requests' && 'صندوق طلبات الحضور والمسكن'}
+                {activeView === 'documents' && 'المستندات الإلكترونية'}
           {activeView === 'health' && 'صحة النظام'}
           {activeView === 'settings' && 'إعدادات الشركة والمنصات'}
                 {activeView === 'companies' && 'إدارة مساحات عمل الشركات والاشتراكات الشهرية'}
@@ -1137,6 +1139,8 @@ export default function AdminPortal({
             <><div>{notificationFocus?.view === 'requests' && <div className="text-xs bg-sky-50 p-3 rounded-xl mb-3 flex gap-3 items-center">طلبات موظف التنبيه ليوم {notificationFocus.date}<button className="border rounded px-3 py-1" onClick={() => setNotificationFocus(null)}>عرض كل الطلبات</button></div>}</div><RequestsView adminRequests={notificationFocus?.view === 'requests' ? adminRequests.filter(r => String(r.empId) === String(notificationFocus.empId) && r.date === notificationFocus.date) : adminRequests} requestsLoading={requestsLoading} onReview={handleReviewRequest}
               reviewingRequest={reviewingRequest} /></>
           )}
+
+          {activeView === 'documents' && hasPermission('canApproveRequests') && <ElectronicDocumentsView companyId={companyId} />}
 
           {/* View: Shift Types Management */}
           {activeView === 'shifttypes' && (
