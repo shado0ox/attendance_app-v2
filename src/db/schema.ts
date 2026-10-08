@@ -1,4 +1,4 @@
-import { pgTable, serial, text, doublePrecision, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, serial, integer, text, doublePrecision, jsonb, timestamp } from 'drizzle-orm/pg-core';
 
 // 0. Companies / Tenants (for subscription/multi-tenancy)
 export const companies = pgTable('companies', {
@@ -127,4 +127,40 @@ export const attendanceMonths = pgTable('attendance_months', {
   companyId: text('company_id').notNull(),
   month: text('month').notNull(),
   value: jsonb('value').notNull(),
+});
+export const electronicDocuments = pgTable('electronic_documents', {
+  id: serial('id').primaryKey(),
+  companyId: text('company_id').notNull(),
+  employeeId: text('employee_id').notNull(),
+  employeeName: text('employee_name').notNull(),
+  departmentName: text('department_name').default(''),
+  documentType: text('document_type').notNull().default('permission'),
+  status: text('status').notNull().default('employee_signed'),
+  version: text('version').notNull().default('1'),
+  parentDocumentId: text('parent_document_id'),
+  formData: jsonb('form_data').notNull(),
+  employeeSignature: text('employee_signature').notNull(),
+  employeeSignedAt: timestamp('employee_signed_at'),
+  managerName: text('manager_name'),
+  managerSignature: text('manager_signature'),
+  managerSignedAt: timestamp('manager_signed_at'),
+  managerDecision: text('manager_decision'),
+  reviewReason: text('review_reason'),
+  shareTokenHash: text('share_token_hash'),
+  shareExpiresAt: timestamp('share_expires_at'),
+  shareUsedAt: timestamp('share_used_at'),
+  finalHtml: text('final_html'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const electronicDocumentAudit = pgTable('electronic_document_audit', {
+  id: serial('id').primaryKey(),
+  companyId: text('company_id').notNull(),
+  documentId: integer('document_id').notNull(),
+  actorId: text('actor_id').notNull(),
+  actorRole: text('actor_role').notNull(),
+  action: text('action').notNull(),
+  details: jsonb('details').default({}),
+  createdAt: timestamp('created_at').defaultNow(),
 });

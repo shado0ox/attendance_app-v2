@@ -25,7 +25,7 @@ try{
  assert.equal((await fetch(origin+'/api/system-health?companyId='+companyId)).status,401);assert.equal((await request('/api/system-health','employee')).status,403);
  assert.equal((await fetch(origin+'/api/system-health?companyId=other',{headers:headers('admin')})).status,403);
  const initial=await request('/api/system-health');assert.equal(initial.headers.get('cache-control'),'private, no-store');const report:any=await initial.json();
- assert.equal(report.database.status,'ok');assert.equal(report.database.tables.length,8);assert.equal(report.backup.status,'missing');assert.match(report.version.id,/^[a-f0-9]{16}$/);assert.equal(report.mail.counts.failed,2);assert.equal(report.permissions.canBackup,false);assert.equal(JSON.stringify(report).includes('private-'),false);
+ assert.equal(report.database.status,'ok');assert.equal(report.database.tables.length,10);assert.equal(report.backup.status,'missing');assert.match(report.version.id,/^[a-f0-9]{16}$/);assert.equal(report.mail.counts.failed,2);assert.equal(report.permissions.canBackup,false);assert.equal(JSON.stringify(report).includes('private-'),false);
  const delegated=await pool.query('INSERT INTO shift_app.admins(name,username,password,company_id) VALUES ($1,$2,$3,$4) RETURNING id',['Health settings admin','health-settings-ci','ci-only-hash',companyId]);
  const delegatedId=delegated.rows[0].id,aclKey='adminAccess:'+companyId+':'+delegatedId;
  const delegatedHeaders={Authorization:'Bearer '+jwt.sign({role:'admin',companyId,id:delegatedId},secret,{expiresIn:'1h'})};
@@ -43,7 +43,7 @@ try{
  assert.equal((await request('/api/system-health/backup','superadmin','POST')).status,200);
  const backed:any=await (await request('/api/system-health','superadmin')).json();assert.equal(backed.backup.status,'ok');assert.ok(backed.backup.lastSuccess.bytes>0);assert.match(backed.backup.lastSuccess.sha256,/^[a-f0-9]{64}$/);
  assert.equal((await request('/api/system-health/verify-restore','superadmin','POST')).status,200);
- const verified:any=await (await request('/api/system-health')).json();assert.equal(verified.backup.lastVerification.status,'success');assert.equal(verified.backup.lastVerification.tables,8);
+ const verified:any=await (await request('/api/system-health')).json();assert.equal(verified.backup.lastVerification.status,'success');assert.equal(verified.backup.lastVerification.tables,10);
  assert.equal((await pool.query("SELECT datname FROM pg_database WHERE datname LIKE 'attendance_restore_check_%'")).rows.length,0);
  assert.deepEqual((await pool.query('SELECT value FROM shift_app.system_data WHERE key=$1',['mainData_'+companyId])).rows[0].value,data,'health and backups never update live employee data');
  const file=path.join(directory,backed.backup.lastSuccess.name),bytes=await fs.readFile(file);bytes[0]^=1;await fs.writeFile(file,bytes);assert.equal((await request('/api/system-health/verify-restore','superadmin','POST')).status,503);
