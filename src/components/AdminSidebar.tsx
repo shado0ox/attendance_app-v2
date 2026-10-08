@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   LayoutDashboard, CalendarDays, ClipboardCheck, Bell, Users, Building2,
-  Clock, Inbox, Settings, LogOut, ShieldCheck
+  Clock, Inbox, FileText, Settings, LogOut, ShieldCheck
 } from 'lucide-react';
 
 interface AdminSidebarProps {
