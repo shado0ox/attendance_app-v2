@@ -181,7 +181,8 @@ export function registerElectronicDocumentRoutes(
       const token=makeToken(), hash=tokenHash(token), expires=new Date(Date.now()+72*60*60*1000);
       await db.update(schema.electronicDocuments).set({shareTokenHash:hash,shareExpiresAt:expires,shareUsedAt:null,status:'pending_manager',updatedAt:new Date()}).where(eq(schema.electronicDocuments.id,id));
       await db.insert(schema.electronicDocumentAudit).values({companyId:String(doc.companyId),documentId:id,actorId:String(auth.id || auth.username || 'employee'),actorRole:auth.role,action:'shared_with_manager',details:{expiresAt:expires.toISOString(),reissued:wasPending}});
-      const base=process.env.PUBLIC_APP_URL || `${req.protocol}://${req.get('host')}`;
+      const base=String(process.env.APP_URL || '').trim();
+      if(!base) return res.status(500).json({error:'APP_URL غير مضبوط في إعدادات الخادم؛ لا يمكن إنشاء رابط المدير'});
       return res.json({url:`${base.replace(/\/$/,'')}/document-approval/${token}`,expiresAt:expires.toISOString()});
     } catch(error:any){return res.status(500).json({error:'تعذر إنشاء رابط المدير'});}
   });
