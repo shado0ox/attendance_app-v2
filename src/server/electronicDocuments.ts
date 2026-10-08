@@ -190,6 +190,7 @@ export function registerElectronicDocumentRoutes(
   app.post('/api/document-approval/:token', async (req:Request,res:Response)=>{
     const hash=tokenHash(String(req.params.token||'')), managerName=clean(req.body?.managerName,200), managerSignature=req.body?.managerSignature, decision=clean(req.body?.decision,20), reason=typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
     if(!managerName || !validateSignature(managerSignature) || !['approved','rejected'].includes(decision)) return res.status(400).json({error:'أدخل اسم المدير والتوقيع والقرار بصيغة صحيحة'});
+    if(reason.length>2000) return res.status(400).json({error:'سبب القرار يجب ألا يتجاوز 2000 حرف'});
     if(decision==='rejected' && !reason) return res.status(400).json({error:'سبب الرفض مطلوب'});
     try {
       const result=await db.transaction(async tx=>{
