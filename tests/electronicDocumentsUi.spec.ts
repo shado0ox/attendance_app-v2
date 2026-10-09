@@ -49,3 +49,42 @@ test('employee confirms a locked form, shares directly; administration tracks, p
  await row.getByRole('button',{name:'حذف الطلب',exact:true}).click();await expect(row).toHaveCount(0);
  expect(errors).toEqual([]);
 });
+
+
+test('an open administration detail refreshes its status and audit timeline',async({page})=>{
+ await page.clock.install();
+ let approved=false;
+ await page.route('**/api/electronic-documents**',async route=>{
+  const doc={id:1,employeeName:'Employee',status:approved?'approved':'pending_manager',managerName:approved?'Manager':null,formData:{date:'2026-10-09'}};
+  await route.fulfill({json:route.request().url().includes('/audit')?[{id:1,action:approved?'approved':'employee_signed',actorRole:approved?'manager':'employee',actorId:'test',createdAt:'2026-10-09T08:00:00Z'}]:[doc]});
+ });
+ await page.goto('/tests/ui/documents.html?admin');
+ await page.getByRole('button',{name:'التفاصيل',exact:true}).click();
+ await expect(page.getByText('اعتماد الموظف',{exact:true})).toBeVisible();
+ approved=true;await page.clock.fastForward(60000);
+ await expect(page.getByText('اعتماد وتوقيع المدير',{exact:true})).toBeVisible();
+ await expect(page.getByText('Manager',{exact:true})).toBeVisible();
+});
+
+test('manager link requires login and uses the authenticated manager name',async({page})=>{
+ let submitted:any=null;
+ await page.route('**/api/auth/admin-login',async route=>route.fulfill({json:{token:'manager-session',name:'Verified Manager'}}));
+ await page.route('**/api/document-approval/**',async route=>{
+  if(route.request().headers().authorization!=='Bearer manager-session')return route.fulfill({status:401,json:{error:'سجّل الدخول بحساب المدير'}});
+  if(route.request().method()==='POST'){submitted=route.request().postDataJSON();return route.fulfill({json:{success:true,status:'approved'}});}
+  return route.fulfill({json:{employeeName:'Employee',companyName:'Company',managerName:'Verified Manager',formData:{date:'2026-10-09',requestType:'temporary_exit',reason:'موعد'},expiresAt:'2026-10-12T10:00:00Z'}});
+ });
+ await page.goto('/tests/ui/documents.html?manager');
+ await expect(page.getByRole('heading',{name:'دخول المدير لاعتماد الاستئذان'})).toBeVisible();
+ await expect(page.getByText('موعد',{exact:true})).toHaveCount(0);
+ await page.getByLabel('اسم المستخدم أو البريد',{exact:true}).fill('manager');
+ await page.getByLabel('كلمة المرور',{exact:true}).fill('test-password');
+ await page.getByRole('button',{name:'دخول ومراجعة الطلب'}).click();
+ await expect(page.getByLabel('اسم المدير',{exact:true})).toHaveValue('Verified Manager');
+ await expect(page.getByLabel('اسم المدير',{exact:true})).toHaveAttribute('readonly','');
+ const box=await page.locator('canvas').boundingBox();
+ await page.mouse.move(box!.x+30,box!.y+30);await page.mouse.down();await page.mouse.move(box!.x+100,box!.y+50,{steps:8});await page.mouse.up();
+ await page.getByRole('button',{name:'اعتماد المستند',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'تم اعتماد المستند'})).toBeVisible();
+ expect(submitted.managerName).toBeUndefined();expect(submitted.managerSignature).toContain('data:image/png;base64,');
+});

@@ -67,6 +67,7 @@ export function allowedAdminRoute(access: AdminAccess, method: string, route: st
   if (route === '/api/schedule-publication') return access.departmentIds === null && access.permissions.canEditSchedule;
   if (route === '/api/requests' || /^\/api\/requests\/\d+$/.test(route)) return read ? access.permissions.canApproveRequests || access.permissions.canViewReports : method === 'PUT' && access.permissions.canApproveRequests;
   if (route === '/api/electronic-documents') return read ? access.permissions.canApproveRequests || access.permissions.canViewReports : access.permissions.canApproveRequests;
+  if (/^\/api\/document-approval\/[A-Za-z0-9_-]+$/.test(route)) return (read || method === 'POST') && access.permissions.canApproveRequests;
   if (/^\/api\/electronic-documents\/\d+\/status$/.test(route)) return method === 'POST' && access.permissions.canApproveRequests;
   if (/^\/api\/electronic-documents\/\d+\/audit$/.test(route)) return read && (access.permissions.canApproveRequests || access.permissions.canViewReports);
   if (/^\/api\/electronic-documents\/\d+$/.test(route)) return method==='DELETE' && access.permissions.canApproveRequests;

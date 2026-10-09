@@ -76,3 +76,16 @@ test('stale application cannot overwrite an existing assignment; invalid input i
   assert.throws(()=>planningDates('2026-10-01','2026-11-01'));
   assert.throws(()=>proposeSchedule(dept,employees,shifts,{}, {...options,restDays:7}));
 });
+
+
+test('planner does not assign archived or suspended employees or count them as coverage',()=>{
+ const staff=[{id:'active',name:'Active',dept:'one'},{id:'archived',name:'Archived',dept:'one',status:'archived'},{id:'suspended',name:'Suspended',dept:'one',status:'suspended'}];
+ const o={...options,from:'2026-10-03',to:'2026-10-03',employeeIds:staff.map(e=>e.id)};
+ const result=proposeSchedule(dept,staff,shifts,{},o);
+ assert.ok(result.changes.every(change=>change.employeeId==='active'));
+ assert.ok(result.issues.length>0,'one active employee cannot cover two separate shifts');
+});
+test('planner rejects overlapping double shifts using the same rules as attendance analysis',()=>{
+ const invalid={id:'BAD',type:'double',start:'08:00',end:'12:00',start2:'11:00',end2:'15:00'};
+ assert.throws(()=>proposeSchedule(dept,employees,[invalid],{},{...options,shiftIds:['BAD']}));
+});

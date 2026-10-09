@@ -101,12 +101,12 @@ export default function AttendanceView({
     try {
     const data = await allResults();
     const filteredRecords = data.items;
-    const rows = [['التاريخ', 'اليوم', 'الموظف', 'القسم', 'أول حضور', 'آخر انصراف', 'مدة العمل', 'الساعات العشرية', 'مكان أول حضور', 'مكان آخر انصراف', 'الحالة', 'بصمات مستبعدة', 'حالة التحليل', 'دقائق الدوام المجدول', 'دقائق التأخير بعد السماح', 'دقائق الخروج المبكر', 'دقائق إضافي محتمل']];
+    const rows = [['التاريخ', 'اليوم', 'الموظف', 'القسم', 'أول حضور', 'آخر انصراف', 'مدة العمل', 'الساعات العشرية', 'مكان أول حضور', 'مكان آخر انصراف', 'الحالة', 'الاستئذان', 'بصمات مستبعدة', 'حالة التحليل', 'دقائق الدوام المجدول', 'دقائق التأخير بعد السماح', 'دقائق الخروج المبكر', 'دقائق إضافي محتمل']];
     filteredRecords.forEach(r => {
       const department = { name: r.departmentName || r.dept };
       rows.push([r.date, new Date(r.date + 'T12:00:00').toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { weekday: 'long' }), r.empName, department?.name || r.dept,
         formatPunch(r.first), formatPunch(r.last), formatMinutes(r.minutes), r.minutes === null ? '' : (r.minutes / 60).toFixed(2),
-        r.first?.location || 'غير مسجل', r.last?.location || 'غير مسجل', r.reportStatus, String(r.ignored), r.analysis?.status || '', r.analysis?.scheduledMinutes ?? '', r.analysis?.lateMinutes ?? '', r.analysis?.earlyMinutes ?? '', r.analysis?.overtimeMinutes ?? '']);
+        r.first?.location || 'غير مسجل', r.last?.location || 'غير مسجل', r.reportStatus, r.permissions?.length ? `استئذان معتمد (${r.permissions.length})` : '', String(r.ignored), r.analysis?.status || '', r.analysis?.scheduledMinutes ?? '', r.analysis?.lateMinutes ?? '', r.analysis?.earlyMinutes ?? '', r.analysis?.overtimeMinutes ?? '']);
     });
     const csv = '\uFEFF' + rows.map(row => row.map(csvCell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
