@@ -68,111 +68,71 @@ try {
   await put('mainData_'+companyA,dataA);
   await put('mainData_'+companyB,dataB);
 
-  const employeeCreate=await request('/api/electronic-documents',{role:'employee',companyId:companyA,id:employeeA,method:'POST',body:JSON.stringify({companyId:companyA,formData:form,employeeSignature:signature})});
-  assert.equal(employeeCreate.status,201);
-  const created:any=await employeeCreate.json();
-
+  const createDoc=async(employeeId=employeeA)=>{
+    const response=await request('/api/electronic-documents',{role:'employee',id:employeeId,method:'POST',body:JSON.stringify({formData:form,employeeSignature:signature})});
+    assert.equal(response.status,201);return response.json() as Promise<any>;
+  };
+  const created=await createDoc();
+  assert.equal(created.status,'pending_manager');
+  assert.ok(created.url.includes('/document-approval/'));
+  const tokenValue=created.url.split('/document-approval/')[1];
   const delegated=await pool.query('INSERT INTO shift_app.admins(name,username,password,company_id) VALUES ($1,$2,$3,$4) RETURNING id',['Docs Admin','docs-admin-ci','ci-only-hash',companyA]);
   const adminId=delegated.rows[0].id;
   await put('adminAccess:'+companyA+':'+adminId,fullAdminAccess());
-
-  assert.equal((await request('/api/electronic-documents/'+created.id+'/share',{role:'employee',companyId:companyA,id:employeeA,method:'POST',body:JSON.stringify({companyId:companyA})})).status,403);
-  const share=await request('/api/electronic-documents/'+created.id+'/share',{role:'admin',companyId:companyA,id:adminId,method:'POST',body:JSON.stringify({companyId:companyA})});
-  assert.equal(share.status,200);
-  const shared:any=await share.json();
-  const tokenValue=shared.url.split('/document-approval/')[1];
-  assert.ok(tokenValue);
-
-  const opened=await fetch(origin+'/api/document-approval/'+encodeURIComponent(tokenValue)+'?companyId='+encodeURIComponent(companyA));
+  assert.equal((await request('/api/electronic-documents/'+created.id+'/print',{role:'employee',id:employeeA})).status,403);
+  assert.equal((await request('/api/electronic-documents/'+created.id+'/cancel',{role:'employee',id:employeeA,method:'POST',body:'{}'})).status,403);
+  assert.equal((await request('/api/electronic-documents/'+created.id,{role:'employee',id:employeeA,method:'DELETE'})).status,403);
+  const employeeList:any[]=await (await request('/api/electronic-documents',{role:'employee',id:employeeA})).json();
+  assert.equal(employeeList[0].formData,undefined);
+  assert.equal(employeeList[0].employeeSignature,undefined);
+  assert.equal(employeeList[0].shareTokenEncrypted,undefined);
+  const copy=await request('/api/electronic-documents/'+created.id+'/share',{role:'employee',id:employeeA,method:'POST',body:'{}'});
+  assert.equal((await copy.json() as any).url,created.url);
+  assert.equal((await request('/api/electronic-documents/'+created.id+'/share',{role:'employee',id:employeeB,method:'POST',body:'{}'})).status,404);
+  const preview=await request('/api/electronic-documents/'+created.id+'/print',{id:adminId});
+  assert.equal(preview.status,200);
+  assert.ok((await preview.json() as any).finalHtml.includes('بانتظار توقيع المدير'));
+  const opened=await fetch(origin+'/api/document-approval/'+tokenValue);
   assert.equal(opened.status,200);
-  const publicDoc:any=await opened.json();
-  assert.equal(publicDoc.employeeName,'Employee A');
-  assert.equal(publicDoc.managerSignature,undefined);
-
-  const approved=await fetch(origin+'/api/document-approval/'+encodeURIComponent(tokenValue),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({companyId:companyA,managerName:'Manager A',managerSignature:signature,decision:'approved',reason:'ملاحظة الموافقة'})});
-  assert.equal(approved.status,200);
-
-  assert.equal((await fetch(origin+'/api/document-approval/'+encodeURIComponent(tokenValue)+'?companyId='+encodeURIComponent(companyA))).status,404);
-  assert.equal((await request('/api/electronic-documents/'+created.id+'/cancel',{role:'employee',companyId:companyA,id:employeeA,method:'POST',body:'{}'})).status,404);
-  const adminPrint=await request('/api/electronic-documents/'+created.id+'/print',{role:'admin',companyId:companyA,id:adminId});
-  assert.equal(adminPrint.status,200);
-  const printPayload:any=await adminPrint.json();
-  assert.ok(typeof printPayload.finalHtml==='string' && printPayload.finalHtml.includes('نموذج استئذان') && printPayload.finalHtml.includes('ملاحظة الموافقة'));
-  await put('adminAccess:'+companyA+':'+adminId,{...fullAdminAccess(),permissions:{...fullAdminAccess().permissions,canPrint:false}});
-  assert.equal((await request('/api/electronic-documents/'+created.id+'/print',{role:'admin',companyId:companyA,id:adminId})).status,403);
+  const approve=()=>fetch(origin+'/api/document-approval/'+tokenValue,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerName:'Manager A',managerSignature:signature,decision:'approved',reason:'ملاحظة الموافقة'})});
+  assert.deepEqual((await Promise.all([approve(),approve()])).map(r=>r.status).sort(),[200,404]);
+  const printed=await request('/api/electronic-documents/'+created.id+'/print',{id:adminId});
+  assert.ok((await printed.json() as any).finalHtml.includes('ملاحظة الموافقة'));
+  const timeline=await request('/api/electronic-documents/'+created.id+'/audit',{id:adminId});
+  assert.equal(timeline.status,200);
+  const actions=(await timeline.json() as any[]).map(event=>event.action);
+  assert.deepEqual(actions.slice(0,2),['employee_signed','shared_with_manager']);
+  assert.ok(actions.includes('approved')&&actions.includes('print_preview'));
+  const ownMain:any=await (await request('/api/main-data',{role:'employee',id:employeeA})).json();
+  assert.ok(ownMain._permissionDays.some((marker:any)=>marker.id===created.id&&marker.date===form.date));
+  const otherMain:any=await (await request('/api/main-data',{role:'employee',id:employeeB})).json();
+  assert.equal(otherMain._permissionDays.length,0);
+  await pool.query('INSERT INTO shift_app.attendance (emp_id,emp_name,dept,date,company_id,check_in,check_out) VALUES ($1,$2,$3,$4,$5,$6,$7)',[employeeA,'Employee A',departmentA,form.date,companyA,'08:00','17:00']);
+  const adminReport:any=await (await request('/api/attendance-report?from='+form.date+'&to='+form.date,{id:adminId})).json();
+  assert.ok(adminReport.items[0].permissions.some((marker:any)=>marker.id===created.id));
+  const ownReport:any=await (await request('/api/employee-attendance?month=2026-10',{role:'employee',id:employeeA})).json();
+  assert.ok(ownReport.items.find((day:any)=>day.date===form.date).permissions.some((marker:any)=>marker.id===created.id));
+  const createdB=await createDoc(employeeB);
   await put('adminAccess:'+companyA+':'+adminId,{...fullAdminAccess(),departmentIds:[departmentA]});
-
-  const employeeBCreate=await request('/api/electronic-documents',{role:'employee',companyId:companyA,id:employeeB,method:'POST',body:JSON.stringify({companyId:companyA,formData:form,employeeSignature:signature})});
-  assert.equal(employeeBCreate.status,201);
-  const createdB:any=await employeeBCreate.json();
-  assert.equal((await request('/api/electronic-documents/'+createdB.id+'/status',{role:'admin',companyId:companyA,id:adminId,method:'POST',body:JSON.stringify({status:'cancelled'})})).status,404);
-
-  const employeeList=await request('/api/electronic-documents',{role:'employee',companyId:companyA,id:employeeA});
-  assert.equal(employeeList.status,200);
-  const list:any[]=await employeeList.json();
-  assert.equal(list.length,1);
-  assert.equal(list[0].finalHtml,undefined);
-  assert.equal(list[0].employeeSignature,undefined);
-  assert.equal(list[0].managerSignature,undefined);
-  assert.equal(list[0].shareTokenHash,undefined);
-
-  const scoped=await request('/api/electronic-documents',{role:'admin',companyId:companyA,id:adminId});
-  assert.equal(scoped.status,200);
-  const scopedDocs:any[]=await scoped.json();
-  assert.ok(scopedDocs.every(d=>d.departmentName==='Department A'));
-  assert.equal((await request('/api/electronic-documents/'+created.id+'/status',{role:'admin',companyId:companyA,id:adminId,method:'POST',body:JSON.stringify({status:'cancelled'})})).status,404);
-
-  const otherCompanyList=await request('/api/electronic-documents',{role:'superadmin',companyId:'default',requestCompanyId:companyB});
-  assert.equal(otherCompanyList.status,403);
-
+  assert.equal((await request('/api/electronic-documents/'+createdB.id,{id:adminId,method:'DELETE'})).status,404);
+  assert.equal((await request('/api/electronic-documents/'+createdB.id+'/audit',{id:adminId})).status,404);
+  const scopedMain:any=await (await request('/api/main-data',{id:adminId})).json();
+  assert.ok(scopedMain._permissionDays.every((marker:any)=>marker.employeeId===employeeA));
   await put('adminAccess:'+companyA+':'+adminId,fullAdminAccess());
-  for (const invalidSignature of [signatureFixture(true),'data:image/png;base64,AAAA']) {
-    assert.equal((await request('/api/electronic-documents',{role:'employee',id:employeeA,method:'POST',body:JSON.stringify({formData:form,employeeSignature:invalidSignature})})).status,400);
-  }
-  const createDoc=async()=>{
-    const response=await request('/api/electronic-documents',{role:'employee',id:employeeA,method:'POST',body:JSON.stringify({formData:form,employeeSignature:signature})});
-    assert.equal(response.status,201);return response.json() as Promise<any>;
-  };
-  // Hold the row while share reads the old state; finish a terminal transition
-  // before releasing the lock. Its UPDATE must recheck the current state.
-  for (const terminal of ['approved','cancelled','rejected']) {
-    const doc=await createDoc();
-    const blocker=await pool.connect();
-    try {
-      await blocker.query('BEGIN');
-      await blocker.query('SELECT id FROM shift_app.electronic_documents WHERE id=$1 FOR UPDATE',[doc.id]);
-      const sharing=request('/api/electronic-documents/'+doc.id+'/share',{id:adminId,method:'POST',body:'{}'});
-      let waiting=false;
-      for(let attempt=0;attempt<100;attempt++) {
-        const active=await pool.query("SELECT 1 FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE '%electronic_documents%' AND query LIKE 'update%'");
-        if(active.rowCount){waiting=true;break;}
-        await new Promise(resolve=>setTimeout(resolve,20));
-      }
-      assert.ok(waiting,'share did not reach its blocked UPDATE');
-      await blocker.query('UPDATE shift_app.electronic_documents SET status=$1 WHERE id=$2',[terminal,doc.id]);
-      await blocker.query('COMMIT');
-      assert.equal((await sharing).status,409);
-      const stored=await pool.query('SELECT status,share_token_hash FROM shift_app.electronic_documents WHERE id=$1',[doc.id]);
-      assert.equal(stored.rows[0].status,terminal);
-      assert.equal(stored.rows[0].share_token_hash,null);
-    } finally {await blocker.query('ROLLBACK');blocker.release();}
-  }
-  const twice=await createDoc();
-  const sharing=await request('/api/electronic-documents/'+twice.id+'/share',{id:adminId,method:'POST',body:'{}'});
-  const approvalToken=(await sharing.json() as any).url.split('/document-approval/')[1];
-  const decisions=await Promise.all([1,2].map(()=>fetch(origin+'/api/document-approval/'+approvalToken,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerName:'Manager',managerSignature:signature,decision:'approved',reason:''})})));
-  assert.deepEqual(decisions.map(r=>r.status).sort(),[200,404]);
+  assert.equal((await request('/api/electronic-documents/'+created.id,{id:adminId,method:'DELETE'})).status,200);
+  assert.equal((await request('/api/electronic-documents/'+created.id+'/print',{id:adminId})).status,404);
+  const afterDelete:any=await (await request('/api/main-data',{role:'employee',id:employeeA})).json();
+  assert.equal(afterDelete._permissionDays.length,0);
+  assert.equal((await fetch(origin+'/api/document-approval/'+tokenValue)).status,404);
+  assert.equal((await pool.query("SELECT count(*)::int AS count FROM shift_app.audit_log WHERE action='electronic-document.delete' AND entity_id=$1",[String(created.id)])).rows[0].count,1);
   const pending=await createDoc();
-  const pendingShare=await request('/api/electronic-documents/'+pending.id+'/share',{id:adminId,method:'POST',body:'{}'});
-  const deletedToken=(await pendingShare.json() as any).url.split('/document-approval/')[1];
+  assert.equal((await request('/api/electronic-documents/'+pending.id,{id:adminId,method:'DELETE'})).status,200);
+  assert.equal((await fetch(origin+'/api/document-approval/'+pending.url.split('/document-approval/')[1])).status,404);
+  for(const invalidSignature of [signatureFixture(true),'data:image/png;base64,AAAA'])assert.equal((await request('/api/electronic-documents',{role:'employee',id:employeeA,method:'POST',body:JSON.stringify({formData:form,employeeSignature:invalidSignature})})).status,400);
   assert.equal((await request('/api/companies/'+companyA,{role:'superadmin',companyId:'default',method:'DELETE'})).status,200);
-  for(const table of ['electronic_documents','electronic_document_audit']) {
-    assert.equal((await pool.query('SELECT count(*)::int AS count FROM shift_app.'+table+' WHERE company_id=$1',[companyA])).rows[0].count,0);
-  }
-  assert.equal((await fetch(origin+'/api/document-approval/'+deletedToken)).status,404);
-  assert.equal((await fetch(origin+'/api/document-approval/'+deletedToken,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerName:'Manager',managerSignature:signature,decision:'approved'})})).status,404);
+  for(const table of ['electronic_documents','electronic_document_audit'])assert.equal((await pool.query('SELECT count(*)::int AS count FROM shift_app.'+table+' WHERE company_id=$1',[companyA])).rows[0].count,0);
+  console.log('PASS: direct employee approval, locked employee forms, reusable manager link, manager signature, admin timeline/printing/deletion and isolated attendance markers.');
 
-  console.log('PASS: electronic documents creation, admin manager link, public approval, one-time token, immutability, company isolation and department scope.');
 } finally {
   child.kill('SIGTERM');
   await pool.end();

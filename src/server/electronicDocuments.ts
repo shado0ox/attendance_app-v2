@@ -44,15 +44,27 @@ function finalHtml(doc:any, company:any) {
   <div class="section">بيانات الطلب</div><table>${rowHtml}</table>
   <div class="section">إقرار الموظف</div><p class="reason">أقر بصحة البيانات الواردة في هذا الطلب وألتزم بما يترتب عليه، وأوافق على استخدام توقيعي الإلكتروني لإثبات تقديم الطلب.</p>
   <div class="signs"><div class="sign"><h4>توقيع الموظف</h4>${doc.employeeSignature?'<img class="sig" src="'+escapeHtml(doc.employeeSignature)+'">':''}<div>${escapeHtml(doc.employeeName)}</div></div>
-  <div class="sign"><h4>اعتماد الإدارة</h4><div class="decision">القرار: معتمد</div>${doc.managerSignature?'<img class="sig" src="'+escapeHtml(doc.managerSignature)+'">':''}<div>${escapeHtml(doc.managerName)}</div></div></div>
+  <div class="sign"><h4>اعتماد الإدارة</h4><div class="decision">القرار: ${doc.status==='approved'?'معتمد':doc.status==='rejected'?'مرفوض':'بانتظار توقيع المدير'}</div>${doc.managerSignature?'<img class="sig" src="'+escapeHtml(doc.managerSignature)+'">':''}<div>${escapeHtml(doc.managerName)}</div></div></div>
   <div class="foot">تم إنشاء هذا المستند إلكترونيًا وحفظه ضمن ملف الموظف.</div></div></body></html>`;
 }
 
 export function registerElectronicDocumentRoutes(
   app: Express,
   requireAuth: (roles: Auth['role'][], matchCompany?: boolean) => any,
-  getMainDataByCompanyId: (companyId:string)=>Promise<any>
+  getMainDataByCompanyId: (companyId:string)=>Promise<any>,
+  getTokenSecret: ()=>string
 ) {
+  const tokenKey = () => crypto.createHash('sha256').update('electronic-document-link:'+getTokenSecret()).digest();
+  const sealToken = (token:string) => {
+    const iv=crypto.randomBytes(12), cipher=crypto.createCipheriv('aes-256-gcm',tokenKey(),iv);
+    const encrypted=Buffer.concat([cipher.update(token,'utf8'),cipher.final()]);
+    return Buffer.concat([iv,cipher.getAuthTag(),encrypted]).toString('base64url');
+  };
+  const openToken = (sealed:string) => {
+    const bytes=Buffer.from(sealed,'base64url'), decipher=crypto.createDecipheriv('aes-256-gcm',tokenKey(),bytes.subarray(0,12));
+    decipher.setAuthTag(bytes.subarray(12,28));
+    return Buffer.concat([decipher.update(bytes.subarray(28)),decipher.final()]).toString('utf8');
+  };
   const employeeOrAdmin = requireAuth(['employee','admin','superadmin']);
   const adminOnly = requireAuth(['admin','superadmin']);
   const companyExists = async (companyId:string, executor:any=db) => {
@@ -95,6 +107,8 @@ export function registerElectronicDocumentRoutes(
         version:schema.electronicDocuments.version,
         parentDocumentId:schema.electronicDocuments.parentDocumentId,
         formData:schema.electronicDocuments.formData,
+        employeeSignedAt:schema.electronicDocuments.employeeSignedAt,
+        managerSignedAt:schema.electronicDocuments.managerSignedAt,
         managerName:schema.electronicDocuments.managerName,
         managerDecision:schema.electronicDocuments.managerDecision,
         reviewReason:schema.electronicDocuments.reviewReason,
@@ -103,21 +117,21 @@ export function registerElectronicDocumentRoutes(
       }).from(schema.electronicDocuments)
         .where(and(...conditions))
         .orderBy(desc(schema.electronicDocuments.createdAt),desc(schema.electronicDocuments.id));
-      return res.json(rows);
+      return res.json(auth.role==='employee'?rows.map(({formData,...doc})=>({...doc,date:(formData as any)?.date,requestType:(formData as any)?.requestType})):rows);
     } catch(error:any){return res.status(500).json({error:'تعذر تحميل المستندات الإلكترونية'});}
   });
 
   app.get('/api/electronic-documents/:id/print', employeeOrAdmin, async (req:Request,res:Response)=>{
     const auth=(req as any).auth as Auth;
+    if(auth.role==='employee') return res.status(403).json({error:'بعد اعتمادك لا يمكن فتح المستند مجددًا؛ الطباعة من الإدارة'});
     const id=Number(req.params.id);
     if(!Number.isInteger(id) || id<=0) return res.status(400).json({error:'معرف المستند غير صالح'});
     const companyId=auth.role==='superadmin'
       ? String(req.query.companyId || 'default')
       : String(auth.companyId || 'default');
     try {
-      const conditions=[eq(schema.electronicDocuments.id,id),eq(schema.electronicDocuments.companyId,companyId),eq(schema.electronicDocuments.status,'approved')];
-      if(auth.role==='employee') conditions.push(eq(schema.electronicDocuments.employeeId,String(auth.id)));
-      else {
+      const conditions=[eq(schema.electronicDocuments.id,id),eq(schema.electronicDocuments.companyId,companyId)];
+      {
         const access=(req as any).adminAccess;
         if(access?.departmentIds !== null && Array.isArray(access?.departmentIds)) {
           const mainData=await getMainDataByCompanyId(companyId);
@@ -128,10 +142,10 @@ export function registerElectronicDocumentRoutes(
           conditions.push(inArray(schema.electronicDocuments.employeeId,allowedIds));
         }
       }
-      const [doc]=await db.select({finalHtml:schema.electronicDocuments.finalHtml})
-        .from(schema.electronicDocuments).where(and(...conditions)).limit(1);
-      if(!doc?.finalHtml) return res.status(404).json({error:'المستند غير موجود أو لا توجد نسخة قابلة للطباعة'});
-      return res.json({finalHtml:doc.finalHtml});
+      const [doc]=await db.select().from(schema.electronicDocuments).where(and(...conditions)).limit(1);
+      if(!doc) return res.status(404).json({error:'المستند غير موجود أو لا توجد نسخة قابلة للطباعة'});
+      await db.insert(schema.electronicDocumentAudit).values({companyId,documentId:id,actorId:String(auth.id||auth.username||'admin'),actorRole:auth.role,action:'print_preview',details:{}});
+      return res.json({finalHtml:doc.finalHtml||finalHtml(doc,await getMainDataByCompanyId(companyId))});
     } catch(error:any){return res.status(500).json({error:'تعذر تحميل نسخة الطباعة'});}
   });
 
@@ -150,44 +164,47 @@ export function registerElectronicDocumentRoutes(
     const form=parsed.value;
     const departmentName=(data?.departments || []).find((d:any)=>String(d.id)===String(employee.dept))?.name || 'بدون قسم';
     try {
-      const [doc]=await db.insert(schema.electronicDocuments).values({
-        companyId, employeeId:String(employee.id), employeeName:clean(employee.name,200), departmentName,
-        documentType:'permission', status:'employee_signed', version:'1', formData:form,
-        employeeSignature:signature, employeeSignedAt:new Date()
-      }).returning();
-      await db.insert(schema.electronicDocumentAudit).values({companyId,documentId:doc.id,actorId:String(auth.id),actorRole:auth.role,action:'employee_signed',details:{type:'permission'}});
-      return res.status(201).json(doc);
+      const base=String(process.env.APP_URL||'').trim();
+      if(!base)return res.status(500).json({error:'APP_URL غير مضبوط؛ تعذر إنشاء رابط المدير'});
+      const token=makeToken(),expires=new Date(Date.now()+72*60*60*1000);
+      const doc=await db.transaction(async tx=>{
+        const [created]=await tx.insert(schema.electronicDocuments).values({
+          companyId,employeeId:String(employee.id),employeeName:clean(employee.name,200),departmentName,
+          documentType:'permission',status:'pending_manager',version:'1',formData:form,
+          employeeSignature:signature,employeeSignedAt:new Date(),shareTokenHash:tokenHash(token),shareTokenEncrypted:sealToken(token),shareExpiresAt:expires
+        }).returning();
+        await tx.insert(schema.electronicDocumentAudit).values({companyId,documentId:created.id,actorId:String(auth.id),actorRole:auth.role,action:'employee_signed',details:{type:'permission'}});
+        await tx.insert(schema.electronicDocumentAudit).values({companyId,documentId:created.id,actorId:String(auth.id),actorRole:auth.role,action:'shared_with_manager',details:{expiresAt:expires.toISOString()}});
+        return created;
+      });
+      return res.status(201).json({id:doc.id,status:doc.status,url:`${base.replace(/\/$/,'')}/document-approval/${token}`,expiresAt:expires.toISOString()});
     } catch(error:any){console.error('electronic document create failed',error);return res.status(500).json({error:'تعذر حفظ المستند'});}
   });
 
-  app.post('/api/electronic-documents/:id/share', adminOnly, async (req:Request,res:Response)=>{
-    const auth=(req as any).auth as Auth;
-    const id=Number(req.params.id);
+  app.post('/api/electronic-documents/:id/share', employeeOrAdmin, async (req:Request,res:Response)=>{
+    const auth=(req as any).auth as Auth, id=Number(req.params.id);
+    if(auth.role!=='employee') return res.status(403).json({error:'رابط المدير متاح لصاحب الطلب فقط'});
+    const base=String(process.env.APP_URL||'').trim();
+    if(!base) return res.status(500).json({error:'APP_URL غير مضبوط في إعدادات الخادم'});
     try {
-      const rows=await db.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.id,id)).limit(1);
-      const doc=rows[0];
-      if(!doc || String(doc.companyId)!==String(auth.companyId)) return res.status(404).json({error:'المستند غير موجود'});
-      const access=(req as any).adminAccess;
-      if(access?.departmentIds !== null && Array.isArray(access?.departmentIds)) {
-        const data=await getMainDataByCompanyId(String(doc.companyId));
-        const employee=(data?.employees || []).find((e:any)=>String(e.id)===String(doc.employeeId));
-        if(!employee || !access.departmentIds.includes(employee.dept)) return res.status(404).json({error:'المستند غير موجود'});
-      }
-      if(doc.status!=='employee_signed' && doc.status!=='pending_manager') return res.status(409).json({error:'المستند غير جاهز للإرسال للمدير'});
-      const wasPending=doc.status==='pending_manager';
-      const base=String(process.env.APP_URL || '').trim();
-      if(!base) return res.status(500).json({error:'APP_URL غير مضبوط في إعدادات الخادم؛ لا يمكن إنشاء رابط المدير'});
-      const token=makeToken(), hash=tokenHash(token), expires=new Date(Date.now()+72*60*60*1000);
-      await db.transaction(async tx => {
-        const [updated] = await tx.update(schema.electronicDocuments)
-          .set({shareTokenHash:hash,shareExpiresAt:expires,shareUsedAt:null,status:'pending_manager',updatedAt:new Date()})
-          .where(and(eq(schema.electronicDocuments.id,id),inArray(schema.electronicDocuments.status,['employee_signed','pending_manager'])))
-          .returning();
-        if (!updated) throw Object.assign(new Error('تغيّرت حالة المستند؛ لا يمكن إنشاء الرابط'), {status:409});
-        await tx.insert(schema.electronicDocumentAudit).values({companyId:String(doc.companyId),documentId:id,actorId:String(auth.id || auth.username || 'admin'),actorRole:auth.role,action:'shared_with_manager',details:{expiresAt:expires.toISOString(),reissued:wasPending}});
+      const result=await db.transaction(async tx=>{
+        const [doc]=await tx.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.id,id)).limit(1).for('update');
+        if(!doc || String(doc.companyId)!==String(auth.companyId) || String(doc.employeeId)!==String(auth.id)) throw Object.assign(new Error('المستند غير موجود'),{status:404});
+        if(!['employee_signed','manager_ready','pending_manager'].includes(doc.status)) throw Object.assign(new Error('الرابط متاح بعد اعتماد الموظف وقبل توقيع المدير'),{status:409});
+        // Repeated copy/share returns the same active link, never invalidating a sent link.
+        if(doc.shareTokenEncrypted && doc.shareExpiresAt && doc.shareExpiresAt.getTime()>Date.now() && !doc.shareUsedAt) {
+          try {
+            const token=openToken(doc.shareTokenEncrypted);
+            if(tokenHash(token)===doc.shareTokenHash) return {token,expires:doc.shareExpiresAt};
+          } catch { /* rotated secret or legacy link: issue a fresh link below */ }
+        }
+        const token=makeToken(), expires=new Date(Date.now()+72*60*60*1000);
+        await tx.update(schema.electronicDocuments).set({status:'pending_manager',shareTokenHash:tokenHash(token),shareTokenEncrypted:sealToken(token),shareExpiresAt:expires,shareUsedAt:null,updatedAt:new Date()}).where(eq(schema.electronicDocuments.id,id));
+        await tx.insert(schema.electronicDocumentAudit).values({companyId:String(doc.companyId),documentId:id,actorId:String(auth.id),actorRole:auth.role,action:'shared_with_manager',details:{expiresAt:expires.toISOString()}});
+        return {token,expires};
       });
-      return res.json({url:`${base.replace(/\/$/,'')}/document-approval/${token}`,expiresAt:expires.toISOString()});
-    } catch(error:any){return res.status(error?.status || 500).json({error:error?.status ? error.message : 'تعذر إنشاء رابط المدير'});}
+      return res.json({url:`${base.replace(/\/$/,'')}/document-approval/${result.token}`,expiresAt:result.expires.toISOString()});
+    } catch(error:any){return res.status(error?.status||500).json({error:error?.status?error.message:'تعذر إنشاء رابط المدير'});}
   });
 
   app.get('/api/document-approval/:token', async (req:Request,res:Response)=>{
@@ -215,11 +232,11 @@ export function registerElectronicDocumentRoutes(
         if (!await companyExists(String(doc.companyId),tx)) throw Object.assign(new Error('الرابط غير صالح أو منتهي'),{status:404});
         const company=await getMainDataByCompanyId(String(doc.companyId));
         if(decision==='rejected'){
-          const [updated]=await tx.update(schema.electronicDocuments).set({status:'rejected',managerName,managerSignature,managerSignedAt:new Date(),managerDecision:'rejected',reviewReason:reason,shareUsedAt:new Date(),updatedAt:new Date()}).where(eq(schema.electronicDocuments.id,doc.id)).returning();
+          const [updated]=await tx.update(schema.electronicDocuments).set({status:'rejected',managerName,managerSignature,managerSignedAt:new Date(),managerDecision:'rejected',reviewReason:reason,shareUsedAt:new Date(),shareTokenEncrypted:null,updatedAt:new Date()}).where(eq(schema.electronicDocuments.id,doc.id)).returning();
           await tx.insert(schema.electronicDocumentAudit).values({companyId:String(doc.companyId),documentId:doc.id,actorId:managerName,actorRole:'manager',action:'rejected',details:{reason}});
           return updated;
         }
-        const updatedBase={status:'approved',managerName,managerSignature,managerSignedAt:new Date(),managerDecision:'approved',reviewReason:reason || null,shareUsedAt:new Date(),updatedAt:new Date()};
+        const updatedBase={status:'approved',managerName,managerSignature,managerSignedAt:new Date(),managerDecision:'approved',reviewReason:reason || null,shareUsedAt:new Date(),shareTokenEncrypted:null,updatedAt:new Date()};
         const preview={...doc,...updatedBase};
         const html=finalHtml(preview,company);
         const [updated]=await tx.update(schema.electronicDocuments).set({...updatedBase,finalHtml:html}).where(eq(schema.electronicDocuments.id,doc.id)).returning();
@@ -232,21 +249,21 @@ export function registerElectronicDocumentRoutes(
 
   app.post('/api/electronic-documents/:id/cancel', employeeOrAdmin, async (req:Request,res:Response)=>{
     const auth=(req as any).auth as Auth;
+    if(auth.role==='employee')return res.status(403).json({error:'لا يمكن تعديل أو إلغاء الطلب بعد اعتماد الموظف؛ تواصل مع الإدارة'});
     const id=Number(req.params.id);
     try {
       const rows=await db.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.id,id)).limit(1);
       const doc=rows[0];
-      const ownsDocument=doc && String(doc.companyId)===String(auth.companyId) &&
-        (auth.role!=='employee' || String(doc.employeeId)===String(auth.id));
-      if(!ownsDocument || !['employee_signed','pending_manager'].includes(doc.status)) {
+      const ownsDocument=doc && String(doc.companyId)===String(auth.companyId);
+      if(!ownsDocument || !['employee_signed','manager_ready','pending_manager'].includes(doc.status)) {
         return res.status(404).json({error:'المستند غير موجود أو لا يمكن إلغاؤه'});
       }
 
       const [updated]=await db.update(schema.electronicDocuments)
-        .set({status:'cancelled',shareTokenHash:null,shareExpiresAt:null,shareUsedAt:null,updatedAt:new Date()})
+        .set({status:'cancelled',shareTokenHash:null,shareTokenEncrypted:null,shareExpiresAt:null,shareUsedAt:null,updatedAt:new Date()})
         .where(and(
           eq(schema.electronicDocuments.id,id),
-          inArray(schema.electronicDocuments.status,['employee_signed','pending_manager']),
+          inArray(schema.electronicDocuments.status,['employee_signed','manager_ready','pending_manager']),
         ))
         .returning();
       if(!updated) return res.status(409).json({error:'تعذر الإلغاء لأن المستند تم اعتماده أثناء العملية'});
@@ -266,13 +283,48 @@ export function registerElectronicDocumentRoutes(
     }
   });
 
+  const scopedDocument=async(req:Request,id:number)=>{
+    const auth=(req as any).auth as Auth;
+    const [doc]=await db.select().from(schema.electronicDocuments).where(and(eq(schema.electronicDocuments.id,id),eq(schema.electronicDocuments.companyId,String(auth.companyId)))).limit(1);
+    if(!doc)return null;
+    const access=(req as any).adminAccess;
+    if(Array.isArray(access?.departmentIds)){
+      const data=await getMainDataByCompanyId(String(doc.companyId));
+      const employee=data?.employees?.find((e:any)=>String(e.id)===String(doc.employeeId));
+      if(!employee||!access.departmentIds.includes(employee.dept))return null;
+    }
+    return doc;
+  };
+  app.get('/api/electronic-documents/:id/audit',adminOnly,async(req:Request,res:Response)=>{
+    try{
+      const id=Number(req.params.id),doc=await scopedDocument(req,id);
+      if(!doc)return res.status(404).json({error:'المستند غير موجود'});
+      const rows=await db.select().from(schema.electronicDocumentAudit).where(and(eq(schema.electronicDocumentAudit.documentId,id),eq(schema.electronicDocumentAudit.companyId,String(doc.companyId)))).orderBy(schema.electronicDocumentAudit.createdAt,schema.electronicDocumentAudit.id);
+      return res.json(rows);
+    }catch{return res.status(500).json({error:'تعذر تحميل مراحل الطلب'});}
+  });
+  app.delete('/api/electronic-documents/:id',adminOnly,async(req:Request,res:Response)=>{
+    try{
+      const id=Number(req.params.id),doc=await scopedDocument(req,id),auth=(req as any).auth as Auth;
+      if(!doc)return res.status(404).json({error:'المستند غير موجود'});
+      await db.transaction(async tx=>{
+        const [current]=await tx.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.id,id)).for('update');
+        if(!current)throw Object.assign(new Error('المستند غير موجود'),{status:404});
+        await tx.insert(schema.auditLog).values({companyId:String(doc.companyId),actorId:String(auth.id||auth.username||'admin'),actorRole:auth.role,action:'electronic-document.delete',entityId:String(id),details:{employeeId:doc.employeeId,status:current.status,date:(doc.formData as any)?.date}});
+        await tx.delete(schema.electronicDocumentAudit).where(eq(schema.electronicDocumentAudit.documentId,id));
+        await tx.delete(schema.electronicDocuments).where(eq(schema.electronicDocuments.id,id));
+      });
+      return res.json({success:true});
+    }catch(error:any){return res.status(error?.status||500).json({error:'تعذر حذف المستند'});}
+  });
+
   app.post('/api/electronic-documents/:id/status', adminOnly, async (req:Request,res:Response)=>{
     const id=Number(req.params.id), status=clean(req.body?.status,30);
     if(!['cancelled'].includes(status)) return res.status(400).json({error:'الحالة المتاحة بعد الحفظ هي الإلغاء فقط'});
     try {
       const rows=await db.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.id,id)).limit(1), doc=rows[0];
       const auth=(req as any).auth as Auth;
-      if(!doc || String(doc.companyId)!==String(auth.companyId) || !['employee_signed','pending_manager'].includes(doc.status)) return res.status(404).json({error:'المستند غير موجود أو لا يمكن تعديله'});
+      if(!doc || String(doc.companyId)!==String(auth.companyId) || !['employee_signed','manager_ready','pending_manager'].includes(doc.status)) return res.status(404).json({error:'المستند غير موجود أو لا يمكن تعديله'});
       const access=(req as any).adminAccess;
       if(access?.departmentIds !== null && Array.isArray(access?.departmentIds)) {
         const data=await getMainDataByCompanyId(String(doc.companyId));
@@ -280,8 +332,8 @@ export function registerElectronicDocumentRoutes(
         if(!employee || !access.departmentIds.includes(employee.dept)) return res.status(404).json({error:'المستند غير موجود أو لا يمكن تعديله'});
       }
       const [updated]=await db.update(schema.electronicDocuments)
-        .set({status,shareTokenHash:null,shareExpiresAt:null,shareUsedAt:null,updatedAt:new Date()})
-        .where(and(eq(schema.electronicDocuments.id,id),inArray(schema.electronicDocuments.status,['employee_signed','pending_manager'])))
+        .set({status,shareTokenHash:null,shareTokenEncrypted:null,shareExpiresAt:null,shareUsedAt:null,updatedAt:new Date()})
+        .where(and(eq(schema.electronicDocuments.id,id),inArray(schema.electronicDocuments.status,['employee_signed','manager_ready','pending_manager'])))
         .returning();
       if(!updated) return res.status(409).json({error:'تعذر الإلغاء لأن المستند تم اعتماده أو تغيّرت حالته أثناء العملية'});
       await db.insert(schema.electronicDocumentAudit).values({companyId:String(updated.companyId),documentId:id,actorId:String(auth.id || auth.username || 'admin'),actorRole:auth.role,action:'status_changed',details:{status}});

@@ -67,6 +67,7 @@ function DocumentApprovalRoute() {
 }
 
 export default function App() {
+  const [permissionDays,setPermissionDays]=useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [appData, setAppData] = useState<any>({
     departments: defaultDepartments,
@@ -197,6 +198,8 @@ export default function App() {
     return localStorage.getItem('app_company_id') || 'default';
   });
 
+  useEffect(() => { setPermissionDays([]); }, [companyId, session.role, session.info?.id]);
+
   if (companyRef.current !== companyId) {
     companyRef.current = companyId;
     revision.current++;
@@ -266,6 +269,7 @@ export default function App() {
         const data = await response.json();
         if (cancelled || fetchRevision !== revision.current || pendingSaves.current || unsaved.current) return false;
         receivedData = true;
+        setPermissionDays(data._permissionDays||[]);
         setDataSyncedAt(Date.now());
         setDataSyncError('');
         if (data._adminAccess && session.role === 'admin') setSession(previous => {
@@ -646,6 +650,7 @@ export default function App() {
                 employees={appData.employees}
                 shiftTypes={appData.shiftTypes}
                 schedule={appData.schedule}
+                permissionDays={permissionDays}
                 onLogout={handleLogout}
                 onOpenChangePassword={handleOpenChangePassword}
                 companyId={companyId}
@@ -669,6 +674,7 @@ export default function App() {
                 employees={appData.employees}
                 shiftTypes={appData.shiftTypes}
                 schedule={appData.schedule}
+                permissionDays={permissionDays}
                 onLogout={handleLogout}
                 onUpdateSettings={handleUpdateSettings}
                 onUpdateAppData={handleUpdateAppData}

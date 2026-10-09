@@ -47,3 +47,5 @@ jobs:
       - run: node --import tsx tests/tenantPrivacy.integration.ts
       - run: node --import tsx tests/employeeSelfService.integration.ts
       - run: node --import tsx tests/electronicDocuments.integration.ts
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --config playwright.documents.config.ts

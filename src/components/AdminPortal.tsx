@@ -32,6 +32,7 @@ import CompaniesView from '../pages/admin/CompaniesView';
 import ElectronicDocumentsView from '../pages/admin/ElectronicDocumentsView';
 
 interface AdminPortalProps {
+  permissionDays?: any[];
   onRefreshData: () => Promise<boolean>;
   admin: any;
   appSettings: any;
@@ -50,6 +51,7 @@ interface AdminPortalProps {
 }
 
 export default function AdminPortal({
+  permissionDays=[],
   onRefreshData,
   admin,
   appSettings,
@@ -974,6 +976,7 @@ export default function AdminPortal({
           {/* View: Schedule */}
           {activeView === 'schedule' && (
             <ScheduleView
+              permissionDays={permissionDays}
               companyId={companyId}
               canPublish={!departmentScoped}
               onPublished={onRefreshData}
@@ -2248,6 +2251,7 @@ export default function AdminPortal({
                                   </div>
                                 )}
 
+                                {permissionDays.some(marker=>marker.date===cell.dateStr&&marker.employeeId===String(emp.id))&&<div style={{fontSize:'9px',color:'#0369a1',fontWeight:'bold'}}>استئذان معتمد</div>}
                                 {cell.entry?.note ? (
                                   <div style={{ 
                                     fontSize: '7px', 
