@@ -15,7 +15,7 @@ test('map click and marker drag select branch coordinates; saving retains the po
   await expect(lng).not.toHaveValue(before);
   await page.getByLabel('النطاق بالمتر').fill('250');
   await page.getByRole('button', { name: 'حفظ مواقع الفروع' }).click();
-  await expect(page.getByRole('status')).toContainText('تم حفظ');
+  await expect(page.getByText('تم حفظ مواقع الفروع بنجاح.', { exact: true })).toBeVisible();
   const saved = JSON.parse(await page.getByTestId('saved').innerText()).attendanceLocations[0];
   expect(saved.radius).toBe(250); expect(saved.lat).toBeCloseTo(Number(await lat.inputValue()), 6); expect(saved.lng).toBeCloseTo(Number(await lng.inputValue()), 6);
   expect(errors).toEqual([]);
