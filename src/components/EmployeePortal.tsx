@@ -1374,7 +1374,7 @@ export default function EmployeePortal({
         </section>
         <section hidden={activeTab!=='settings'} style={{display:activeTab==='settings'?'flex':'none'}} className="flex flex-col gap-6">
         {/* Automatic Geofencing Punch Card */}
-        <div className="p-6 bg-gradient-to-br from-slate-900 to-indigo-950 border border-indigo-900 rounded-2xl shadow-xl text-white flex flex-col gap-5 relative overflow-hidden">
+        <div className="employee-attendance-settings p-6 bg-gradient-to-br from-slate-900 to-indigo-950 border border-indigo-900 rounded-2xl shadow-xl text-white flex flex-col gap-5 relative overflow-hidden">
           {/* Subtle decorative lights */}
           <div className="absolute top-0 right-0 w-36 h-36 bg-sky-500/10 rounded-full blur-3xl"></div>
           <div className="absolute bottom-0 left-0 w-36 h-36 bg-amber-500/10 rounded-full blur-3xl"></div>
@@ -1382,16 +1382,16 @@ export default function EmployeePortal({
           <div className="flex items-center justify-between pb-3 border-b border-indigo-800/60 z-10">
             <div className="flex items-center gap-2.5">
               <span className="p-2 bg-indigo-500/20 rounded-xl text-sky-400">
-                <Clock size={16} className="animate-pulse" />
+                <Clock size={16}  />
               </span>
               <div>
                 <h3 className="font-extrabold text-sm text-indigo-100">الحضور بالموقع وتذكيرات الدوام</h3>
-                <p className="text-[10px] text-indigo-300">حضور بعد ثبات الموقع، وتذكير بالانصراف للتأكيد أثناء فتح التطبيق</p>
+                <p className="text-sm text-indigo-300">حضور بعد ثبات الموقع، وتذكير بالانصراف للتأكيد أثناء فتح التطبيق</p>
               </div>
             </div>
             {(autoCheckIn || autoCheckOut) && (
-              <span className="flex items-center gap-1 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-2 py-0.5 rounded-full text-[10px] font-bold">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+              <span className="flex items-center gap-1 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-2 py-0.5 rounded-full text-sm font-bold">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                 الفحص مفعّل أثناء الاستخدام
               </span>
             )}
@@ -1399,32 +1399,32 @@ export default function EmployeePortal({
 
           {/* Quick Permission Grants section */}
           <div className="p-3.5 bg-sky-950/45 border border-sky-900/40 rounded-xl flex flex-col gap-2.5 z-10">
-            <span className="text-[11px] font-extrabold text-sky-300 flex items-center gap-1">
+            <span className="text-sm font-extrabold text-sky-300 flex items-center gap-1">
               📱 خطوة هامة: تفعيل إذن الموقع والتنبيهات على الهاتف:
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
               <button
                 onClick={requestAlwaysLocationPermission}
-                className="px-3 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 rounded-lg text-[11px] font-bold transition-all text-right flex items-center justify-between"
+                className="px-3 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 rounded-lg text-sm font-bold transition-all text-right flex items-center justify-between"
               >
                 <span>1. طلب إذن الموقع أثناء الاستخدام</span>
-                <span className="font-mono text-[9px] bg-sky-900/40 px-1.5 py-0.5 rounded">اضغط هنا 📍</span>
+                <span className="font-mono text-sm bg-sky-900/40 px-1.5 py-0.5 rounded">اضغط هنا 📍</span>
               </button>
               <button
                 onClick={requestNotificationPermission}
-                className="px-3 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 rounded-lg text-[11px] font-bold transition-all text-right flex items-center justify-between"
+                className="px-3 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 rounded-lg text-sm font-bold transition-all text-right flex items-center justify-between"
               >
                 <span>2. تفعيل التنبيهات المباشرة على الجوال</span>
-                <span className="font-mono text-[9px] bg-sky-900/40 px-1.5 py-0.5 rounded">
+                <span className="font-mono text-sm bg-sky-900/40 px-1.5 py-0.5 rounded">
                   {notificationPermissionState === 'granted' ? 'إذن الإشعارات مسموح' : 'اضغط للتفعيل 🔔'}
                 </span>
               </button>
             </div>
-            <p className="text-[9px] text-slate-300 leading-normal">
+            <p className="text-sm text-slate-300 leading-normal">
               لتشغيل البصمة افتح التطبيق واسمح بالموقع. تثبيت الـPWA لا يضمن استمرار GPS والشاشة مقفلة؛ يستأنف الفحص عند الرجوع.
             </p>
             <p role="status" className="text-xs text-indigo-200">{pushMessage || 'بعد تفعيل الإشعارات: تذكير كل 10 دقائق خلال أول ساعة من بداية كل فترة، ويتوقف فور تسجيل الحضور.'}</p>
-            <p className="text-[10px] text-slate-300">{pushReady ? 'اشتراك السيرفر محفوظ؛ استلام الإشعار يحتاج اختبارًا.' : 'إشعارات الخلفية غير مؤكدة.'} تذكير الشاشة يظل فعالًا أثناء الاستخدام.</p>
+            <p className="text-sm text-slate-300">{pushReady ? 'اشتراك السيرفر محفوظ؛ استلام الإشعار يحتاج اختبارًا.' : 'إشعارات الخلفية غير مؤكدة.'} تذكير الشاشة يظل فعالًا أثناء الاستخدام.</p>
             <button disabled={pushTesting || !enableMissedShiftAlert} onClick={() => { void testServerPush(); }} className="rounded-lg border border-sky-700 px-3 py-2 text-xs text-sky-200 disabled:opacity-50">{pushTesting ? 'جاري اختبار السيرفر…' : 'إعادة الربط واختبار إشعار السيرفر'}</button>
           </div>
 
@@ -1433,7 +1433,7 @@ export default function EmployeePortal({
             <label className="flex items-center justify-between p-3.5 bg-indigo-950/40 border border-indigo-800/40 rounded-xl cursor-pointer hover:bg-indigo-900/40 transition-all">
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs font-bold text-slate-100">بصمة الحضور تلقائياً عند الدخول</span>
-                <span className="text-[9.5px] text-indigo-300">يسجل بعد تأكيد الموقع أثناء فتح التطبيق</span>
+                <span className="text-sm text-indigo-300">يسجل بعد تأكيد الموقع أثناء فتح التطبيق</span>
               </div>
               <input
                 type="checkbox"
@@ -1447,7 +1447,7 @@ export default function EmployeePortal({
             <label className="flex items-center justify-between p-3.5 bg-indigo-950/40 border border-indigo-800/40 rounded-xl cursor-pointer hover:bg-indigo-900/40 transition-all">
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs font-bold text-slate-100">تذكير بالانصراف عند الخروج أو نهاية الدوام</span>
-                <span className="text-[9.5px] text-indigo-300">يذكّرك؛ تسجيل الانصراف يحتاج تأكيدك</span>
+                <span className="text-sm text-indigo-300">يذكّرك؛ تسجيل الانصراف يحتاج تأكيدك</span>
               </div>
               <input
                 type="checkbox"
@@ -1458,14 +1458,29 @@ export default function EmployeePortal({
             </label>
           </div>
 
+          <div className="attendance-reminder-row rounded-xl border p-4">              <div className="flex items-center justify-between pt-1 text-xs">
+                <span className="text-sm text-slate-300 font-bold">تذكير الحضور كل 10 دقائق خلال أول ساعة فقط</span>
+                <input
+                  type="checkbox"
+                  checked={enableMissedShiftAlert}
+                  onChange={(e) => setEnableMissedShiftAlert(e.target.checked)}
+                  className="w-8 h-4 bg-indigo-900 rounded-full appearance-none relative before:content-[''] before:absolute before:h-3 before:w-3 before:rounded-full before:bg-white before:top-0.5 before:left-0.5 checked:bg-emerald-500 checked:before:translate-x-4 before:transition-all cursor-pointer"
+                />
+              </div>
+            <p className="mt-2 text-sm">يتوقف عند تسجيل حضور الفترة أو مرور ساعة من بدايتها.</p>
+          </div>
+          <details className="attendance-advanced rounded-xl border">
+            <summary className="cursor-pointer px-4 py-4 font-semibold">خيارات فحص الموقع المتقدمة</summary>
           {/* Smart Check Scheduling configuration */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 z-10 p-4 bg-indigo-950/45 border border-indigo-900/50 rounded-xl">
             {/* Check interval & Mode */}
             <div className="flex flex-col gap-2.5">
-              <span className="text-[11px] font-extrabold text-indigo-200">⏱️ نظام الجدولة والتحقق الذكي:</span>
+              <span className="text-sm font-extrabold text-indigo-200">⏱️ نظام الجدولة والتحقق الذكي:</span>
               <div className="flex flex-col gap-1.5 text-xs">
-                <label className="text-[10px] text-slate-300 font-bold">نمط التحقق التلقائي عبر الـ GPS</label>
+                <label className="text-sm text-slate-300 font-bold">نمط التحقق التلقائي عبر الـ GPS</label>
                 <select
+                  disabled={!autoCheckIn}
+                  aria-label="نمط فحص الحضور"
                   value={autoCheckMode}
                   onChange={(e) => setAutoCheckMode(e.target.value as any)}
                   className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:outline-none"
@@ -1477,9 +1492,11 @@ export default function EmployeePortal({
 
               {autoCheckMode === 'scheduled' && (
                 <div className="flex flex-col gap-1.5 text-xs">
-                  <label className="text-[10px] text-slate-300 font-bold">وقت بدء الفحص أثناء فتح التطبيق</label>
+                  <label className="text-sm text-slate-300 font-bold">وقت بدء الفحص أثناء فتح التطبيق</label>
                   <input
                     type="time"
+                    disabled={!autoCheckIn}
+                    aria-label="وقت بدء فحص الحضور"
                     value={scheduledCheckTime}
                     onChange={(e) => setScheduledCheckTime(e.target.value)}
                     className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 focus:outline-none"
@@ -1489,10 +1506,12 @@ export default function EmployeePortal({
             </div>
 
             <div className="flex flex-col gap-2.5">
-              <span className="text-[11px] font-extrabold text-indigo-200">⚙️ إعدادات الحضور والتذكير:</span>
+              <span className="text-sm font-extrabold text-indigo-200">⚙️ إعدادات الحضور والتذكير:</span>
               <div className="flex flex-col gap-1.5 text-xs">
-                <label className="text-[10px] text-slate-300 font-bold">الفاصل بين الفحوص المستقرة (يقصر عند تأكيد الموقع)</label>
+                <label className="text-sm text-slate-300 font-bold">الفاصل بين الفحوص المستقرة (يقصر عند تأكيد الموقع)</label>
                 <select
+                  disabled={!autoCheckIn && !autoCheckOut}
+                  aria-label="الفاصل بين فحوص الموقع"
                   value={autoCheckInterval}
                   onChange={(e) => setAutoCheckInterval(Number(e.target.value))}
                   className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:outline-none"
@@ -1503,37 +1522,30 @@ export default function EmployeePortal({
                 </select>
               </div>
 
-              <div className="flex items-center justify-between pt-1 text-xs">
-                <span className="text-[10px] text-slate-300 font-bold">تذكير الحضور كل 10 دقائق خلال أول ساعة فقط</span>
-                <input
-                  type="checkbox"
-                  checked={enableMissedShiftAlert}
-                  onChange={(e) => setEnableMissedShiftAlert(e.target.checked)}
-                  className="w-8 h-4 bg-indigo-900 rounded-full appearance-none relative before:content-[''] before:absolute before:h-3 before:w-3 before:rounded-full before:bg-white before:top-0.5 before:left-0.5 checked:bg-emerald-500 checked:before:translate-x-4 before:transition-all cursor-pointer"
-                />
-              </div>
+
             </div>
           </div>
 
+          </details>
           <div className="p-3.5 bg-indigo-950/60 border border-indigo-800/60 rounded-xl flex flex-col gap-2 z-10 text-xs">
             <div className="flex justify-between items-center text-slate-300">
-              <span className="font-bold text-[11px]">حالة فحص الموقع أثناء الاستخدام:</span>
+              <span className="font-bold text-sm">حالة فحص الموقع أثناء الاستخدام:</span>
               {currentDistance !== null ? (
-                <span className="font-mono text-[11px] bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-sky-400 font-extrabold">
+                <span className="font-mono text-sm bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-sky-400 font-extrabold">
                   المسافة للموقع: {currentDistance} م
                 </span>
               ) : (
-                <span className="text-[10px] text-slate-400">{autoCheckIn || autoCheckOut ? 'لا توجد قراءة موقع متاحة' : 'فحص الموقع غير مفعّل'}</span>
+                <span className="text-sm text-slate-400">{autoCheckIn || autoCheckOut ? 'لا توجد قراءة موقع متاحة' : 'فحص الموقع غير مفعّل'}</span>
               )}
             </div>
 
-            <div className="text-slate-200 text-[11px] flex items-center gap-1.5 font-semibold">
+            <div className="text-slate-200 text-sm flex items-center gap-1.5 font-semibold">
               <span className={`w-2 h-2 rounded-full ${autoCheckIn || autoCheckOut ? 'bg-sky-400 animate-pulse' : 'bg-slate-500'}`}></span>
               <span>{autoCheckIn || autoCheckOut ? autoStatusText : 'الحضور والانصراف يدويان؛ فحص الموقع متوقف'}</span>
             </div>
 
-            <p className="text-[11px] text-slate-300">دقة GPS: {gpsAccuracy === null ? 'غير متاحة' : `${gpsAccuracy} م`} — آخر حضور تلقائي أكد الخادم حفظه: {lastAutoSaved || 'لا يوجد في هذه الجلسة'}</p>
-            <p className="text-[10px] text-indigo-300">الفحص أثناء فتح الـPWA فقط. لا تُحفظ بصمة دون اتصال أو عند إخفاء التطبيق؛ افتحه قرب وقت الحضور والانصراف.</p>
+            <p className="text-sm text-slate-300">دقة GPS: {gpsAccuracy === null ? 'غير متاحة' : `${gpsAccuracy} م`} — آخر حضور تلقائي أكد الخادم حفظه: {lastAutoSaved || 'لا يوجد في هذه الجلسة'}</p>
+            <p className="text-sm text-indigo-300">الفحص أثناء فتح الـPWA فقط. لا تُحفظ بصمة دون اتصال أو عند إخفاء التطبيق؛ افتحه قرب وقت الحضور والانصراف.</p>
             {departureHint && departureHint.id === todayRecord?.id && <div className="p-3 border border-amber-400 rounded-lg"><p>{departureHint.text}</p><button disabled={actionLoading} onClick={() => { void handleCheckOut(); }} className="mt-2 px-3 py-2 bg-amber-500 text-slate-900 rounded-lg font-bold">تأكيد الانصراف الآن</button><button onClick={() => setDepartureHint(null)} className="mr-3 underline">ما زلت أعمل</button></div>}
             {/* Auto logs */}
             {autoLogs.length > 0 && (

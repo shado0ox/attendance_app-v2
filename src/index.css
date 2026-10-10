@@ -225,3 +225,43 @@ body {
   .wafr-week-controls button { padding-inline: 8px; }
   .wafr-login-tabs button { gap: 4px; font-size: 12px; }
 }
+
+/* Employee attendance settings: readable surfaces and immediate touch feedback. */
+.employee-attendance-settings {
+  background: #f8fafb;
+  color: #183b3a;
+  border-color: #d9e6e5;
+  box-shadow: 0 8px 24px rgb(24 59 58 / 6%);
+  padding: clamp(1rem, 4vw, 1.5rem);
+  line-height: 1.65;
+}
+.employee-attendance-settings > .absolute { display: none; }
+.employee-attendance-settings :is(div, span, p, h3, label) { color: inherit; }
+.employee-attendance-settings h3 { font-size: 1.125rem; }
+.employee-attendance-settings :is(.bg-sky-950\/45, .bg-indigo-950\/40, .bg-indigo-950\/45, .bg-indigo-950\/60) {
+  background: white;
+  border-color: #d9e6e5;
+}
+.employee-attendance-settings :is(button, select, input[type="time"]) {
+  min-height: 44px;
+  font-size: 1rem;
+  color: #183b3a;
+  border-color: #b9d2cf;
+}
+.employee-attendance-settings button { background: #edf6f4; transition: transform 100ms ease-out, background-color 100ms ease-out; }
+.employee-attendance-settings button:active:not(:disabled) { transform: scale(.98); background: #deeeea; }
+.employee-attendance-settings :is(button, input, select, summary):focus-visible { outline: 3px solid #157e75; outline-offset: 3px; }
+.employee-attendance-settings select:disabled, .employee-attendance-settings input:disabled { opacity: .55; cursor: not-allowed; }
+.employee-attendance-settings label { gap: 1rem; min-height: 64px; }
+.employee-attendance-settings input[type="checkbox"] { flex-shrink: 0; }
+.employee-attendance-settings input[type="checkbox"]:checked { background: #157e75; }
+.employee-attendance-settings .attendance-reminder-row { background: #edf6f4; border-color: #c5ddd7; }
+.employee-attendance-settings .attendance-advanced { background: white; border-color: #d9e6e5; }
+@media (prefers-reduced-motion: reduce) {
+  .employee-attendance-settings *, .employee-attendance-settings *::before { animation: none !important; transition: none !important; }
+  .employee-attendance-settings button:active:not(:disabled) { transform: none; }
+}
+.employee-attendance-settings :is(.bg-slate-800, .bg-sky-900\/40, .bg-slate-900\/35) { background: #edf6f4; border-color: #c5ddd7; }
+.employee-attendance-settings .attendance-reminder-row input[type="checkbox"] { width: 40px; height: 20px; }
+.employee-attendance-settings .attendance-reminder-row input[type="checkbox"]::before { width: 16px; height: 16px; }
+.employee-attendance-settings .attendance-reminder-row input[type="checkbox"]:checked::before { transform: translateX(20px); }
