@@ -153,13 +153,16 @@ export default function EmployeePortal({
   const [pushReady, setPushReady] = useState(false);
   const [pushMessage, setPushMessage] = useState('');
   const [pushAttempt, setPushAttempt] = useState(0);
+  const [pushTesting, setPushTesting] = useState(false);
   useEffect(() => {
     let cancelled = false;
     setPushReady(false);
-    if (notificationPermissionState !== 'granted') return;
+    setPushMessage(enableMissedShiftAlert ? 'لم يتم ربط الجهاز بإشعارات السيرفر؛ التذكير متاح أثناء فتح التطبيق فقط.' : 'تذكير الحضور متوقف.');
+    if (notificationPermissionState !== 'granted' && enableMissedShiftAlert) return;
+    setPushMessage('جاري التحقق من اشتراك الجهاز…');
     syncAttendancePush(enableMissedShiftAlert).then(ready => {
-      if (!cancelled) { setPushReady(ready); setPushMessage(ready ? 'تذكير من السيرفر كل 10 دقائق خلال أول ساعة، ويتوقف عند تسجيل حضور الفترة.' : 'تذكيرات الحضور متوقفة على هذا الجهاز.'); }
-    }).catch(error => { if (!cancelled) setPushMessage(error.message); });
+      if (!cancelled) { setPushReady(ready); setPushMessage(ready ? 'اشتراك الجهاز محفوظ لدى السيرفر؛ وصول الإشعارات لم يُختبر بعد. اضغط اختبار الإشعار.' : 'تذكيرات الحضور متوقفة على هذا الجهاز.'); }
+    }).catch(error => { if (!cancelled) setPushMessage(error.message + ' — التذكير أثناء فتح التطبيق فقط.'); });
     return () => { cancelled = true; };
   }, [companyId, employee.id, enableMissedShiftAlert, notificationPermissionState, pushAttempt]);
   useEffect(() => {
@@ -338,11 +341,27 @@ export default function EmployeePortal({
       if (permission === 'granted') {
         setPushAttempt(attempt => attempt + 1);
         await showPwaNotification('تم تفعيل التنبيهات', 'جاري ربط الجهاز بتذكيرات الحضور من السيرفر');
-        speakVoiceAlert('تم تفعيل إشعارات وتنبيهات الدوام بنجاح');
+        speakVoiceAlert('تم السماح بالإشعارات؛ جاري التحقق من اشتراك السيرفر');
       } else setPushMessage('الإشعارات غير مسموحة؛ فعّلها من إعدادات الجهاز أو المتصفح لتصلك التذكيرات خارج التطبيق.');
     } else {
       alert('متصفحك أو جهازك لا يدعم التنبيهات المباشرة حالياً.');
     }
+  };
+
+  const testServerPush = async () => {
+    setPushTesting(true);
+    try {
+      const ready = await syncAttendancePush(enableMissedShiftAlert);
+      setPushReady(ready);
+      if (!ready) throw new Error('فعّل تذكير الحضور أولًا');
+      const registration = await navigator.serviceWorker.getRegistration();
+      const subscription = await registration?.pushManager.getSubscription();
+      const response = await fetch('/api/attendance-push/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: subscription?.endpoint }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'تعذر إرسال الاختبار');
+      setPushMessage('قبل مزود الإشعارات رسالة الاختبار. تأكد من ظهورها على جهازك؛ القبول لا يضمن وصولها.');
+    } catch (error: any) { setPushReady(false); setPushMessage(error.message); }
+    finally { setPushTesting(false); }
   };
 
   const requestAlwaysLocationPermission = () => {
@@ -486,7 +505,7 @@ export default function EmployeePortal({
     refresh: loadAttendanceStatus, punch: executePunchInBackground, message: setAutoStatusText,
     fix: (accuracy, distance) => { setGpsAccuracy(Number.isFinite(accuracy) ? Math.round(accuracy) : null); setCurrentDistance(distance === null ? null : Math.round(distance)); },
     departure: (id, text) => { setDepartureHint({ id, text }); void showPwaNotification('تذكير بالانصراف', text); },
-    missedAlert: enableMissedShiftAlert && !pushReady,
+    missedAlert: enableMissedShiftAlert,
     late: (start) => triggerMissedShiftAlert(getTodayShift()?.name || 'الدوام', new Date(start).toLocaleTimeString('en-GB', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit' }), start),
   });
 
@@ -1366,7 +1385,7 @@ export default function EmployeePortal({
                 <Clock size={16} className="animate-pulse" />
               </span>
               <div>
-                <h3 className="font-extrabold text-sm text-indigo-100">نظام البصمة التلقائي والتنبيه الذكي (Geofencing)</h3>
+                <h3 className="font-extrabold text-sm text-indigo-100">الحضور بالموقع وتذكيرات الدوام</h3>
                 <p className="text-[10px] text-indigo-300">حضور بعد ثبات الموقع، وتذكير بالانصراف للتأكيد أثناء فتح التطبيق</p>
               </div>
             </div>
@@ -1397,7 +1416,7 @@ export default function EmployeePortal({
               >
                 <span>2. تفعيل التنبيهات المباشرة على الجوال</span>
                 <span className="font-mono text-[9px] bg-sky-900/40 px-1.5 py-0.5 rounded">
-                  {notificationPermissionState === 'granted' ? '✅ مفعلة' : 'اضغط للتفعيل 🔔'}
+                  {notificationPermissionState === 'granted' ? 'إذن الإشعارات مسموح' : 'اضغط للتفعيل 🔔'}
                 </span>
               </button>
             </div>
@@ -1405,6 +1424,8 @@ export default function EmployeePortal({
               لتشغيل البصمة افتح التطبيق واسمح بالموقع. تثبيت الـPWA لا يضمن استمرار GPS والشاشة مقفلة؛ يستأنف الفحص عند الرجوع.
             </p>
             <p role="status" className="text-xs text-indigo-200">{pushMessage || 'بعد تفعيل الإشعارات: تذكير كل 10 دقائق خلال أول ساعة من بداية كل فترة، ويتوقف فور تسجيل الحضور.'}</p>
+            <p className="text-[10px] text-slate-300">{pushReady ? 'اشتراك السيرفر محفوظ؛ استلام الإشعار يحتاج اختبارًا.' : 'إشعارات الخلفية غير مؤكدة.'} تذكير الشاشة يظل فعالًا أثناء الاستخدام.</p>
+            <button disabled={pushTesting || !enableMissedShiftAlert} onClick={() => { void testServerPush(); }} className="rounded-lg border border-sky-700 px-3 py-2 text-xs text-sky-200 disabled:opacity-50">{pushTesting ? 'جاري اختبار السيرفر…' : 'إعادة الربط واختبار إشعار السيرفر'}</button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-1 z-10">
@@ -1447,21 +1468,21 @@ export default function EmployeePortal({
                 <select
                   value={autoCheckMode}
                   onChange={(e) => setAutoCheckMode(e.target.value as any)}
-                  className="px-2.5 py-1.5 bg-indigo-900/60 border border-indigo-800 rounded-lg text-xs font-bold text-white focus:outline-none"
+                  className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:outline-none"
                 >
-                  <option value="shift" className="bg-indigo-950">تلقائياً خلال أوقات الدوام فقط 💼</option>
-                  <option value="scheduled" className="bg-indigo-950">في توقيت مخصص يتم تحديده 🔔</option>
+                  <option value="shift" className="bg-white text-slate-900">من 30 دقيقة قبل الدوام إلى نهاية الفترة</option>
+                  <option value="scheduled" className="bg-white text-slate-900">بدء فحص الحضور بعد وقت محدد</option>
                 </select>
               </div>
 
               {autoCheckMode === 'scheduled' && (
                 <div className="flex flex-col gap-1.5 text-xs">
-                  <label className="text-[10px] text-slate-300 font-bold">التوقيت المخصص للتحقق اليومي</label>
+                  <label className="text-[10px] text-slate-300 font-bold">وقت بدء الفحص أثناء فتح التطبيق</label>
                   <input
                     type="time"
                     value={scheduledCheckTime}
                     onChange={(e) => setScheduledCheckTime(e.target.value)}
-                    className="px-2.5 py-1 bg-indigo-900/60 border border-indigo-800 rounded-lg text-xs font-mono font-bold text-white focus:outline-none"
+                    className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 focus:outline-none"
                   />
                 </div>
               )}
@@ -1474,11 +1495,11 @@ export default function EmployeePortal({
                 <select
                   value={autoCheckInterval}
                   onChange={(e) => setAutoCheckInterval(Number(e.target.value))}
-                  className="px-2.5 py-1.5 bg-indigo-900/60 border border-indigo-800 rounded-lg text-xs font-bold text-white focus:outline-none"
+                  className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:outline-none"
                 >
-                  <option value="1" className="bg-indigo-950">كل دقيقة</option>
-                  <option value="2" className="bg-indigo-950">كل دقيقتين</option>
-                  <option value="5" className="bg-indigo-950">كل 5 دقائق — موصى به</option>
+                  <option value="1" className="bg-white text-slate-900">كل دقيقة</option>
+                  <option value="2" className="bg-white text-slate-900">كل دقيقتين</option>
+                  <option value="5" className="bg-white text-slate-900">كل 5 دقائق — موصى به</option>
                 </select>
               </div>
 
@@ -1496,19 +1517,19 @@ export default function EmployeePortal({
 
           <div className="p-3.5 bg-indigo-950/60 border border-indigo-800/60 rounded-xl flex flex-col gap-2 z-10 text-xs">
             <div className="flex justify-between items-center text-slate-300">
-              <span className="font-bold text-[11px]">حالة التتبع الجغرافي للشبكة:</span>
+              <span className="font-bold text-[11px]">حالة فحص الموقع أثناء الاستخدام:</span>
               {currentDistance !== null ? (
                 <span className="font-mono text-[11px] bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-sky-400 font-extrabold">
                   المسافة للموقع: {currentDistance} م
                 </span>
               ) : (
-                <span className="text-[10px] text-slate-400">جاري مسح الإشارة...</span>
+                <span className="text-[10px] text-slate-400">{autoCheckIn || autoCheckOut ? 'لا توجد قراءة موقع متاحة' : 'فحص الموقع غير مفعّل'}</span>
               )}
             </div>
 
             <div className="text-slate-200 text-[11px] flex items-center gap-1.5 font-semibold">
               <span className={`w-2 h-2 rounded-full ${autoCheckIn || autoCheckOut ? 'bg-sky-400 animate-pulse' : 'bg-slate-500'}`}></span>
-              <span>{autoStatusText}</span>
+              <span>{autoCheckIn || autoCheckOut ? autoStatusText : 'الحضور والانصراف يدويان؛ فحص الموقع متوقف'}</span>
             </div>
 
             <p className="text-[11px] text-slate-300">دقة GPS: {gpsAccuracy === null ? 'غير متاحة' : `${gpsAccuracy} م`} — آخر حضور تلقائي أكد الخادم حفظه: {lastAutoSaved || 'لا يوجد في هذه الجلسة'}</p>
