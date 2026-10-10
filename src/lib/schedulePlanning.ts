@@ -1,3 +1,4 @@
+import {shiftWindow} from './attendanceAnalysis';
 import { employeeAtDate, isActiveEmployee } from './employeeLifecycle';
 export type Period = 'morning' | 'evening';
 export type Schedule = Record<string, Record<string, { shiftType: string; note?: string; [key: string]: any }>>;
@@ -55,22 +56,9 @@ export interface PlanOptions {
   // Employee-specific unavailable weekdays, Sunday=0. Existing cells are always preserved.
   unavailable: Record<string, number[]>;
 }
-function timeMinutes(value: string) {
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value || '')) return NaN;
-  const [h, m] = value.split(':').map(Number); return h * 60 + m;
-}
 function span(shift: any, date: string): [number, number] | null {
-  if (!shift) return null;
-  const start = timeMinutes(shift.start), end = timeMinutes(shift.end);
-  if (!Number.isFinite(start + end) || start === end) return null;
-  let finish = end <= start ? end + 1440 : end;
-  if (shift.type === 'double') {
-    const s2 = timeMinutes(shift.start2), e2 = timeMinutes(shift.end2);
-    if (!Number.isFinite(s2 + e2) || s2 === e2) return null;
-    const secondStart = s2 < finish ? s2 + 1440 : s2;
-    finish = secondStart + ((e2 - s2 + 1440) % 1440);
-  }
-  return [dateMs(date) + start * 60000, dateMs(date) + finish * 60000];
+  const window=shiftWindow(date,shift);
+  return window?[window.start,window.end]:null;
 }
 /** Checks both past and future cells so existing overnight shifts remain protected. */
 function allowed(schedule: Schedule, shifts: any[], employeeId: string, date: string, shift: any, o: PlanOptions) {
@@ -110,7 +98,6 @@ export function proposeSchedule(dept: any, employees: any[], shifts: any[], base
   if (!staff.length) throw new Error('اختر موظفاً واحداً على الأقل من القسم');
   const selected = shifts.filter(s => o.shiftIds.includes(s.id) && shiftPeriods(s).length && span(s, dates[0]));
   if (!selected.length && (o.morning || o.evening)) throw new Error('اختر شيفتات ذات مواعيد صحيحة؛ الشيفت المزدوج يحتاج مواعيد الفترتين');
-  const departmentStaff = employees.filter(e => e.dept === dept.id && isActiveEmployee(e));
   const schedule: Schedule = { ...base };
   for (const date of dates) schedule[date] = { ...base[date] };
   const changes: { date: string; employeeId: string; shiftType: string; note: string }[] = [];
@@ -139,6 +126,8 @@ export function proposeSchedule(dept: any, employees: any[], shifts: any[], base
   };
   for (const date of dates) {
     const need = requirements(dept, date, o.morning, o.evening);
+    const eligible=(e:any)=>{const employee=employeeAtDate(e,date);return isActiveEmployee(employee)&&employee.dept===dept.id;};
+    const departmentStaff=employees.filter(eligible);
     const counts = coverage(departmentStaff, shifts, schedule, date);
     const anyCount = () => departmentStaff.filter(e => shiftPeriods(shifts.find(s => s.id === schedule[date]?.[e.id]?.shiftType)).length).length;
     for (let attempt = 0; attempt < staff.length; attempt++) {
@@ -146,7 +135,7 @@ export function proposeSchedule(dept: any, employees: any[], shifts: any[], base
       if (!missing.length && anyCount() >= need.any) break;
       const candidates: { e: any; s: any; gain: number; score: number }[] = [];
       for (const e of staff) {
-        if (schedule[date]?.[e.id] || (o.unavailable[e.id] || []).includes(new Date(dateMs(date)).getUTCDay())) continue;
+        if (!eligible(e) || schedule[date]?.[e.id] || (o.unavailable[e.id] || []).includes(new Date(dateMs(date)).getUTCDay())) continue;
         for (const s of selected) {
           const periods = shiftPeriods(s), gain = missing.filter(p => periods.includes(p)).length + (need.any > anyCount() ? 1 : 0);
           if (!gain || !allowed(schedule, shifts, e.id, date, s, o)) continue;
@@ -161,7 +150,7 @@ export function proposeSchedule(dept: any, employees: any[], shifts: any[], base
     }
     for (const p of ['morning', 'evening'] as Period[]) if (counts[p] < need[p]) issues.push(`${date}: نقص ${need[p] - counts[p]} في ${p === 'morning' ? 'الصباحي' : 'المسائي'}`);
     if (anyCount() < need.any) issues.push(`${date}: نقص ${need.any - anyCount()} في دوام الجمعة الجزئي`);
-    for (const e of staff) if (!schedule[date]?.[e.id]) assign(date, e, 'A');
+    for (const e of staff) if (eligible(e) && !schedule[date]?.[e.id]) assign(date, e, 'A');
   }
   for (const date of dates) for (const e of staff) {
     const entry = base[date]?.[e.id];

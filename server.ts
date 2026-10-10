@@ -1,5 +1,6 @@
+import {employeeRequestValues} from './src/lib/employeeRequests';
 import {approvedPermissionMarkers} from './src/server/permissionMarkers';
-import {attachPermissionMarkers} from './src/lib/permissionMarkers';
+import {attachPermissionMarkers,ensurePermissionDays} from './src/lib/permissionMarkers';
 import { selfProfile, selfProfileUpdate, privateAttendanceDay, employeePhotoKey } from './src/server/employeeSelfService';
 import { businessCompany, canReadCompany, subscriptionMetadata, subscriptionUpdate } from './src/server/tenantPrivacy';
 import { identityValue, employeeIdentities, adminIdentity, masterIdentity, identityLock, allIdentities, assertUnique, resolveIdentity, migrateCompanyCodes, nextCompanyCode } from './src/server/companyIdentity';
@@ -910,7 +911,7 @@ app.get('/api/main-data', async (req, res) => {
 // this stops one logged-in employee token from rewriting another employee's data,
 // the schedule, or the whole company's settings.
 app.post('/api/main-data', requireAuth(['employee', 'admin', 'superadmin']), async (req, res) => {
-  const { _baseVersion, _version, _adminAccess: ignoredAccess, _schedulePublication: ignoredPublication, scheduleNotice: ignoredNotice, ...rawPayload } = req.body || {};
+  const { _baseVersion, _version, _adminAccess: ignoredAccess, _permissionDays: ignoredPermissionDays, _schedulePublication: ignoredPublication, scheduleNotice: ignoredNotice, ...rawPayload } = req.body || {};
   let payload = rawPayload;
   const companyId = (req.query.companyId as string) || 'default';
   const key = companyId === 'default' ? 'mainData' : 'mainData_' + companyId;
@@ -1063,7 +1064,7 @@ app.get('/api/employee-attendance',requireAuth(['employee']),async(req,res)=>{
     const leaves=await db.select().from(schema.requests).where(and(eq(schema.requests.companyId,auth.companyId),eq(schema.requests.empId,String(auth.id)),eq(schema.requests.type,'leave'),eq(schema.requests.status,'approved'),sql`${schema.requests.date} >= ${from}`,sql`${schema.requests.date} <= ${to}`));
     const published=effectiveScheduleData(data);
     const permissions=(await approvedPermissionMarkers(auth.companyId,from,to)).filter(marker=>marker.employeeId===String(auth.id));
-    const days=analyzeAttendance(buildAttendanceDays(records,data.settings),{...published,employees:[employee]},{from,to,empId:String(auth.id),dept:''},leaves).map(privateAttendanceDay).sort((a,b)=>b.date.localeCompare(a.date));
+    const days=analyzeAttendance(ensurePermissionDays(buildAttendanceDays(records,data.settings),permissions,[employee]),{...published,employees:[employee]},{from,to,empId:String(auth.id),dept:''},leaves).map(privateAttendanceDay).sort((a,b)=>b.date.localeCompare(a.date));
     return res.json({month,generatedAt:new Date().toISOString(),items:days.map(day=>({...day,permissions:permissions.filter(marker=>marker.date===day.date)})),totalMinutes:days.reduce((sum,d)=>sum+(d.minutes || 0),0),absentDays:days.filter(d=>d.absent).length,lateDays:days.filter(d=>d.lateMinutes>0).length,reviewDays:days.filter(d=>d.needsReview).length});
   }catch{return res.status(503).json({error:'تعذر تحميل البصمات والغياب'});}
 });
@@ -1348,12 +1349,13 @@ app.get('/api/attendance-report', requireAuth(['admin', 'superadmin']), async (r
     )).orderBy(desc(schema.attendance.id));
     records = await visibleRows(req, records, companyId);
     const mainData = await getMainDataByCompanyId(companyId);
-    let reportDays = buildAttendanceDays(records, mainData?.settings);
+    const permissions=(await approvedPermissionMarkers(companyId,query.from,query.to)).filter(marker=>(!query.empId||marker.employeeId===query.empId)&&ownsDay(requestAccess(req),mainData,{empId:marker.employeeId,date:marker.date}));
+    let reportDays = ensurePermissionDays(buildAttendanceDays(records, mainData?.settings),permissions,mainData?.employees||[]);
     if (query.analysis) {
       const leaves = await db.select().from(schema.requests).where(and(eq(schema.requests.companyId, companyId), eq(schema.requests.type, 'leave'), eq(schema.requests.status, 'approved'), sql`${schema.requests.date} >= ${query.from}`, sql`${schema.requests.date} <= ${query.to}`));
       reportDays = analyzeAttendance(reportDays, effectiveScheduleData(mainData), query, leaves);
     }
-    reportDays=attachPermissionMarkers(reportDays,await approvedPermissionMarkers(companyId,query.from,query.to));
+    reportDays=attachPermissionMarkers(reportDays,permissions).filter(day=>!query.dept||day.dept===query.dept).sort((a,b)=>b.date.localeCompare(a.date)||String(a.empName).localeCompare(String(b.empName),'ar'));
     const days = reportDays.map(day => ({ ...day, departmentName: mainData?.departments?.find((dept: any) => dept.id === day.dept)?.name || day.dept }));
     return res.json({ ...attendanceReportPage(days.filter(day => ownsDay(requestAccess(req), mainData, day)), query), companyName: mainData?.settings?.companyName || companyId, from: query.from, to: query.to });
   } catch (error) { console.error('Attendance report query failed', error); return res.status(500).json({ error: 'تعذر تحميل كشف الحضور' }); }
@@ -1718,13 +1720,16 @@ app.post('/api/requests', requireAuth(['employee', 'admin', 'superadmin']), asyn
   }
 
   try {
+    const requestCompany=auth.companyId;
+    const main=await getMainDataByCompanyId(requestCompany);
+    const values=employeeRequestValues(req.body,main);
     const inserted = await db.insert(schema.requests).values({
-      empId, empName: auth.role === 'employee' ? (auth.name || empName) : empName, dept: dept || '', date, type, notes: notes || req.body.note || '', status: auth.role === 'employee' ? 'pending' : (status || 'pending'),
-      swapWithEmpId, swapWithEmpName, targetShift, checkInTime, checkOutTime,
-      companyId: companyId || 'default'
+      ...values, status: auth.role === 'employee' ? 'pending' : (status || 'pending'),
+      companyId: requestCompany
     }).returning();
     return res.json(inserted[0]);
   } catch (error: any) {
+    if(error.status)return res.status(error.status).json({error:error.message});
     console.error('Error creating request in PostgreSQL:', error);
     return res.status(500).json({
       error: 'فشل تقديم الطلب في قاعدة البيانات',

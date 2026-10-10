@@ -29,26 +29,20 @@ export function installAuthFetch() {
     }
 
     const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
-    let hadToken = headers.has('Authorization');
-    if (!hadToken) {
-      try {
-        const stored = localStorage.getItem('app_session');
-        const session = stored ? JSON.parse(stored) : null;
-        const token = session?.info?.token;
-        if (token) {
-          headers.set('Authorization', `Bearer ${token}`);
-          hadToken = true;
-        }
-      } catch {
-        // ignore malformed session, request proceeds without a token
-      }
-    }
+    const isLoginCall = /^\/api\/auth\/(admin|employee)-login$/.test(new URL(url, window.location.origin).pathname);
+    let sessionToken = '';
+    try {
+      const stored = localStorage.getItem('app_session');
+      sessionToken = (stored ? JSON.parse(stored) : null)?.info?.token || '';
+    } catch { /* malformed session: request proceeds without an implicit token */ }
+    if (!headers.has('Authorization') && sessionToken && !isLoginCall) headers.set('Authorization', `Bearer ${sessionToken}`);
+    const usedSessionToken = !!sessionToken && !isLoginCall && headers.get('Authorization') === `Bearer ${sessionToken}`;
 
     const response = await originalFetch(input, { ...init, headers });
 
-    // Only treat this as "your session expired" if we actually sent a token —
-    // a 401 on the login endpoints themselves just means wrong credentials.
-    if (response.status === 401 && hadToken) {
+    // Separate manager-link credentials must never clear the employee portal session.
+    // A rejected login means wrong credentials, not expiry of an unrelated stored token.
+    if (response.status === 401 && usedSessionToken) {
       window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
     }
 
