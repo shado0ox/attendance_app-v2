@@ -289,8 +289,7 @@ export function registerElectronicDocumentRoutes(
     if(auth.role==='employee')return res.status(403).json({error:'لا يمكن تعديل أو إلغاء الطلب بعد اعتماد الموظف؛ تواصل مع الإدارة'});
     const id=Number(req.params.id);
     try {
-      const rows=await db.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.id,id)).limit(1);
-      const doc=rows[0];
+      const doc=await scopedDocument(req,id);
       const ownsDocument=doc && String(doc.companyId)===String(auth.companyId);
       if(!ownsDocument || !['employee_signed','manager_ready','pending_manager'].includes(doc.status)) {
         return res.status(404).json({error:'المستند غير موجود أو لا يمكن إلغاؤه'});

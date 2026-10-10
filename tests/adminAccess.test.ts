@@ -41,6 +41,8 @@ test('server route permissions separate department review from company-wide oper
  assert.equal(allowedAdminRoute(access,'POST','/api/requests'),false);
  assert.equal(allowedAdminRoute(access,'GET','/api/document-approval/token'),true);
  assert.equal(allowedAdminRoute(access,'POST','/api/document-approval/token'),true);
+ assert.equal(allowedAdminRoute(access,'POST','/api/electronic-documents/1/cancel'),true);
+ assert.equal(allowedAdminRoute({...access,permissions:{...access.permissions,canApproveRequests:false}},'POST','/api/electronic-documents/1/cancel'),false);
  assert.equal(allowedAdminRoute({...access,permissions:{...access.permissions,canApproveRequests:false}},'POST','/api/document-approval/token'),false);
  assert.equal(allowedAdminRoute(access,'GET','/api/new-unreviewed-endpoint'),false);
  assert.equal(allowedAdminRoute({...access,permissions:{...access.permissions,canApproveRequests:false}},'PUT','/api/requests/1'),false);

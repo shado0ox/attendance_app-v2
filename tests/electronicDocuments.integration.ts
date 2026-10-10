@@ -143,6 +143,8 @@ try {
   await put('adminAccess:'+companyA+':'+adminId,{...fullAdminAccess(),departmentIds:[departmentA]});
   assert.equal((await request('/api/electronic-documents/'+createdB.id,{id:adminId,method:'DELETE'})).status,404);
   assert.equal((await request('/api/electronic-documents/'+createdB.id+'/audit',{id:adminId})).status,404);
+  assert.equal((await request('/api/electronic-documents/'+createdB.id+'/cancel',{id:adminId,method:'POST',body:'{}'})).status,404);
+  assert.equal((await request('/api/electronic-documents/'+createdB.id+'/share',{role:'employee',id:employeeB,method:'POST',body:'{}'})).status,200,'denied cancellation preserves the manager link');
   const scopedMain:any=await (await request('/api/main-data',{id:adminId})).json();
   assert.ok(scopedMain._permissionDays.every((marker:any)=>marker.employeeId===employeeA));
   await put('adminAccess:'+companyA+':'+adminId,fullAdminAccess());
@@ -153,6 +155,12 @@ try {
   assert.equal((await fetch(origin+'/api/document-approval/'+tokenValue,{headers:managerHeaders})).status,404);
   assert.equal((await pool.query("SELECT count(*)::int AS count FROM shift_app.audit_log WHERE action='electronic-document.delete' AND entity_id=$1",[String(created.id)])).rows[0].count,1);
   const pending=await createDoc();
+  await put('adminAccess:'+companyA+':'+adminId,{...fullAdminAccess(),permissions:{...fullAdminAccess().permissions,canApproveRequests:false}});
+  assert.equal((await request('/api/electronic-documents/'+pending.id+'/cancel',{id:adminId,method:'POST',body:'{}'})).status,403);
+  await put('adminAccess:'+companyA+':'+adminId,{...fullAdminAccess(),departmentIds:[departmentA]});
+  assert.equal((await request('/api/electronic-documents/'+pending.id+'/cancel',{id:adminId,method:'POST',body:'{}'})).status,200);
+  assert.equal((await fetch(origin+'/api/document-approval/'+pending.url.split('/document-approval/')[1],{headers:managerHeaders})).status,404);
+  await put('adminAccess:'+companyA+':'+adminId,fullAdminAccess());
   assert.equal((await request('/api/electronic-documents/'+pending.id,{id:adminId,method:'DELETE'})).status,200);
   assert.equal((await fetch(origin+'/api/document-approval/'+pending.url.split('/document-approval/')[1],{headers:managerHeaders})).status,404);
   for(const invalidSignature of [signatureFixture(true),'data:image/png;base64,AAAA'])assert.equal((await request('/api/electronic-documents',{role:'employee',id:employeeA,method:'POST',body:JSON.stringify({formData:form,employeeSignature:invalidSignature})})).status,400);
