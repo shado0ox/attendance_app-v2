@@ -10,6 +10,7 @@ import { db, schema, pool } from '../src/db/index';
 import { eq, sql } from 'drizzle-orm';
 import { registerAttendancePush } from '../src/server/attendancePush';
 
+process.env.APP_URL = 'https://attendance.example.com';
 const directory = await fs.mkdtemp(path.join(tmpdir(), 'attendance-push-'));
 const secret = 'attendance-push-ci-secret', companyId = 'push-ci-a', otherCompany = 'push-ci-b', employeeId = 'push-ci-employee';
 const child = spawn(process.execPath, ['--import', './tests/mockResend.mjs', 'dist/server.cjs'], {
@@ -39,8 +40,10 @@ try {
   assert.equal((await request('POST', { subscription })).status, 200);
   assert.equal((await request('DELETE', { endpoint: subscription.endpoint }, 'employee', otherCompany)).status, 200);
   assert.equal((await db.select().from(schema.systemData).where(eq(schema.systemData.key, subscriptionKey))).length, 1, 'other company cannot remove subscription');
+  let testExpired = false;
+  const testSend: any = (...args: any[]) => { if (testExpired) throw { statusCode: 410 }; return send(...args); };
   const testApp = express(); testApp.use(express.json());
-  registerAttendancePush(testApp, () => (req: any, _res: any, next: any) => { req.auth = { companyId: req.headers['x-company'] || companyId, id: employeeId }; next(); }, async () => main, async () => true, send);
+  registerAttendancePush(testApp, () => (req: any, _res: any, next: any) => { req.auth = { companyId: req.headers['x-company'] || companyId, id: employeeId }; next(); }, async () => main, async () => true, testSend);
   const testServer = testApp.listen(0, '127.0.0.1');
   await new Promise<void>(resolve => testServer.once('listening', resolve));
   const testUrl = 'http://127.0.0.1:' + (testServer.address() as any).port + '/api/attendance-push/test';
@@ -50,6 +53,11 @@ try {
     assert.equal((await testPush(companyId)).status, 200, 'test sends through provider');
     assert.equal(sent.at(-1).payload.title, 'اختبار إشعارات الحضور');
     assert.equal((await testPush(companyId)).status, 429, 'test rate limited');
+    testExpired = true; Date.now = () => originalNow() + 61000;
+    const expiredResponse = await testPush(companyId);
+    assert.equal(expiredResponse.status, 503);
+    assert.equal((await expiredResponse.json()).renewSubscription, true, 'expired provider subscription asks client to renew');
+    Date.now = originalNow;
   } finally { await new Promise<void>(resolve => testServer.close(() => resolve())); }
   sent.length = 0;
   // Foreign attendance never suppresses this employee's reminder.

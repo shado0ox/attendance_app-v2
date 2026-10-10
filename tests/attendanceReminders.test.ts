@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { dueAttendanceReminders, reminderSlot } from '../src/lib/attendanceReminders';
-import { validPushSubscription } from '../src/server/attendancePushValidation';
+import { validPushSubscription, pushSubject } from '../src/server/attendancePushValidation';
 import crypto from 'node:crypto';
 const date = '2026-10-10', start = Date.parse(date + 'T08:00:00+03:00');
 const shift = { id: 'S', name: 'الصباح', start: '08:00', end: '16:00' };
@@ -39,4 +39,19 @@ test('browser push subscription only accepts recognized HTTPS providers and boun
   assert.equal(validPushSubscription(value), true);
   for (const endpoint of ['http://fcm.googleapis.com/test', 'https://localhost/test', 'https://fcm.googleapis.com.evil.test/a', 'https://127.0.0.1/a', 'https://fcm.googleapis.com:8443/a', 'https://user:pass@fcm.googleapis.com/a']) assert.equal(validPushSubscription({ ...value, endpoint }), false);
   assert.equal(validPushSubscription({ ...value, keys: { ...value.keys, p256dh: 'A'.repeat(1000) } }), false);
+});
+
+test('Apple push subdomains accepted without accepting lookalike domains', () => {
+  const ecdh = crypto.createECDH('prime256v1'); ecdh.generateKeys();
+  const keys = { p256dh: ecdh.getPublicKey().toString('base64url'), auth: crypto.randomBytes(16).toString('base64url') };
+  for (const endpoint of ['https://web.push.apple.com/a', 'https://region.push.apple.com/a']) assert.equal(validPushSubscription({ endpoint, keys }), true);
+  for (const endpoint of ['https://push.apple.com.evil.test/a', 'https://evilpush.apple.com/a']) assert.equal(validPushSubscription({ endpoint, keys }), false);
+});
+test('VAPID contact rejects placeholder and localhost configuration', () => {
+  assert.equal(pushSubject({ APP_URL: 'https://attendance.example.com/employee' }), 'https://attendance.example.com');
+  assert.equal(pushSubject({ ATTENDANCE_PUSH_SUBJECT: 'mailto:admin@example.com' }), 'mailto:admin@example.com');
+  for (const APP_URL of ['', 'MY_APP_URL', 'https://localhost', 'http://attendance.example.com']) assert.throws(() => pushSubject({ APP_URL }));
+});
+test('removed shift types cannot break the reminder worker', () => {
+  assert.deepEqual(dueAttendanceReminders({ ...data, shiftTypes: [] }, 'e', [], [], start), []);
 });

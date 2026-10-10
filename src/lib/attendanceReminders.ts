@@ -19,6 +19,7 @@ export function dueAttendanceReminders(data: any, employeeId: string, records: a
     const assignment = published.schedule?.[date]?.[employeeId];
     if (!assignment || ['A', 'OFF'].includes(assignment.shiftType)) continue;
     const shift = published.shiftTypes?.find((s: any) => s.id === assignment.shiftType);
+    if (!shift) continue;
     for (const period of [1, 2]) {
       const window = autoPeriodWindow(date, shift, period === 2);
       if (!window) continue;

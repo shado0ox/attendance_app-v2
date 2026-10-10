@@ -13,11 +13,11 @@ async function workerSupportsPush(worker: ServiceWorker) {
   });
 }
 let pendingSync: Promise<unknown> = Promise.resolve();
-export function syncAttendancePush(enabled: boolean) {
-  const pending = pendingSync.catch(() => {}).then(() => performSync(enabled));
+export function syncAttendancePush(enabled: boolean, renew = false) {
+  const pending = pendingSync.catch(() => {}).then(() => performSync(enabled, renew));
   pendingSync = pending.catch(() => {}); return pending;
 }
-async function performSync(enabled: boolean) {
+async function performSync(enabled: boolean, renew: boolean) {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('هذا الجهاز لا يدعم إشعارات الحضور خارج التطبيق. على iPhone افتح التطبيق المثبت على الشاشة الرئيسية.');
   const registration = await navigator.serviceWorker.getRegistration();
   if (!registration?.active) throw new Error('افتح التطبيق بعد تثبيته وتحديثه ثم فعّل الإشعارات.');
@@ -30,10 +30,15 @@ async function performSync(enabled: boolean) {
     }
     return false;
   }
+  if (renew && subscription) {
+    const response = await pushRequest('/api/attendance-push/subscription', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: subscription.endpoint }) });
+    if (!response.ok) throw new Error('تعذر تجديد اشتراك الجهاز؛ تحقق من الاتصال وأعد المحاولة');
+    await subscription.unsubscribe(); subscription = null;
+  }
   if (!await workerSupportsPush(registration.active)) throw new Error('حدّث التطبيق من تنبيه النسخة الجديدة ثم أعد تفعيل الإشعارات.');
   if (Notification.permission !== 'granted') throw new Error('اسمح بالإشعارات أولًا.');
   const keyResponse = await pushRequest('/api/attendance-push/key');
-  const config = await keyResponse.json();
+  const config = await keyResponse.json().catch(() => ({ error: 'تعذر قراءة إعدادات الإشعارات من السيرفر؛ تحقق من تحديثه' }));
   if (!keyResponse.ok) throw new Error(config.error || 'تعذر تفعيل الإشعارات');
   const padded = config.publicKey.replace(/-/g, '+').replace(/_/g, '/');
   const bytes = Uint8Array.from(atob(padded + '='.repeat((4 - padded.length % 4) % 4)), char => char.charCodeAt(0));
@@ -54,4 +59,13 @@ export async function clearAttendanceNotifications(scope: string) {
     const notifications = await registration?.getNotifications();
     notifications?.filter(notification => notification.tag.startsWith(scope + ':')).forEach(notification => notification.close());
   } catch { /* notification support is optional */ }
+}
+
+export async function testAttendancePush(endpoint: string) {
+  const response = await pushRequest('/api/attendance-push/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint }) });
+  const result = await response.json().catch(() => ({ error: 'استجابة اختبار غير صالحة؛ تحقق من تحديث السيرفر' }));
+  if (!response.ok) {
+    const error = new Error(result.error || 'تعذر إرسال الاختبار') as Error & { renewSubscription?: boolean };
+    error.renewSubscription = !!result.renewSubscription; throw error;
+  }
 }

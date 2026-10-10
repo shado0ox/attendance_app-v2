@@ -6,7 +6,7 @@ import EmployeeEmailVerification from './EmployeeEmailVerification';
 import { useAutoPunch } from '../hooks/useAutoPunch';
 import { autoPeriodWindow } from '../lib/autoPunch';
 import { showPwaNotification } from '../lib/pwaNotification';
-import { syncAttendancePush, clearAttendanceNotifications } from '../lib/attendancePushClient';
+import { syncAttendancePush, testAttendancePush, clearAttendanceNotifications } from '../lib/attendancePushClient';
 import { getEmployeeLocations as getApprovedLocations, matchAttendanceLocation } from '../lib/attendanceLocations';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle, Fingerprint, ScanFace, ShieldCheck, House, CalendarCheck, ClipboardList, UserRound, Settings } from 'lucide-react';
@@ -153,6 +153,7 @@ export default function EmployeePortal({
   const [pushReady, setPushReady] = useState(false);
   const [pushMessage, setPushMessage] = useState('');
   const [pushAttempt, setPushAttempt] = useState(0);
+  const [renewPush, setRenewPush] = useState(false);
   const [pushTesting, setPushTesting] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -351,16 +352,16 @@ export default function EmployeePortal({
   const testServerPush = async () => {
     setPushTesting(true);
     try {
-      const ready = await syncAttendancePush(enableMissedShiftAlert);
+      const ready = await syncAttendancePush(enableMissedShiftAlert, renewPush);
       setPushReady(ready);
       if (!ready) throw new Error('فعّل تذكير الحضور أولًا');
       const registration = await navigator.serviceWorker.getRegistration();
       const subscription = await registration?.pushManager.getSubscription();
-      const response = await fetch('/api/attendance-push/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: subscription?.endpoint }) });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'تعذر إرسال الاختبار');
+      if (!subscription) throw new Error('اشتراك الجهاز غير متاح');
+      await testAttendancePush(subscription.endpoint);
+      setRenewPush(false);
       setPushMessage('قبل مزود الإشعارات رسالة الاختبار. تأكد من ظهورها على جهازك؛ القبول لا يضمن وصولها.');
-    } catch (error: any) { setPushReady(false); setPushMessage(error.message); }
+    } catch (error: any) { setPushReady(false); setRenewPush(!!error.renewSubscription); setPushMessage(error.message); }
     finally { setPushTesting(false); }
   };
 
@@ -1425,7 +1426,7 @@ export default function EmployeePortal({
             </p>
             <p role="status" className="text-xs text-indigo-200">{pushMessage || 'بعد تفعيل الإشعارات: تذكير كل 10 دقائق خلال أول ساعة من بداية كل فترة، ويتوقف فور تسجيل الحضور.'}</p>
             <p className="text-sm text-slate-300">{pushReady ? 'اشتراك السيرفر محفوظ؛ استلام الإشعار يحتاج اختبارًا.' : 'إشعارات الخلفية غير مؤكدة.'} تذكير الشاشة يظل فعالًا أثناء الاستخدام.</p>
-            <button disabled={pushTesting || !enableMissedShiftAlert} onClick={() => { void testServerPush(); }} className="rounded-lg border border-sky-700 px-3 py-2 text-xs text-sky-200 disabled:opacity-50">{pushTesting ? 'جاري اختبار السيرفر…' : 'إعادة الربط واختبار إشعار السيرفر'}</button>
+            <button disabled={pushTesting || !enableMissedShiftAlert} onClick={() => { void testServerPush(); }} className="rounded-lg border border-sky-700 px-3 py-2 text-xs text-sky-200 disabled:opacity-50">{pushTesting ? 'جاري اختبار السيرفر…' : renewPush ? 'تجديد الاشتراك وإعادة الاختبار' : 'إعادة الربط واختبار إشعار السيرفر'}</button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-1 z-10">
