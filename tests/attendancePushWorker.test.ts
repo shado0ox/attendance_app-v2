@@ -14,6 +14,8 @@ test('push worker drops expired reminders, uses a fixed employee URL and replace
   await push({ expiresAt: Date.now() - 1, body: 'expired' }); assert.equal(shown.length, 0);
   await push({ expiresAt: Date.now() + 60000, body: 'حضور', tag: 'company:employee:date:1', url: 'https://evil.test' });
   assert.equal(shown.length, 1); assert.equal(shown[0][1].data.url, '/employee'); assert.equal(shown[0][1].renotify, true);
+  await push({ expiresAt: Date.now() + 60000, title: 'اختبار إشعارات الحضور', body: 'اختبار' });
+  assert.equal(shown[1][0], 'اختبار إشعارات الحضور');
   handlers.notificationclick({ notification: { data: shown[0][1].data, close: () => {} }, waitUntil: (p: Promise<any>) => { pending = p; } }); await pending;
   assert.deepEqual(opened, ['/employee']);
 });

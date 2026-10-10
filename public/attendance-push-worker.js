@@ -6,7 +6,7 @@ self.addEventListener('push', event => {
     let payload;
     try { payload = event.data?.json(); } catch { return; }
     if (!payload || !Number.isFinite(payload.expiresAt) || Date.now() >= payload.expiresAt) return;
-    await self.registration.showNotification('لم تسجل حضورك', {
+    await self.registration.showNotification(payload.title === 'اختبار إشعارات الحضور' ? 'اختبار إشعارات الحضور' : 'لم تسجل حضورك', {
       body: String(payload.body || '').slice(0, 300), dir: 'rtl', icon: '/icons/icon-192.png',
       tag: String(payload.tag || 'attendance-reminder'), renotify: true,
       data: { url: '/employee', expiresAt: payload.expiresAt },

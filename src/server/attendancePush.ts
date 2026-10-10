@@ -59,6 +59,26 @@ export function registerAttendancePush(app: Express, requireAuth: any, getMain: 
     } catch { res.status(503).json({ error: 'تعذر إيقاف الإشعارات' }); }
   });
 
+  const lastTest = new Map<string, number>();
+  app.post('/api/attendance-push/test', employeeOnly, async (req, res) => {
+    if (process.env.ATTENDANCE_PUSH_ENABLED === 'false') return res.status(503).json({ error: 'إشعارات السيرفر متوقفة' });
+    const auth = (req as any).auth, endpoint = req.body?.endpoint;
+    if (typeof endpoint !== 'string' || endpoint.length > 2048) return res.status(400).json({ error: 'اشتراك الجهاز غير متاح؛ أعد الربط' });
+    const owner = auth.companyId + ':' + auth.id;
+    if ((lastTest.get(owner) || 0) > Date.now() - 60000) return res.status(429).json({ error: 'انتظر دقيقة قبل إعادة الاختبار' });
+    for (const [key, timestamp] of lastTest) if (timestamp <= Date.now() - 60000) lastTest.delete(key);
+    lastTest.set(owner, Date.now());
+    try {
+      const [row] = await db.select().from(schema.systemData).where(and(eq(schema.systemData.key, keyFor(endpoint)), sql`${schema.systemData.value}->>'companyId' = ${auth.companyId}`, sql`${schema.systemData.value}->>'employeeId' = ${String(auth.id)}`));
+      if (!row) return res.status(404).json({ error: 'اشتراك الجهاز غير محفوظ لحسابك' });
+      await send((row.value as Stored).subscription, JSON.stringify({ title: 'اختبار إشعارات الحضور', body: 'وصل إشعار الاختبار من السيرفر إلى جهازك.', tag: owner + ':test', expiresAt: Date.now() + 60000 }), { vapidDetails: { subject: process.env.APP_URL || 'https://attendance.example.com', ...await keys() }, TTL: 60, timeout: 10000, urgency: 'high' });
+      res.json({ accepted: true });
+    } catch (error: any) {
+      console.warn('Attendance push test failed', error.statusCode || 'network');
+      res.status(503).json({ error: [404, 410].includes(error.statusCode) ? 'اشتراك الجهاز منتهي؛ أعد تفعيل الإشعارات' : 'فشل إرسال السيرفر إلى مزود الإشعارات؛ راجع اتصال السيرفر وإعدادات APP_URL' });
+    }
+  });
+
   let running = false;
   const run = async () => {
     if (running) return; running = true;

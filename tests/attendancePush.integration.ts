@@ -39,6 +39,19 @@ try {
   assert.equal((await request('POST', { subscription })).status, 200);
   assert.equal((await request('DELETE', { endpoint: subscription.endpoint }, 'employee', otherCompany)).status, 200);
   assert.equal((await db.select().from(schema.systemData).where(eq(schema.systemData.key, subscriptionKey))).length, 1, 'other company cannot remove subscription');
+  const testApp = express(); testApp.use(express.json());
+  registerAttendancePush(testApp, () => (req: any, _res: any, next: any) => { req.auth = { companyId: req.headers['x-company'] || companyId, id: employeeId }; next(); }, async () => main, async () => true, send);
+  const testServer = testApp.listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => testServer.once('listening', resolve));
+  const testUrl = 'http://127.0.0.1:' + (testServer.address() as any).port + '/api/attendance-push/test';
+  const testPush = (company: string) => fetch(testUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-company': company }, body: JSON.stringify({ endpoint: subscription.endpoint }) });
+  try {
+    assert.equal((await testPush(otherCompany)).status, 404, 'test cannot send to another company device');
+    assert.equal((await testPush(companyId)).status, 200, 'test sends through provider');
+    assert.equal(sent.at(-1).payload.title, 'اختبار إشعارات الحضور');
+    assert.equal((await testPush(companyId)).status, 429, 'test rate limited');
+  } finally { await new Promise<void>(resolve => testServer.close(() => resolve())); }
+  sent.length = 0;
   // Foreign attendance never suppresses this employee's reminder.
   await db.insert(schema.attendance).values({ companyId: otherCompany, empId: employeeId, empName: 'Foreign Employee', date, checkIn: '08:00' });
   Date.now = () => start;
