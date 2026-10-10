@@ -27,6 +27,7 @@ import { mainDataVersion } from './src/lib/mainDataVersion';
 import { punchFields, validatePunchTransition, checkPunchLocation } from './src/lib/punchPolicy';
 import { matchAttendanceLocation } from './src/lib/attendanceLocations';
 import { registerElectronicDocumentRoutes } from './src/server/electronicDocuments';
+import { registerAttendancePush } from './src/server/attendancePush';
 import dotenv from 'dotenv';
 import path from 'path';
 dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
@@ -317,6 +318,7 @@ function bufferFromBase64url(value: string) {
 }
 
 registerElectronicDocumentRoutes(app, requireAuth, getMainDataByCompanyId, () => JWT_SECRET);
+const startAttendanceReminders = registerAttendancePush(app, requireAuth, getMainDataByCompanyId, companyCanLogin);
 
 // Debug DB route (development only — leaks connection details, never expose in production)
 app.get('/api/debug-db', (req, res) => {
@@ -2028,6 +2030,7 @@ app.delete('/api/companies/:id', requireAuth(['superadmin'], false), async (req,
       const keys=['mainData_'+id,'companyPrivacy:'+id,'ownerPasswordRevision:'+id,emailVerificationQuotaKey(id),notificationStateKey(id,{role:'admin'}),notificationStateKey(id,{role:'admin',username:companies[0].adminUsername || undefined})];
       for(const employee of (data[0]?.value as any)?.employees || []) keys.push(welcomeStateKey(id,String(employee.id)),emailVerificationKey(id,String(employee.id)),employeePhotoKey(id,String(employee.id)));
       for(const admin of admins) keys.push(adminAccessKey(id,admin.id),notificationStateKey(id,{role:'admin',id:admin.id}));
+      await tx.delete(schema.systemData).where(sql`${schema.systemData.key} LIKE 'attendancePush:%' AND ${schema.systemData.value}->>'companyId' = ${id}`);
       for(const role of ['superadmin','admin']) for(const username of [undefined, 'admin']) keys.push(notificationStateKey(id,{role,username}));
       for(const table of [schema.electronicDocumentAudit,schema.electronicDocuments,schema.attendance,schema.requests,schema.registrationRequests,schema.auditLog,schema.attendanceMonths,schema.admins]) await tx.delete(table).where(eq(table.companyId,id));
       await tx.delete(schema.systemData).where(inArray(schema.systemData.key,keys));
@@ -2046,6 +2049,7 @@ async function startServer() {
   await initializeSchemaAndTables();
   await migrateCompanyCodes(db);
   await ensureJwtSecret();
+  startAttendanceReminders.start();
 
   // Serve only this public association file; Express otherwise ignores dot-directories.
   app.get('/.well-known/assetlinks.json', (_req, res) => {
@@ -2065,7 +2069,7 @@ async function startServer() {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath, {
       setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.html') || filePath.endsWith('manifest.json') || filePath.includes('sw.js') || filePath.includes('registerSW') || filePath.endsWith('pwa-upgrade-bridge.js')) {
+        if (filePath.endsWith('.html') || filePath.endsWith('manifest.json') || filePath.includes('sw.js') || filePath.includes('registerSW') || filePath.endsWith('pwa-upgrade-bridge.js') || filePath.endsWith('attendance-push-worker.js')) {
           res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         }
       },

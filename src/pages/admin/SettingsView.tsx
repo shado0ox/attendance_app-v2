@@ -1,6 +1,7 @@
 import AttendanceAnalysisSettings from '../../components/AttendanceAnalysisSettings';
 import AuditLogView from '../../components/AuditLogView';
 import AttendanceLocationsEditor from '../../components/AttendanceLocationsEditor';
+import AttendanceLocationMap from '../../components/AttendanceLocationMap';
 import { useState, useEffect, type ChangeEvent } from 'react';
 import {
   Building2, UploadCloud, X, Crosshair, Key, Save, Shield, Plus, Edit, Trash2, UserCheck,
@@ -162,10 +163,12 @@ export default function SettingsView({
         </h3>
 
         <div className="p-3.5 bg-sky-50 border border-sky-100 rounded-xl text-xs text-sky-800 leading-relaxed font-medium">
-          📍 عند وضع إحداثيات GPS مقر الشركة وتحديد المسافة الجغرافية المعتمدة للبحث، سيمنع النظام الموظفين من البصمة إلا إذا كانوا داخل هذا النطاق المعتمد.
+          📍 حدد المقر من الخريطة واضبط نطاق البصمة بالمتر، ثم احفظ التعديلات.
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <AttendanceLocationMap lat={geoDraft.lat} lng={geoDraft.lng} radius={geoDraft.radius} disabled={geoSaving} onChange={(lat, lng) => updateGeoDraft({ ...geoDraft, lat, lng, radius: geoDraft.radius || 150 })} />
+        <details className="text-xs"><summary className="cursor-pointer text-slate-500">الإحداثيات — إعدادات متقدمة</summary>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-bold text-slate-600">خط العرض (Latitude)</label>
             <input
@@ -194,6 +197,7 @@ export default function SettingsView({
             />
           </div>
 
+        </div></details>
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-bold text-slate-600">نطاق البصمة المسموح (بالمتر)</label>
             <input
@@ -205,7 +209,6 @@ export default function SettingsView({
               className="px-3 py-2 text-xs border rounded-lg focus:outline-none focus:border-sky-500 font-extrabold"
             />
           </div>
-        </div>
 
         <div className="flex items-center gap-2 bg-sky-50 bg-opacity-30 p-3.5 rounded-xl border border-sky-100/50">
           <input

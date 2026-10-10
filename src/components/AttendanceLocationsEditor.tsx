@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { isValidLocation } from '../lib/attendanceLocations';
+import AttendanceLocationMap from './AttendanceLocationMap';
 
 export default function AttendanceLocationsEditor({ settings, onSave }: {
   settings: any; onSave: (settings: any) => Promise<boolean>;
@@ -28,11 +29,13 @@ export default function AttendanceLocationsEditor({ settings, onSave }: {
       </div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <label className="text-xs">اسم الفرع<input disabled={saving} className="border rounded-lg p-2 w-full mt-1" value={location.name || ''} onChange={e => update(location.id, { name: e.target.value })} /></label>
-        {(['lat', 'lng', 'radius'] as const).map(key => <label key={key} className="text-xs">
+        {(['radius'] as const).map(key => <label key={key} className="text-xs">
           {{ lat: 'خط العرض', lng: 'خط الطول', radius: 'النطاق بالمتر' }[key]}
           <input disabled={saving} type="number" step={key === 'radius' ? '1' : 'any'} dir="ltr" className="border rounded-lg p-2 w-full mt-1" value={location[key] ?? ''} onChange={e => update(location.id, { [key]: e.target.value })} />
         </label>)}
       </div>
+      <AttendanceLocationMap lat={location.lat} lng={location.lng} radius={location.radius} disabled={saving} onChange={(lat, lng) => update(location.id, { lat, lng })} />
+      <details className="text-xs"><summary className="cursor-pointer text-slate-500">الإحداثيات — إعدادات متقدمة</summary><div className="flex gap-3 mt-2">{(['lat', 'lng'] as const).map(key => <label key={key}>{key === 'lat' ? 'خط العرض' : 'خط الطول'}<input disabled={saving} type="number" step="any" dir="ltr" className="border rounded-lg p-2 w-full" value={location[key] ?? ''} onChange={e => update(location.id, { [key]: e.target.value })} /></label>)}</div></details>
       <div className="flex gap-4 items-center text-xs">
         <label><input disabled={saving} type="checkbox" checked={location.enabled !== false} onChange={e => update(location.id, { enabled: e.target.checked })} /> موقع مفعّل للبصمة</label>
         <button disabled={saving} className="text-sky-700 underline" onClick={() => {

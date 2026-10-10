@@ -15,7 +15,7 @@ export default defineConfig(() => {
         includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/app-icon.svg', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png', 'icons/icon.ico', 'icons/icon-16.png', 'icons/icon-32.png', 'brand/logo-light.svg', 'brand/logo-dark.svg', 'brand/logo-mono.svg', 'privacy.html', 'account-deletion.html'],
         workbox: {
           skipWaiting: false,
-          importScripts: ['/pwa-upgrade-bridge.js'],
+          importScripts: ['/pwa-upgrade-bridge.js', '/attendance-push-worker.js'],
           clientsClaim: true,
           cleanupOutdatedCaches: true,
           navigateFallbackDenylist: [/^\/api\//, /^\/privacy\.html$/, /^\/account-deletion\.html$/],
