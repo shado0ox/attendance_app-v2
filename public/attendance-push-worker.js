@@ -1,3 +1,6 @@
+self.addEventListener('message', event => {
+  if (event.data?.type === 'ATTENDANCE_PUSH_PROBE') event.ports?.[0]?.postMessage({ type: 'ATTENDANCE_PUSH_CAPABLE' });
+});
 self.addEventListener('push', event => {
   event.waitUntil((async () => {
     let payload;

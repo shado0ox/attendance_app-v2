@@ -6,6 +6,9 @@ test('push worker drops expired reminders, uses a fixed employee URL and replace
   const handlers: any = {}, shown: any[] = [], opened: string[] = [];
   const context = { self: { addEventListener: (name: string, handler: any) => { handlers[name] = handler; }, registration: { showNotification: async (...args: any[]) => { shown.push(args); } }, clients: { matchAll: async () => [], openWindow: async (url: string) => { opened.push(url); } }, location: { origin: 'https://attendance.example' } }, Date };
   vm.runInNewContext(fs.readFileSync('public/attendance-push-worker.js', 'utf8'), context);
+  let capability: any;
+  handlers.message({ data: { type: 'ATTENDANCE_PUSH_PROBE' }, ports: [{ postMessage: (value: any) => { capability = value; } }] });
+  assert.equal(capability.type, 'ATTENDANCE_PUSH_CAPABLE');
   let pending: Promise<any>;
   const push = async (payload: any) => { handlers.push({ data: { json: () => payload }, waitUntil: (p: Promise<any>) => { pending = p; } }); await pending; };
   await push({ expiresAt: Date.now() - 1, body: 'expired' }); assert.equal(shown.length, 0);

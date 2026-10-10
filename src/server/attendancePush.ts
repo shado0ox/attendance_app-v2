@@ -21,7 +21,11 @@ export function registerAttendancePush(app: Express, requireAuth: any, getMain: 
     }
     return vapid;
   };
-  const employeeOnly = requireAuth(['employee']);
+  const employeeOnly = [requireAuth(['employee'], false), (req: any, res: any, next: any) => {
+    const companyId = req.query?.companyId ?? req.body?.companyId;
+    if (companyId !== undefined && String(companyId) !== req.auth.companyId) return res.status(403).json({ error: 'الاشتراك خارج شركتك' });
+    next();
+  }];
   app.get('/api/attendance-push/key', employeeOnly, async (_req, res) => {
     if (process.env.ATTENDANCE_PUSH_ENABLED === 'false') return res.status(503).json({ error: 'تذكيرات السيرفر متوقفة؛ التذكير متاح أثناء فتح التطبيق.' });
     try { res.json({ publicKey: (await keys()).publicKey }); }
