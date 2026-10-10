@@ -4,7 +4,7 @@ import webpush from 'web-push';
 import { and, eq, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index';
 import { dueAttendanceReminders } from '../lib/attendanceReminders';
-import { validPushSubscription } from './attendancePushValidation';
+import { validPushSubscription, pushSubject } from './attendancePushValidation';
 
 const prefix = 'attendancePush:';
 const keyFor = (endpoint: string) => prefix + crypto.createHash('sha256').update(endpoint).digest('hex');
@@ -28,8 +28,8 @@ export function registerAttendancePush(app: Express, requireAuth: any, getMain: 
   }];
   app.get('/api/attendance-push/key', employeeOnly, async (_req, res) => {
     if (process.env.ATTENDANCE_PUSH_ENABLED === 'false') return res.status(503).json({ error: 'تذكيرات السيرفر متوقفة؛ التذكير متاح أثناء فتح التطبيق.' });
-    try { res.json({ publicKey: (await keys()).publicKey }); }
-    catch { res.status(503).json({ error: 'تعذر تجهيز إشعارات الحضور' }); }
+    try { pushSubject(); res.json({ publicKey: (await keys()).publicKey }); }
+    catch (error: any) { res.status(503).json({ error: error.message?.startsWith('اضبط APP_URL') ? error.message : 'تعذر تجهيز إشعارات الحضور' }); }
   });
   app.post('/api/attendance-push/subscription', employeeOnly, async (req, res) => {
     if (!validPushSubscription(req.body?.subscription)) return res.status(400).json({ error: 'اشتراك إشعارات غير صالح' });
@@ -71,11 +71,11 @@ export function registerAttendancePush(app: Express, requireAuth: any, getMain: 
     try {
       const [row] = await db.select().from(schema.systemData).where(and(eq(schema.systemData.key, keyFor(endpoint)), sql`${schema.systemData.value}->>'companyId' = ${auth.companyId}`, sql`${schema.systemData.value}->>'employeeId' = ${String(auth.id)}`));
       if (!row) return res.status(404).json({ error: 'اشتراك الجهاز غير محفوظ لحسابك' });
-      await send((row.value as Stored).subscription, JSON.stringify({ title: 'اختبار إشعارات الحضور', body: 'وصل إشعار الاختبار من السيرفر إلى جهازك.', tag: owner + ':test', expiresAt: Date.now() + 60000 }), { vapidDetails: { subject: process.env.APP_URL || 'https://attendance.example.com', ...await keys() }, TTL: 60, timeout: 10000, urgency: 'high' });
+      await send((row.value as Stored).subscription, JSON.stringify({ title: 'اختبار إشعارات الحضور', body: 'وصل إشعار الاختبار من السيرفر إلى جهازك.', tag: owner + ':test', expiresAt: Date.now() + 60000 }), { vapidDetails: { subject: pushSubject(), ...await keys() }, TTL: 60, timeout: 10000, urgency: 'high' });
       res.json({ accepted: true });
     } catch (error: any) {
       console.warn('Attendance push test failed', error.statusCode || 'network');
-      res.status(503).json({ error: [404, 410].includes(error.statusCode) ? 'اشتراك الجهاز منتهي؛ أعد تفعيل الإشعارات' : 'فشل إرسال السيرفر إلى مزود الإشعارات؛ راجع اتصال السيرفر وإعدادات APP_URL' });
+      res.status(503).json({ renewSubscription: [404, 410].includes(error.statusCode), error: [404, 410].includes(error.statusCode) ? 'اشتراك الجهاز منتهي؛ أعد تفعيل الإشعارات' : 'فشل إرسال السيرفر إلى مزود الإشعارات؛ راجع اتصال السيرفر وإعدادات APP_URL' });
     }
   });
 
@@ -113,7 +113,7 @@ export function registerAttendancePush(app: Express, requireAuth: any, getMain: 
             try {
               const vapidKeys = await keys();
               await send(stored.subscription, JSON.stringify({ title: 'لم تسجل حضورك', body: `لم تُسجّل حضور ${reminder.shiftName}${reminder.period === 2 ? ' — الفترة الثانية' : ''}. افتح التطبيق لتسجيل البصمة.`, tag: `${companyId}:${stored.employeeId}:${reminder.date}:${reminder.period}`, url: '/employee', expiresAt: reminder.expiresAt }), {
-                vapidDetails: { subject: process.env.APP_URL || 'https://attendance.example.com', ...vapidKeys },
+                vapidDetails: { subject: pushSubject(), ...vapidKeys },
                 TTL: Math.max(1, Math.min(60, Math.floor((reminder.expiresAt - Date.now()) / 1000))), timeout: 10000, urgency: 'high',
               });
             } catch (error: any) {
