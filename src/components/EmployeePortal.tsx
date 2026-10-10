@@ -6,6 +6,7 @@ import EmployeeEmailVerification from './EmployeeEmailVerification';
 import { useAutoPunch } from '../hooks/useAutoPunch';
 import { autoPeriodWindow } from '../lib/autoPunch';
 import { showPwaNotification } from '../lib/pwaNotification';
+import { syncAttendancePush, clearAttendanceNotifications } from '../lib/attendancePushClient';
 import { getEmployeeLocations as getApprovedLocations, matchAttendanceLocation } from '../lib/attendanceLocations';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Key, LogOut, ChevronRight, ChevronLeft, CalendarOff, Repeat, ArrowRightLeft, Clock, RefreshCw, Loader, AlertCircle, Fingerprint, ScanFace, ShieldCheck, House, CalendarCheck, ClipboardList, UserRound, Settings } from 'lucide-react';
@@ -135,12 +136,13 @@ export default function EmployeePortal({
     shiftName: string;
     startTime: string;
     date: string;
+    expiresAt: number;
   } | null>(() => {
-    const saved = localStorage.getItem(`missedShiftAlert_${employee.id}`);
+    const saved = localStorage.getItem(`missedShiftAlert_${companyId}_${employee.id}`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.date === getTodayStr()) return parsed;
+        if (parsed.date === getTodayStr() && parsed.expiresAt > Date.now()) return parsed;
       } catch (e) {}
     }
     return null;
@@ -148,6 +150,30 @@ export default function EmployeePortal({
   const [notificationPermissionState, setNotificationPermissionState] = useState<string>(() => {
     return 'Notification' in window ? Notification.permission : 'unsupported';
   });
+  const [pushReady, setPushReady] = useState(false);
+  const [pushMessage, setPushMessage] = useState('');
+  const [pushAttempt, setPushAttempt] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setPushReady(false);
+    if (notificationPermissionState !== 'granted') return;
+    syncAttendancePush(enableMissedShiftAlert).then(ready => {
+      if (!cancelled) { setPushReady(ready); setPushMessage(ready ? 'تذكير من السيرفر كل 10 دقائق خلال أول ساعة، ويتوقف عند تسجيل حضور الفترة.' : 'تذكيرات الحضور متوقفة على هذا الجهاز.'); }
+    }).catch(error => { if (!cancelled) setPushMessage(error.message); });
+    return () => { cancelled = true; };
+  }, [companyId, employee.id, enableMissedShiftAlert, notificationPermissionState, pushAttempt]);
+  useEffect(() => {
+    if (!['not-checked-in', 'not-checked-in-2', 'checking', 'error'].includes(attendanceStatus)) {
+      setMissedShiftAlert(null);
+      localStorage.removeItem(`missedShiftAlert_${companyId}_${employee.id}`);
+      void clearAttendanceNotifications(companyId + ':' + employee.id);
+    }
+  }, [attendanceStatus, companyId, employee.id]);
+  useEffect(() => {
+    if (!missedShiftAlert) return;
+    const timer = setTimeout(() => { setMissedShiftAlert(null); localStorage.removeItem(`missedShiftAlert_${companyId}_${employee.id}`); }, Math.max(0, missedShiftAlert.expiresAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [missedShiftAlert, companyId, employee.id]);
 
     const [biometricType, setBiometricType] = useState<'face' | 'fingerprint'>('face');
   const [biometricSupported, setBiometricSupported] = useState(false);
@@ -286,26 +312,20 @@ export default function EmployeePortal({
     }
   };
 
-  const triggerMissedShiftAlert = (shiftName: string, startTime: string) => {
+  const triggerMissedShiftAlert = (shiftName: string, startTime: string, shiftStart: number) => {
     const todayStr = getTodayStr();
-    const alertKey = `lastMissedAlertDate_${employee.id}`;
-    const lastAlertDate = localStorage.getItem(alertKey);
-    
-    // Check if we already alerted today
-    if (lastAlertDate === todayStr) return;
     
     // Set alert state
-    const alertObj = { shiftName, startTime, date: todayStr };
+    const alertObj = { shiftName, startTime, date: todayStr, expiresAt: shiftStart + 3600000 };
     setMissedShiftAlert(alertObj);
-    localStorage.setItem(`missedShiftAlert_${employee.id}`, JSON.stringify(alertObj));
-    localStorage.setItem(alertKey, todayStr);
+    localStorage.setItem(`missedShiftAlert_${companyId}_${employee.id}`, JSON.stringify(alertObj));
     
     // Voice speech alert
-    speakVoiceAlert(`تنبيه هام. لقد فات موعد شيفت ${shiftName} المجدول في الساعة ${startTime}. يرجى التوجه لمقر العمل لتسجيل الحضور`);
+    speakVoiceAlert(`لم تسجل حضورك في ${shiftName}. افتح تسجيل الحضور إذا كنت في مقر العمل`);
 
     // Mobile Notification if permission granted
     if ('Notification' in window && Notification.permission === 'granted') {
-      void showPwaNotification('تنبيه: فاتك موعد الدوام', `بدأ ${shiftName} في ${startTime}؛ لم يتأكد تسجيل الحضور`);
+      void showPwaNotification('لم تسجل حضورك', `بدأ ${shiftName} في ${startTime}؛ سجّل حضورك إذا كنت في مقر العمل`);
     }
     
     setAutoLogs((prev) => [`[${new Date().toLocaleTimeString('ar-EG')}] ⚠️ تم إرسال تنبيه: لقد فاتك موعد الدوام الجاري!`, ...prev.slice(0, 4)]);
@@ -316,9 +336,10 @@ export default function EmployeePortal({
       const permission = await Notification.requestPermission();
       setNotificationPermissionState(permission);
       if (permission === 'granted') {
-        await showPwaNotification('تم تفعيل التنبيهات', 'ستظهر تذكيرات الدوام عند تشغيل التطبيق');
+        setPushAttempt(attempt => attempt + 1);
+        await showPwaNotification('تم تفعيل التنبيهات', 'جاري ربط الجهاز بتذكيرات الحضور من السيرفر');
         speakVoiceAlert('تم تفعيل إشعارات وتنبيهات الدوام بنجاح');
-      }
+      } else setPushMessage('الإشعارات غير مسموحة؛ فعّلها من إعدادات الجهاز أو المتصفح لتصلك التذكيرات خارج التطبيق.');
     } else {
       alert('متصفحك أو جهازك لا يدعم التنبيهات المباشرة حالياً.');
     }
@@ -453,6 +474,7 @@ export default function EmployeePortal({
     scope: companyId + ':' + employee.id, autoIn: autoCheckIn, autoOut: autoCheckOut,
     mode: autoCheckMode, interval: autoCheckInterval, scheduled: scheduledCheckTime, settings: appSettings,
     status: attendanceStatus, record: todayRecord, blocked: actionLoading || autoPunchBusy.current,
+    currentStatus: () => stateRef.current.attendanceStatus,
     window: () => {
       const tr = stateRef.current.todayRecord;
       const active = ['checked-in', 'checked-in-2', 'not-checked-in-2'].includes(stateRef.current.attendanceStatus);
@@ -464,8 +486,8 @@ export default function EmployeePortal({
     refresh: loadAttendanceStatus, punch: executePunchInBackground, message: setAutoStatusText,
     fix: (accuracy, distance) => { setGpsAccuracy(Number.isFinite(accuracy) ? Math.round(accuracy) : null); setCurrentDistance(distance === null ? null : Math.round(distance)); },
     departure: (id, text) => { setDepartureHint({ id, text }); void showPwaNotification('تذكير بالانصراف', text); },
-    missedAlert: enableMissedShiftAlert,
-    late: (start) => triggerMissedShiftAlert(getTodayShift()?.name || 'الدوام', new Date(start).toLocaleTimeString('en-GB', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit' })),
+    missedAlert: enableMissedShiftAlert && !pushReady,
+    late: (start) => triggerMissedShiftAlert(getTodayShift()?.name || 'الدوام', new Date(start).toLocaleTimeString('en-GB', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit' }), start),
   });
 
   const DAYS_AR = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
@@ -869,6 +891,7 @@ export default function EmployeePortal({
             <h1 className="font-extrabold text-slate-800 text-base leading-relaxed break-words">{currentProfile.displayName || employee.name}</h1>
             <p className="text-[11px] text-slate-400 mt-0.5">{dept ? dept.name : 'بدون قسم'}</p>
           </div>
+
         </div>
 
         <div className="flex gap-2">
@@ -917,7 +940,7 @@ export default function EmployeePortal({
               <button
                 onClick={() => {
                   setMissedShiftAlert(null);
-                  localStorage.removeItem(`missedShiftAlert_${employee.id}`);
+                  localStorage.removeItem(`missedShiftAlert_${companyId}_${employee.id}`);
                 }}
                 className="px-4 py-1.5 bg-white border border-rose-200 text-rose-700 hover:bg-rose-100 rounded-xl text-xs font-bold transition-all whitespace-nowrap"
               >
@@ -1381,6 +1404,7 @@ export default function EmployeePortal({
             <p className="text-[9px] text-slate-300 leading-normal">
               لتشغيل البصمة افتح التطبيق واسمح بالموقع. تثبيت الـPWA لا يضمن استمرار GPS والشاشة مقفلة؛ يستأنف الفحص عند الرجوع.
             </p>
+            <p role="status" className="text-xs text-indigo-200">{pushMessage || 'بعد تفعيل الإشعارات: تذكير كل 10 دقائق خلال أول ساعة من بداية كل فترة، ويتوقف فور تسجيل الحضور.'}</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-1 z-10">
@@ -1388,7 +1412,7 @@ export default function EmployeePortal({
             <label className="flex items-center justify-between p-3.5 bg-indigo-950/40 border border-indigo-800/40 rounded-xl cursor-pointer hover:bg-indigo-900/40 transition-all">
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs font-bold text-slate-100">بصمة الحضور تلقائياً عند الدخول</span>
-                <span className="text-[9.5px] text-indigo-300">يسجل حضور فور وصولك لنطاق الشركة</span>
+                <span className="text-[9.5px] text-indigo-300">يسجل بعد تأكيد الموقع أثناء فتح التطبيق</span>
               </div>
               <input
                 type="checkbox"
@@ -1402,7 +1426,7 @@ export default function EmployeePortal({
             <label className="flex items-center justify-between p-3.5 bg-indigo-950/40 border border-indigo-800/40 rounded-xl cursor-pointer hover:bg-indigo-900/40 transition-all">
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs font-bold text-slate-100">تذكير بالانصراف عند الخروج أو نهاية الدوام</span>
-                <span className="text-[9.5px] text-indigo-300">يسجل انصراف بمجرد مغادرتك للموقع</span>
+                <span className="text-[9.5px] text-indigo-300">يذكّرك؛ تسجيل الانصراف يحتاج تأكيدك</span>
               </div>
               <input
                 type="checkbox"
@@ -1459,7 +1483,7 @@ export default function EmployeePortal({
               </div>
 
               <div className="flex items-center justify-between pt-1 text-xs">
-                <span className="text-[10px] text-slate-300 font-bold">تذكير عند فتح التطبيق إذا فات موعد الدوام</span>
+                <span className="text-[10px] text-slate-300 font-bold">تذكير الحضور كل 10 دقائق خلال أول ساعة فقط</span>
                 <input
                   type="checkbox"
                   checked={enableMissedShiftAlert}

@@ -493,8 +493,16 @@ export default function App() {
 
   const handleLogout = () => {
     requestConfirm('هل تريد تأكيد تسجيل الخروج وتأمين المنصة؟', () => {
-      persistSession(null, null);
-      navigate('/login', { replace: true });
+      void (async () => {
+        if (session.role === 'employee') {
+          try { const { syncAttendancePush } = await import('./lib/attendancePushClient'); await syncAttendancePush(false); }
+          catch { /* Logout must remain available offline; unsubscribe the browser endpoint too. */
+            try { const registration = await navigator.serviceWorker?.getRegistration(); await (await registration?.pushManager?.getSubscription())?.unsubscribe(); } catch { /* optional support */ }
+          }
+        }
+        persistSession(null, null);
+        navigate('/login', { replace: true });
+      })();
     });
   };
 

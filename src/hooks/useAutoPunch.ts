@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { AutoPunchDwell, autoFix } from '../lib/autoPunch';
 import { getEmployeeLocations } from '../lib/attendanceLocations';
+import { reminderSlot } from '../lib/attendanceReminders';
 type Options = {
   scope: string; autoIn: boolean; autoOut: boolean; mode: string; interval: number; scheduled: string;
+  currentStatus?: () => string;
   settings: any; status: string; record: any; blocked: boolean;
   window: () => { start: number; end: number } | null;
   refresh: () => Promise<boolean>; punch: (position: GeolocationPosition) => Promise<boolean>;
@@ -30,11 +32,11 @@ export function useAutoPunch(options: Options) {
       try {
         const day = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
         if (day !== lastDay) { lastDay = day; needsRefresh = true; dwell.reset(); notified.clear(); }
-        if (needsRefresh) {
+        if (needsRefresh || latest.current.missedAlert) {
           if (!await latest.current.refresh()) { latest.current.message('تعذر تأكيد الحالة من الخادم؛ البصمة التلقائية متوقفة مؤقتًا'); return; }
           needsRefresh = false;
         }
-        const opt = latest.current;
+        const opt = { ...latest.current, status: latest.current.currentStatus?.() ?? latest.current.status };
         if (stopped || epoch !== generation || document.visibilityState !== 'visible') return;
         if (opt.blocked || opt.status === 'checking' || opt.status === 'error' || Date.now() < cooldownUntil) return;
         const incoming = opt.status === 'not-checked-in' || opt.status === 'not-checked-in-2';
@@ -43,13 +45,18 @@ export function useAutoPunch(options: Options) {
         const window = opt.window(), now = Date.now();
         if (!window) { opt.message('لا يوجد دوام صالح لهذه الفترة؛ استخدم البصمة اليدوية أو راجع الجدول'); return; }
         if (incoming && (now < window.start - 1800000 || now > window.end)) { dwell.reset(); opt.message('انتظار نافذة الحضور: من نصف ساعة قبل الدوام إلى نهايته'); return; }
+        if (incoming && opt.missedAlert) {
+          const slot = reminderSlot(window.start, window.end, now);
+          if (slot !== null) {
+            const key = opt.scope + ':' + window.start + ':late:' + slot;
+            let alreadySent = notified.has(key);
+            try { alreadySent ||= localStorage.getItem('attendanceReminder:' + opt.scope) === key; } catch { /* storage optional */ }
+            if (!alreadySent) { notified.add(key); try { localStorage.setItem('attendanceReminder:' + opt.scope, key); } catch { /* storage optional */ } opt.late(window.start); }
+          }
+        }
         if (incoming && opt.autoIn && opt.mode === 'scheduled') {
           const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(opt.scheduled) ? Date.parse(new Date(window.start).toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' }) + 'T' + opt.scheduled + ':00+03:00') : NaN;
           if (!Number.isFinite(time) || now < time) { opt.message('انتظار موعد الفحص المحدد داخل نافذة الدوام'); return; }
-        }
-        if (incoming && opt.missedAlert && now >= window.start + 900000) {
-          const key = window.start + ':late';
-          if (!notified.has(key)) { notified.add(key); opt.late(window.start); }
         }
         if (incoming && !opt.autoIn) { opt.message('تذكير الدوام مفعّل؛ الحضور يدوي'); return; }
         if (!getEmployeeLocations(opt.settings).length) { opt.message('لا يوجد موقع بصمة مسموح ومفعّل'); return; }
