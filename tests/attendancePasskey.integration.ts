@@ -1,0 +1,63 @@
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
+import pg from 'pg';
+import jwt from 'jsonwebtoken';
+const origin = 'http://127.0.0.1:3011', secret = 'passkey-ci-only-secret', company = 'passkey-ci', employeeId = 'passkey-employee';
+const pool = new pg.Pool({ host: process.env.SQL_HOST, port: Number(process.env.SQL_PORT || 5432), user: process.env.SQL_USER, password: process.env.SQL_PASSWORD, database: process.env.SQL_DB_NAME });
+const child = spawn(process.execPath, ['dist/server.cjs'], { env: { ...process.env, NODE_ENV: 'production', JWT_SECRET: secret, BACKUP_ENABLED: 'false', ATTENDANCE_PUSH_ENABLED: 'false', WEBAUTHN_ORIGIN: origin }, stdio: 'inherit' });
+const token = (role: string, companyId = company, id?: string) => ({ 'Content-Type': 'application/json', Authorization: 'Bearer ' + jwt.sign({ role, companyId, ...(id && { id }) }, secret) });
+const employee = token('employee', company, employeeId), admin = token('admin');
+const request = (endpoint: string, body?: any, headers = employee) => fetch(origin + endpoint, { method: body ? 'POST' : 'GET', headers, ...(body && { body: JSON.stringify(body) }) });
+const pair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }), jwk = pair.publicKey.export({ format: 'jwk' });
+const publicKey = Buffer.concat([Buffer.from('a5010203262001215820', 'hex'), Buffer.from(jwk.x!, 'base64url'), Buffer.from('225820', 'hex'), Buffer.from(jwk.y!, 'base64url')]).toString('base64url');
+const credentialId = crypto.randomBytes(32).toString('base64url');
+let counter = 0;
+async function signedProof(field: string, recordId?: number, flags = 5) {
+  const optionsResponse = await request('/api/attendance-passkey/options', { field, recordId });
+  assert.equal(optionsResponse.status, 200);
+  const options = await optionsResponse.json();
+  const clientDataJSON = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge: options.options.challenge, origin }));
+  const count = Buffer.alloc(4); count.writeUInt32BE(++counter);
+  const authenticatorData = Buffer.concat([crypto.createHash('sha256').update('127.0.0.1').digest(), Buffer.from([flags]), count]);
+  const signature = crypto.sign('sha256', Buffer.concat([authenticatorData, crypto.createHash('sha256').update(clientDataJSON).digest()]), pair.privateKey);
+  const payload = { challengeId: options.challengeId, credential: { id: credentialId, rawId: credentialId, type: 'public-key', response: { clientDataJSON: clientDataJSON.toString('base64url'), authenticatorData: authenticatorData.toString('base64url'), signature: signature.toString('base64url') }, clientExtensionResults: {} } };
+  return { payload, response: await request('/api/attendance-passkey/verify', payload) };
+}
+try {
+  let ready = false; for (let i = 0; i < 60; i++) { try { if ((await fetch(origin + '/api/health/live')).ok) { ready = true; break; } } catch {} await new Promise(r => setTimeout(r, 500)); } assert.ok(ready);
+  await pool.query('INSERT INTO shift_app.companies(id,name,admin_username,admin_password) VALUES ($1,$1,$1,$2)', [company, 'ci-hash']);
+  const data = { employees: [{ id: employeeId, name: 'Passkey employee', dept: 'd', webauthnCredentials: [{ id: credentialId, publicKey, counter: 0, transports: ['internal'] }] }, { id: 'pilot-other', name: 'Other', dept: 'd' }], departments: [{ id: 'd' }], settings: {}, schedule: {}, shiftTypes: [] };
+  await pool.query('INSERT INTO shift_app.system_data(key,value) VALUES ($1,$2)', ['mainData_' + company, JSON.stringify(data)]);
+  assert.equal((await (await request('/api/attendance-passkey/status')).json()).required, false);
+  assert.equal((await request('/api/attendance-passkey/policy', { mode: 'all', employeeIds: [] })).status, 403, 'employee cannot enable or disable policy');
+  assert.equal((await request('/api/attendance-passkey/policy', { mode: 'selected', employeeIds: ['foreign'] }, admin)).status, 400);
+  assert.equal((await request('/api/attendance-passkey/policy', { mode: 'selected', employeeIds: [employeeId] }, admin)).status, 200);
+  assert.equal((await request('/api/attendance', { companyId: company, checkIn: '08:00', automatic: true })).status, 403, 'automatic punch cannot bypass identity');
+  assert.equal((await request('/api/attendance', { companyId: company, checkIn: '08:00' })).status, 403);
+  assert.equal((await request('/api/attendance-passkey/options', { field: 'checkIn' })).status, 400, 'unapproved credential blocked');
+  assert.equal((await request('/api/attendance-passkey/credential', { employeeId, credentialId, approved: true }, token('admin', 'default'))).status, 400, 'cannot approve foreign credential');
+  assert.equal((await request('/api/attendance-passkey/credential', { employeeId, credentialId, approved: true }, admin)).status, 200);
+  const uvMissing = await signedProof('checkIn', undefined, 1); assert.equal(uvMissing.response.status, 400, 'user verification required');
+  const result = await signedProof('checkIn'); assert.equal(result.response.status, 200);
+  const proof = (await result.response.json()).proof;
+  assert.equal((await request('/api/attendance-passkey/verify', result.payload)).status, 400, 'challenge is single use');
+  assert.equal((await request('/api/attendance', { companyId: company, checkOut: '16:00', passkeyProof: proof })).status, 403, 'proof action bound');
+  assert.equal((await request('/api/attendance', { companyId: company, checkIn: '08:00', passkeyProof: proof }, token('employee', company, 'pilot-other'))).status, 200, 'pilot does not require other employee proof');
+  const punched = await request('/api/attendance', { companyId: company, checkIn: '08:00', passkeyProof: proof }); assert.equal(punched.status, 200);
+  const record = await punched.json();
+  assert.equal((await request('/api/attendance', { companyId: company, checkIn: '08:00', passkeyProof: proof })).status, 403, 'proof cannot replay');
+  const outProof = await signedProof('checkOut', record.id); assert.equal(outProof.response.status, 200);
+  const out = (await outProof.response.json()).proof;
+  assert.equal((await request('/api/attendance-passkey/credential', { employeeId, credentialId, approved: false }, admin)).status, 200);
+  assert.equal((await request('/api/attendance', { companyId: company, id: record.id, checkOut: '16:00', passkeyProof: out })).status, 403, 'revocation invalidates existing proof');
+  assert.equal((await request('/api/attendance-passkey/policy', { mode: 'off', employeeIds: [] }, admin)).status, 200);
+  assert.equal((await request('/api/attendance', { companyId: company, id: record.id, checkOut: '16:00' })).status, 200, 'disabled policy restores manual attendance');
+  console.log('PASS: passkey pilot policy, administrator approval, genuine signed UV assertion, single-use action-bound proof and revocation.');
+} finally {
+  child.kill('SIGTERM');
+  await pool.query("DELETE FROM shift_app.system_data WHERE key=$1 OR key=$2 OR (key LIKE 'attendancePasskeyChallenge:%' OR key LIKE 'attendancePasskeyProof:%') AND value->>'companyId'=$3", ['mainData_' + company, 'attendancePasskeyPolicy:' + company, company]);
+  await pool.query('DELETE FROM shift_app.attendance WHERE company_id=$1', [company]);
+  await pool.query('DELETE FROM shift_app.audit_log WHERE company_id=$1', [company]);
+  await pool.query('DELETE FROM shift_app.companies WHERE id=$1', [company]); await pool.end();
+}

@@ -1,3 +1,4 @@
+import AttendancePasskeySettings from '../../components/AttendancePasskeySettings';
 import AttendanceAnalysisSettings from '../../components/AttendanceAnalysisSettings';
 import AuditLogView from '../../components/AuditLogView';
 import AttendanceLocationsEditor from '../../components/AttendanceLocationsEditor';
@@ -268,6 +269,7 @@ export default function SettingsView({
 
       <AttendanceLocationsEditor settings={appSettings} onSave={onUpdateSettings} />
 
+      <AttendancePasskeySettings companyId={companyId} />
       <AuditLogView companyId={companyId} />
 
       {/* General Admin Password updates */}
