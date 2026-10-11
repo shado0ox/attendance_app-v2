@@ -61,6 +61,7 @@ export function mergeAdminData(current: any, incoming: any, access: AdminAccess)
 }
 export function allowedAdminRoute(access: AdminAccess, method: string, route: string) {
   if (route.startsWith('/api/whatsapp/')) return access.departmentIds === null && access.permissions.canManageSettings;
+  if (route.startsWith('/api/company-backup/')) return access.departmentIds === null && ['canManageSettings','canManageEmployees','canEditSchedule','canManageDepts','canApproveRequests','canViewReports'].every(p => access.permissions[p]);
   const read = method === 'GET';
   if (route.startsWith('/api/attendance-passkey/')) return access.departmentIds === null && access.permissions.canManageSettings;
   if (route === '/api/system-health') return read && access.departmentIds === null && access.permissions.canManageSettings;

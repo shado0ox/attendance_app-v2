@@ -1,0 +1,75 @@
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { promises as fs } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import jwt from 'jsonwebtoken';
+import { and, eq, sql } from 'drizzle-orm';
+import { db, schema, pool } from '../src/db/index';
+import { openCompanyBackup } from '../src/server/companyBackupFormat';
+import { employeePhotoKey } from '../src/server/employeeSelfService';
+import { fullAdminAccess } from '../src/lib/adminAccess';
+const directory = await fs.mkdtemp(path.join(tmpdir(), 'company-backup-ci-'));
+const secret = 'company-backup-ci-secret', companyId = 'backup-ci-a', otherCompany = 'backup-ci-b', employeeId = 'backup-ci-employee';
+const child = spawn(process.execPath, ['--import', './tests/mockResend.mjs', 'dist/server.cjs'], { env: { ...process.env, NODE_ENV: 'production', JWT_SECRET: secret, COMPANY_BACKUP_KEY: secret, BACKUP_ENABLED: 'false', BACKUP_DIR: directory, ATTENDANCE_WHATSAPP_ENABLED: 'false', ATTENDANCE_PUSH_ENABLED: 'false', RESEND_API_KEY: 'mock-key', RESEND_FROM: 'Attendance <attendance@example.com>', ATTENDANCE_TEST_EMAIL_CAPTURE: path.join(directory, 'mail.jsonl') }, stdio: 'inherit' });
+const main = { employees: [{ id: employeeId, name: 'Employee', username: 'backup-ci-employee', password: 'original-password', dept: 'd', webauthnCredentials: [{ id: 'current-key', counter: 50 }] }], departments: [{ id: 'd', name: 'Department' }], shiftTypes: [], schedule: {}, settings: { companyName: 'Backup Company', password: 'root-password' } };
+const mainKey = 'mainData_' + companyId;
+const request = (route: string, body?: any, company = companyId, role = 'admin', id?: any) => fetch('http://127.0.0.1:3011/api/company-backup/' + route, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + jwt.sign({ role, companyId: company, ...(id !== undefined ? { id } : {}) }, secret, { expiresIn: '1h' }) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+const putMain = async (data: any) => db.update(schema.systemData).set({ value: data }).where(eq(schema.systemData.key, mainKey));
+try {
+  let ready = false; for (let i = 0; i < 60; i++) { try { if ((await fetch('http://127.0.0.1:3011/api/health/live')).ok) { ready = true; break; } } catch {} await new Promise(r => setTimeout(r, 500)); } assert.ok(ready);
+  for (const id of [companyId, otherCompany]) {
+    await pool.query('INSERT INTO shift_app.companies(id,name,admin_username,admin_password) VALUES ($1,$1,$1,$2) ON CONFLICT(id) DO NOTHING', [id, 'ci-only-hash']);
+    await db.insert(schema.systemData).values({ key: 'mainData_' + id, value: id === companyId ? main : { ...main, employees: [{ ...main.employees[0], username: 'backup-ci-foreign' }] } }).onConflictDoUpdate({ target: schema.systemData.key, set: { value: main } });
+  }
+  const [original] = await db.insert(schema.attendance).values({ companyId, empId: employeeId, empName: 'Employee', date: '2026-10-10', checkIn: '08:00' }).returning();
+  const [foreign] = await db.insert(schema.attendance).values({ companyId: otherCompany, empId: employeeId, empName: 'Foreign', date: '2026-10-10', checkIn: '09:00' }).returning();
+  const [document] = await db.insert(schema.electronicDocuments).values({ companyId, employeeId, employeeName: 'Employee', formData: { requestType: 'absence' }, employeeSignature: 'signed', status: 'approved', shareTokenHash: 'old-link' }).returning();
+  await db.insert(schema.electronicDocumentAudit).values({ companyId, documentId: document.id, actorId: employeeId, actorRole: 'employee', action: 'employee_signed' });
+  await db.insert(schema.attendanceMonths).values({ companyId, key: companyId + ':2026-10', month: '2026-10', value: { status: 'approved', snapshot: { days: [{ ids: [original.id] }] } } });
+  const photoKey = employeePhotoKey(companyId, employeeId); await db.insert(schema.systemData).values({ key: photoKey, value: { dataUrl: 'data:image/png;base64,original' } });
+  const [admin] = await db.insert(schema.admins).values({ companyId, username: 'backup-ci-admin', name: 'Limited', password: 'current-admin-password' }).returning();
+  const access = fullAdminAccess(); access.permissions.canManageEmployees = false;
+  await db.insert(schema.systemData).values({ key: 'adminAccess:' + companyId + ':' + admin.id, value: access });
+  assert.equal((await request('download', {}, companyId, 'employee', employeeId)).status, 403);
+  assert.equal((await request('download', {}, companyId, 'admin', admin.id)).status, 403);
+  assert.equal((await request('download', { companyId: otherCompany })).status, 403);
+  const downloaded = await request('download', {}); assert.equal(downloaded.status, 200); assert.match(downloaded.headers.get('content-disposition') || '', /attachment/);
+  const file = await downloaded.text(), decoded = openCompanyBackup(file, companyId, secret).payload;
+  assert.equal(decoded.tables.attendance.length, 1); assert.equal(decoded.tables.attendance[0].companyId, companyId); assert.equal(decoded.photos.length, 1); assert.equal(decoded.mainData.settings.password, undefined); assert.equal(decoded.mainData.employees[0].webauthnCredentials, undefined);
+  assert.equal((await request('preview', { file }, otherCompany)).status, 400, 'cross-tenant restore rejected');
+  assert.equal((await request('preview', { file: file.replace('"version":1', '"version":2') })).status, 400);
+  assert.equal((await request('restore', { file, token: '0'.repeat(64), confirm: 'استرجاع' })).status, 409, 'restore without preview rejected');
+  let preview = await (await request('preview', { file })).json();
+  await db.insert(schema.attendance).values({ companyId, empId: employeeId, empName: 'New', date: '2026-10-11', checkIn: '08:30' });
+  assert.equal((await request('restore', { file, token: preview.token, confirm: 'استرجاع' })).status, 409, 'new attendance invalidates preview');
+  const changed = structuredClone(main); changed.settings.companyName = 'Changed'; changed.settings.password = 'current-root'; changed.employees[0].password = 'current-employee-password'; changed.employees[0].webauthnCredentials[0].counter = 99; await putMain(changed);
+  await db.update(schema.systemData).set({ value: { dataUrl: 'data:image/png;base64,changed' } }).where(eq(schema.systemData.key, photoKey));
+  preview = await (await request('preview', { file })).json(); assert.equal(preview.current.attendance, 2); assert.equal(preview.incoming.attendance, 1);
+  assert.equal((await request('restore', { file, token: preview.token, confirm: 'yes' })).status, 400);
+  const restore = await request('restore', { file, token: preview.token, confirm: 'استرجاع' }); const restored = await restore.json(); assert.equal(restore.status, 200, JSON.stringify(restored));
+  const [saved] = await db.select().from(schema.systemData).where(eq(schema.systemData.key, mainKey)); const value = saved.value as any;
+  assert.equal(value.settings.companyName, 'Backup Company'); assert.equal(value.settings.password, 'current-root'); assert.equal(value.employees[0].password, 'current-employee-password'); assert.equal(value.employees[0].webauthnCredentials[0].counter, 99);
+  const records = await db.select().from(schema.attendance).where(eq(schema.attendance.companyId, companyId)); assert.equal(records.length, 1); assert.notEqual(records[0].id, original.id);
+  const [month] = await db.select().from(schema.attendanceMonths).where(eq(schema.attendanceMonths.companyId, companyId)); assert.deepEqual((month.value as any).snapshot.days[0].ids, [records[0].id]);
+  const [doc] = await db.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.companyId, companyId)); assert.equal(doc.shareTokenHash, null);
+  const [docAudit] = await db.select().from(schema.electronicDocumentAudit).where(eq(schema.electronicDocumentAudit.companyId, companyId)); assert.equal(docAudit.documentId, doc.id);
+  const [photo] = await db.select().from(schema.systemData).where(eq(schema.systemData.key, photoKey)); assert.equal((photo.value as any).dataUrl, 'data:image/png;base64,original');
+  assert.deepEqual(await db.select().from(schema.attendance).where(eq(schema.attendance.companyId, otherCompany)), [foreign], 'other tenant unchanged');
+  const rollback = await request('rollback/' + restored.rollback.id); assert.equal(rollback.status, 200); const previous = openCompanyBackup(await rollback.text(), companyId, secret).payload; assert.equal(previous.tables.attendance.length, 2); assert.equal(previous.mainData.settings.companyName, 'Changed');
+  assert.equal((await request('rollback/' + restored.rollback.id, undefined, otherCompany)).status, 404);
+  assert.equal((await request('restore', { file, token: preview.token, confirm: 'استرجاع' })).status, 409, 'preview consumed once');
+  assert.equal((await db.select().from(schema.admins).where(eq(schema.admins.id, admin.id)))[0].password, 'current-admin-password');
+  // A filesystem failure must abort before deleting any live records.
+  const newPreview = await (await request('preview', { file })).json();
+  const filesDir = path.join(directory, 'companies'); const movedDir = filesDir + '.saved'; await fs.rename(filesDir, movedDir); await fs.writeFile(filesDir, 'blocked');
+  const failed = await request('restore', { file, token: newPreview.token, confirm: 'استرجاع' }); assert.notEqual(failed.status, 200);
+  assert.deepEqual(await db.select().from(schema.attendance).where(eq(schema.attendance.companyId, companyId)), records, 'rollback save failure leaves live data intact');
+  await fs.unlink(filesDir); await fs.rename(movedDir, filesDir);
+  console.log('Company backup export, isolation, preview, restore, photos, remapped IDs and rollback safety passed');
+} finally {
+  child.kill('SIGTERM'); await new Promise(resolve => child.exitCode !== null ? resolve(null) : child.once('exit', resolve));
+  for (const table of [schema.electronicDocumentAudit, schema.electronicDocuments, schema.attendance, schema.requests, schema.registrationRequests, schema.auditLog, schema.attendanceMonths, schema.admins]) await db.delete(table).where(sql`${table.companyId} IN ('backup-ci-a','backup-ci-b')`);
+  await db.delete(schema.systemData).where(sql`${schema.systemData.key} IN ('mainData_backup-ci-a','mainData_backup-ci-b',${employeePhotoKey(companyId, employeeId)}) OR ${schema.systemData.key} LIKE 'adminAccess:backup-ci-a:%' OR ${schema.systemData.value}->>'companyId' IN ('backup-ci-a','backup-ci-b')`);
+  await db.delete(schema.companies).where(sql`${schema.companies.id} IN ('backup-ci-a','backup-ci-b')`); await pool.end(); await fs.rm(directory, { recursive: true, force: true });
+}

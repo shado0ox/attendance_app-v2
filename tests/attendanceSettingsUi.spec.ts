@@ -105,3 +105,35 @@ test('required first-use Passkey gate stays until registration and administrator
   await page.getByRole('button', { name: 'إعادة التحقق من الاعتماد' }).click();
   await expect(page.getByText('بوابة الموظف متاحة')).toBeVisible();
 });
+test('settings sections start collapsed, open with keyboard and preserve draft values across collapse', async ({ page }) => {
+  await page.route('**/api/whatsapp/settings', route => route.fulfill({ json: { enabled: false, mode: 'selected', employeeIds: [], phoneNumberId: '', sender: '', apiVersion: 'v26.0', language: 'ar', attendanceTemplate: '', departureTemplate: '', portalUrl: '', attendanceEnabled: true, departureEnabled: true, attendanceDelay: 10, departureDelay: 0, interval: 10, contacts: {}, ready: false, webhookPath: '/api/whatsapp-webhook/test', employees: [] } }));
+  await page.route('**/api/whatsapp/logs', route => route.fulfill({ json: [] }));
+  await page.route('**/api/attendance-passkey/policy', route => route.fulfill({ json: { mode: 'off', employeeIds: [], employees: [] } }));
+  await page.route('**/api/audit-log?*', route => route.fulfill({ json: [] }));
+  await page.goto('/tests/ui/companyTools.html');
+  await expect(page.locator('.settings-section[open]')).toHaveCount(0);
+  const company = page.locator('.settings-section').filter({ has: page.locator('summary', { hasText: 'بيانات الشركة والشعار' }) });
+  await company.locator('summary').focus(); await page.keyboard.press('Enter');
+  await expect(company).toHaveAttribute('open', '');
+  await company.getByPlaceholder('مثال: شركة النجوم للاستقدام').fill('اسم جديد');
+  await page.getByRole('button', { name: 'طي الكل', exact: true }).click();
+  await expect(page.locator('.settings-section[open]')).toHaveCount(0);
+  await company.locator('summary').click(); await expect(company.getByPlaceholder('مثال: شركة النجوم للاستقدام')).toHaveValue('اسم جديد');
+  await page.getByRole('button', { name: 'توسيع الكل', exact: true }).click();
+  await expect(page.locator('.settings-section[open]')).toHaveCount(8);
+});
+test('company backup requires preview and explicit confirmation before replacement', async ({ page }) => {
+  let restored = false;
+  await page.route('**/api/company-backup/status?*', route => route.fulfill({ json: restored ? { lastRestore: { at: '2026-10-11T12:00:00+03:00', rollback: { id: 'rollback-id' } } } : {} }));
+  await page.route('**/api/company-backup/preview?*', route => route.fulfill({ json: { token: 'preview-token', companyName: 'شركة التجربة', createdAt: '2026-10-10T12:00:00+03:00', current: { employees: 2, attendance: 5 }, incoming: { employees: 2, attendance: 3 } } }));
+  await page.route('**/api/company-backup/restore?*', route => { expect(route.request().postDataJSON()).toEqual({ file: 'encrypted-file', token: 'preview-token', confirm: 'استرجاع' }); restored = true; return route.fulfill({ json: { success: true, rollback: { id: 'rollback-id' }, message: 'تم استرجاع بيانات الشركة.' } }); });
+  await page.goto('/tests/ui/companyTools.html?backup');
+  await page.getByText('استرجاع نسخة سابقة للشركة', { exact: true }).click();
+  await page.getByLabel('ملف نسخة الشركة', { exact: true }).setInputFiles({ name: 'company.wafr-backup', mimeType: 'application/octet-stream', buffer: Buffer.from('encrypted-file') });
+  await page.getByRole('button', { name: 'فحص النسخة ومعاينة المحتوى' }).click();
+  const restore = page.getByRole('button', { name: 'استبدال بيانات شركتي بهذه النسخة' }); await expect(restore).toBeDisabled();
+  await page.getByLabel('تأكيد استرجاع الشركة').fill('استرجاع'); await expect(restore).toBeEnabled(); await restore.click();
+  await expect(page.getByRole('button', { name: 'إعادة تحميل البيانات المسترجعة' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'تنزيل نسخة ما قبل آخر استرجاع' })).toBeVisible();
+  await expect(page.getByText('تم استرجاع بيانات الشركة.', { exact: true })).toBeVisible();
+});
