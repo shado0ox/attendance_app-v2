@@ -126,7 +126,7 @@ test('company backup requires preview and explicit confirmation before replaceme
   let restored = false;
   await page.route('**/api/company-backup/status?*', route => route.fulfill({ json: restored ? { lastRestore: { at: '2026-10-11T12:00:00+03:00', rollback: { id: 'rollback-id' } } } : {} }));
   await page.route('**/api/company-backup/preview?*', route => route.fulfill({ json: { token: 'preview-token', companyName: 'شركة التجربة', createdAt: '2026-10-10T12:00:00+03:00', current: { employees: 2, attendance: 5 }, incoming: { employees: 2, attendance: 3 } } }));
-  await page.route('**/api/company-backup/restore?*', route => { expect(route.request().postDataJSON()).toEqual({ file: 'encrypted-file', token: 'preview-token', confirm: 'استرجاع' }); restored = true; return route.fulfill({ json: { success: true, message: 'تم استرجاع بيانات الشركة.' } }); });
+  await page.route('**/api/company-backup/restore?*', route => { expect(route.request().postDataJSON()).toEqual({ file: 'encrypted-file', token: 'preview-token', confirm: 'استرجاع' }); restored = true; return route.fulfill({ json: { success: true, rollback: { id: 'rollback-id' }, message: 'تم استرجاع بيانات الشركة.' } }); });
   await page.goto('/tests/ui/companyTools.html?backup');
   await page.getByText('استرجاع نسخة سابقة للشركة', { exact: true }).click();
   await page.getByLabel('ملف نسخة الشركة', { exact: true }).setInputFiles({ name: 'company.wafr-backup', mimeType: 'application/octet-stream', buffer: Buffer.from('encrypted-file') });
