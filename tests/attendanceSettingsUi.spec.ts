@@ -66,3 +66,15 @@ test('administrator can pilot Passkey for one employee and approve or revoke a c
   await expect(page.getByRole('status')).toHaveText('تم الحفظ');
   expect(mode).toBe('off');
 });
+
+
+test('required first-use Passkey gate stays until registration and administrator approval', async ({ page }) => {
+  await page.goto('/tests/ui/passkeySettings.html?gate');
+  await expect(page.getByRole('heading', { name: 'إنشاء Passkey مطلوب للمتابعة' })).toBeVisible();
+  await expect(page.getByText('بوابة الموظف متاحة')).toHaveCount(0);
+  await page.getByRole('button', { name: 'إنشاء Passkey الآن' }).click();
+  await expect(page.getByRole('heading', { name: 'بانتظار اعتماد مفتاحك' })).toBeVisible();
+  await expect(page.getByText('بوابة الموظف متاحة')).toHaveCount(0);
+  await page.getByRole('button', { name: 'إعادة التحقق من الاعتماد' }).click();
+  await expect(page.getByText('بوابة الموظف متاحة')).toBeVisible();
+});

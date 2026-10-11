@@ -1,3 +1,4 @@
+import AttendancePasskeyGate from './AttendancePasskeyGate';
 import { punchWithPasskey } from '../lib/attendancePasskeyClient';
 import EmployeeWeekSchedule from './EmployeeWeekSchedule';
 import EmployeeSelfProfile from './EmployeeSelfProfile';
@@ -182,11 +183,27 @@ export default function EmployeePortal({
 
     const [biometricType, setBiometricType] = useState<'face' | 'fingerprint'>('face');
   const [passkeyStatus, setPasskeyStatus] = useState<any>(null);
+  const [passkeyStatusError, setPasskeyStatusError] = useState('');
+  const passkeyScope = useRef('');
+  passkeyScope.current = companyId + ':' + employee.id;
   const refreshPasskeyStatus = async () => {
-    const response = await fetch('/api/attendance-passkey/status');
-    if (response.ok) setPasskeyStatus(await response.json());
+    const scope = companyId + ':' + employee.id;
+    try {
+      const response = await fetch('/api/attendance-passkey/status');
+      const value = await response.json();
+      if (!response.ok) throw new Error(value.error || 'تعذر تأكيد سياسة Passkey');
+      if (passkeyScope.current !== scope) return;
+      setPasskeyStatus({ ...value, scope }); setPasskeyStatusError('');
+    } catch (error: any) { if (passkeyScope.current === scope) setPasskeyStatusError(error.message || 'تعذر الاتصال؛ أعد المحاولة'); }
   };
-  useEffect(() => { void refreshPasskeyStatus(); }, [companyId, employee.id]);
+  useEffect(() => {
+    setPasskeyStatus(null); setPasskeyStatusError('');
+    const refresh = () => { if (document.visibilityState === 'visible') void refreshPasskeyStatus(); };
+    refresh();
+    const timer = setInterval(refresh, 30000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
+  }, [companyId, employee.id]);
   const [biometricSupported, setBiometricSupported] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
   const [biometricMessage, setBiometricMessage] = useState('');
@@ -414,14 +431,12 @@ export default function EmployeePortal({
     setBiometricMessage('🔐 جاري تجهيز تسجيل البصمة...');
 
     try {
-      const token = employee?.token;
-        if (!token) throw new Error('يجب تسجيل الدخول أولاً');
 
       const optionsRes = await fetch('/api/auth/webauthn-register-options', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+
         },
         body: JSON.stringify({ empId: employee.id, companyId })
       });
@@ -456,7 +471,7 @@ export default function EmployeePortal({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+
         },
         body: JSON.stringify({
           empId: employee.id,
@@ -884,6 +899,10 @@ export default function EmployeePortal({
 
   // App owns network/cached data; an authoritative empty schedule stays empty.
   const scheduleData = schedule;
+
+  if (!passkeyStatus || passkeyStatus.scope !== passkeyScope.current || passkeyStatus.required && passkeyStatus.approvedCount === 0) {
+    return <AttendancePasskeyGate name={employee.name} status={passkeyStatus?.scope === passkeyScope.current ? passkeyStatus : null} error={passkeyStatusError} supported={biometricSupported} busy={biometricLoading} message={biometricMessage} onEnroll={() => { void startBiometricEnrollment(); }} onRefresh={() => { void refreshPasskeyStatus(); }} onLogout={onLogout} />;
+  }
 
   return (
     <div id="emp-portal" dir="rtl" className="wafr-employee min-h-screen pb-12 bg-sky-50 bg-opacity-40">
