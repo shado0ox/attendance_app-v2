@@ -59,7 +59,7 @@ const whatsappReminders = registerWhatsAppReminders(app, requireAuth, getMainDat
 app.use(express.json({ limit: '10mb' }));
 app.use((error: any, _req: Request, res: Response, next: NextFunction) => {
   if (error?.type === 'entity.too.large') {
-    return res.status(413).json({ error: 'حجم البيانات يتجاوز 10 ميجابايت. قلّل حجم شعار الشركة ثم أعد الحفظ.' });
+    return res.status(413).json({ error: _req.path.startsWith('/api/company-backup/') ? 'حجم ملف النسخة يتجاوز الحد المسموح؛ الحد الأقصى 50 MB.' : 'حجم البيانات يتجاوز 10 ميجابايت. قلّل حجم شعار الشركة ثم أعد الحفظ.' });
   }
   if (error?.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'صيغة بيانات الحفظ غير صحيحة.' });

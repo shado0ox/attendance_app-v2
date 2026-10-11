@@ -77,7 +77,7 @@ export function registerCompanyBackup(app: Express, requireAuth: any) {
     await tx.insert(schema.systemData).values({ key: stateKey(companyId), value }).onConflictDoUpdate({ target: schema.systemData.key, set: { value, updatedAt: new Date() } });
   };
   const audit = async (tx: any, auth: any, action: string, details: any) => tx.insert(schema.auditLog).values({ companyId: auth.companyId, actorId: String(auth.id || auth.username || auth.role), actorRole: auth.role, action, details });
-  const wrap = (handler: any) => async (req: any, res: any) => { try { await handler(req, res); } catch (error: any) { res.status(error.status || 400).json({ error: error.status ? error.message : error.code === '40001' ? 'تغيرت البيانات أثناء العملية؛ أعد المعاينة والمحاولة' : /النسخة|ملف|حجم|بيانات الشركة/.test(error.message || '') ? error.message : 'تعذر تنفيذ العملية؛ لم يتم تأكيد الاسترجاع' }); } };
+  const wrap = (handler: any) => async (req: any, res: any) => { try { await handler(req, res); } catch (error: any) { if (req.auth?.companyId) await cleanupFiles(req.auth.companyId).catch(() => {}); res.status(error.status || 400).json({ error: error.status ? error.message : error.code === '40001' ? 'تغيرت البيانات أثناء العملية؛ أعد المعاينة والمحاولة' : /النسخة|ملف|حجم|بيانات الشركة/.test(error.message || '') ? error.message : 'تعذر تنفيذ العملية؛ لم يتم تأكيد الاسترجاع' }); } };
   const auth = [requireAuth(['admin', 'superadmin'], false), (req: any, res: any, next: any) => {
     const requested = req.body?.companyId ?? req.query.companyId;
     if (requested !== undefined && String(requested) !== req.auth.companyId) return res.status(403).json({ error: 'النسخة خارج شركتك' }); next();
