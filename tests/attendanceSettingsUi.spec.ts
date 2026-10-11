@@ -38,3 +38,31 @@ test('a saved check-in stops foreground reminders on the next status refresh', a
   status = 'checked-in'; await page.clock.fastForward(5 * 60000); await page.waitForTimeout(100);
   await page.clock.fastForward(15 * 60000); await expect(page.getByTestId('reminder-count')).toHaveText('1');
 });
+
+test('administrator can pilot Passkey for one employee and approve or revoke a credential', async ({ page }) => {
+  let mode = 'off', employeeIds: string[] = [], approved = false;
+  await page.route('**/api/attendance-passkey/**', async route => {
+    const request = route.request(), url = request.url();
+    if (request.method() === 'POST') {
+      const body = request.postDataJSON();
+      if (url.endsWith('/credential')) approved = body.approved;
+      else { mode = body.mode; employeeIds = body.employeeIds; }
+      await route.fulfill({ json: { saved: true } });
+    } else await route.fulfill({ json: { mode, employeeIds, employees: [{ id: 'one', name: 'موظف التجربة', credentials: [{ id: 'credential', approved }] }, { id: 'two', name: 'موظف آخر', credentials: [] }] } });
+  });
+  await page.goto('/tests/ui/passkeySettings.html');
+  await page.getByLabel('تطبيق خدمة Passkey').selectOption('selected');
+  await page.getByRole('checkbox', { name: 'موظف التجربة', exact: true }).check();
+  await page.getByRole('button', { name: 'حفظ نطاق التفعيل' }).click();
+  await expect(page.getByRole('status')).toHaveText('تم الحفظ');
+  expect(employeeIds).toEqual(['one']);
+  await page.getByText('اعتماد مفاتيح الموظفين وإلغاء اعتمادها', { exact: true }).click();
+  await page.getByRole('button', { name: 'اعتماد بعد التحقق من الموظف' }).click();
+  await expect(page.getByRole('button', { name: 'إلغاء الاعتماد' })).toBeVisible();
+  await page.getByRole('button', { name: 'إلغاء الاعتماد' }).click();
+  await expect(page.getByRole('button', { name: 'اعتماد بعد التحقق من الموظف' })).toBeVisible();
+  await page.getByLabel('تطبيق خدمة Passkey').selectOption('off');
+  await page.getByRole('button', { name: 'حفظ نطاق التفعيل' }).click();
+  await expect(page.getByRole('status')).toHaveText('تم الحفظ');
+  expect(mode).toBe('off');
+});

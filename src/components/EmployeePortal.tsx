@@ -1,3 +1,4 @@
+import { punchWithPasskey } from '../lib/attendancePasskeyClient';
 import EmployeeWeekSchedule from './EmployeeWeekSchedule';
 import EmployeeSelfProfile from './EmployeeSelfProfile';
 import ElectronicRequestPanel from './ElectronicRequestPanel';
@@ -180,6 +181,12 @@ export default function EmployeePortal({
   }, [missedShiftAlert, companyId, employee.id]);
 
     const [biometricType, setBiometricType] = useState<'face' | 'fingerprint'>('face');
+  const [passkeyStatus, setPasskeyStatus] = useState<any>(null);
+  const refreshPasskeyStatus = async () => {
+    const response = await fetch('/api/attendance-passkey/status');
+    if (response.ok) setPasskeyStatus(await response.json());
+  };
+  useEffect(() => { void refreshPasskeyStatus(); }, [companyId, employee.id]);
   const [biometricSupported, setBiometricSupported] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
   const [biometricMessage, setBiometricMessage] = useState('');
@@ -261,6 +268,9 @@ export default function EmployeePortal({
     if (autoPunchBusy.current || stateRef.current.actionLoading) return false;
     autoPunchBusy.current = true; setCheckActionLoading(true); stateRef.current.actionLoading = true;
     try {
+      const policyResponse = await fetch('/api/attendance-passkey/status');
+      if (!policyResponse.ok) throw new Error('تعذر تأكيد سياسة Passkey؛ استخدم التسجيل اليدوي');
+      if ((await policyResponse.json()).required) { setAutoStatusText('مطلوب تأكيد Passkey؛ اضغط تسجيل الحضور يدويًا'); return false; }
       const second = stateRef.current.attendanceStatus === 'not-checked-in-2';
       const tr = stateRef.current.todayRecord;
       if (second && !tr?.id) return false;
@@ -420,9 +430,7 @@ export default function EmployeePortal({
       if (!optionsRes.ok) throw new Error(optionsData.error || 'فشل تجهيز طلب تسجيل البصمة');
 
       setBiometricMessage(
-        biometricType === 'face'
-          ? '📸 انظر إلى الكاميرا لإكمال تسجيل بصمة الوجه...'
-          : '👆 ضع إصبعك على المستشعر لإكمال تسجيل البصمة...'
+        'أكد إنشاء Passkey من نافذة الجهاز؛ لا نلتقط أو نرسل صورة وجهك'
       );
 
       const credential = (await navigator.credentials.create({
@@ -473,7 +481,8 @@ export default function EmployeePortal({
 
       localStorage.setItem(`biometric_enabled_${companyId}_${employee.id}`, 'true');
       setHasBiometricCredential(true);
-      setBiometricMessage('✅ تم تسجيل البصمة البيومترية بنجاح. يمكنك الآن استخدامها عند تسجيل الدخول.');
+      await refreshPasskeyStatus();
+      setBiometricMessage('تم تسجيل Passkey. استخدامه للحضور المحمي يحتاج اعتماد الإدارة.');
     } catch (e: any) {
       if (e.name === 'NotAllowedError') {
         setBiometricMessage('❌ تم إلغاء أو رفض عملية تسجيل البصمة.');
@@ -665,13 +674,9 @@ export default function EmployeePortal({
           checkInTs2: Date.now(),
           ...(lat !== null && { checkInLat2: lat, checkInLng2: lng })
         };
-        const response = await fetch('/api/attendance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updateData)
-        });
+        const response = await punchWithPasskey(updateData);
         if (!response.ok) {
-          throw new Error('فشل تسجيل حضور الفترة الثانية');
+          throw new Error((await response.json()).error || 'فشل تسجيل حضور الفترة الثانية');
         }
 
         setGeoStatus('✅ تم تسجيل حضور الفترة الثانية بنجاح اليوم!');
@@ -692,13 +697,9 @@ export default function EmployeePortal({
           ...(lat !== null && { checkInLat: lat, checkInLng: lng })
         };
 
-        const response = await fetch('/api/attendance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        const response = await punchWithPasskey(payload);
         if (!response.ok) {
-          throw new Error('فشل تسجيل الحضور');
+          throw new Error((await response.json()).error || 'فشل تسجيل الحضور');
         }
 
         setGeoStatus('✅ تم تسجيل حضورك بنجاح اليوم!');
@@ -779,13 +780,9 @@ export default function EmployeePortal({
           ...(checkoutCoords && { checkOutLat: checkoutCoords.lat, checkOutLng: checkoutCoords.lng })
         };
 
-        const response = await fetch('/api/attendance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updateData)
-        });
+        const response = await punchWithPasskey(updateData);
         if (!response.ok) {
-          throw new Error('فشل تسجيل الانصراف');
+          throw new Error((await response.json()).error || 'فشل تسجيل الانصراف');
         }
 
         setGeoStatus('✅ تم تسجيل الانصراف وحفظ السجل بنجاح.');
@@ -977,10 +974,10 @@ export default function EmployeePortal({
             <div className="text-right">
               <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
                 <ShieldCheck size={16} className="text-sky-600" />
-                <span>تفعيل البصمة البيومترية</span>
+                <span>تسجيل مفتاح Passkey</span>
               </h3>
               <p className="text-[11px] text-slate-500 mt-1 leading-5">
-                فعّل بصمة الوجه أو الإصبع على جهازك لاستخدامها لاحقاً في صفحة تسجيل الدخول.
+                أنشئ مفتاحًا باستخدام تحقق الجهاز. لتسجيل الحضور المحمي، اطلب من الإدارة اعتماد المفتاح بعد التحقق من هويتك.
               </p>
             </div>
             <div
@@ -990,37 +987,14 @@ export default function EmployeePortal({
                   : 'bg-amber-50 text-amber-700 border border-amber-100'
               }`}
             >
-              {hasBiometricCredential ? 'مفعلة' : 'غير مفعلة'}
+              {hasBiometricCredential ? 'مفتاح مسجّل؛ الاعتماد لدى الإدارة' : 'لم يُسجّل مفتاح على هذا المتصفح'}
             </div>
           </div>
 
-          <div className="flex bg-slate-100 p-1 rounded-lg mt-4 w-fit">
-            <button
-              type="button"
-              onClick={() => setBiometricType('face')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
-                biometricType === 'face' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500'
-              }`}
-            >
-              <span className="flex items-center gap-1.5">
-                <ScanFace size={13} />
-                بصمة الوجه
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setBiometricType('fingerprint')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
-                biometricType === 'fingerprint' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500'
-              }`}
-            >
-              <span className="flex items-center gap-1.5">
-                <Fingerprint size={13} />
-                بصمة الإصبع
-              </span>
-            </button>
+          <div className="mt-3 rounded-xl bg-teal-50 p-3 text-sm text-teal-900">
+            {passkeyStatus ? <p>{passkeyStatus.required ? 'تأكيد Passkey مطلوب لكل حضور وانصراف.' : 'تأكيد Passkey للحضور غير مطلوب حاليًا.'} مفاتيح معتمدة: {passkeyStatus.approvedCount} — بانتظار الاعتماد: {passkeyStatus.pendingCount}</p> : <p>جاري التحقق من سياسة الشركة…</p>}
+            <button className="mt-2 underline" onClick={() => void refreshPasskeyStatus()}>تحديث حالة الاعتماد</button>
           </div>
-
           {!biometricSupported && (
             <div className="mt-3 p-3 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl">
               هذا الجهاز أو المتصفح لا يدعم WebAuthn. جرّب Safari على iPhone أو Chrome على Android.
@@ -1048,7 +1022,7 @@ export default function EmployeePortal({
               ) : (
                 <>
                   {biometricType === 'face' ? <ScanFace size={14} /> : <Fingerprint size={14} />}
-                  <span>{hasBiometricCredential ? 'إعادة تسجيل البصمة' : 'تفعيل البصمة الآن'}</span>
+                  <span>{hasBiometricCredential ? 'تسجيل مفتاح إضافي' : 'إنشاء Passkey'}</span>
                 </>
               )}
             </button>

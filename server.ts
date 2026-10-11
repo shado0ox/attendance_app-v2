@@ -1,3 +1,4 @@
+import { registerAttendancePasskey, checkAttendancePasskey } from './src/server/attendancePasskey';
 import {employeeRequestValues} from './src/lib/employeeRequests';
 import {approvedPermissionMarkers} from './src/server/permissionMarkers';
 import {attachPermissionMarkers,ensurePermissionDays} from './src/lib/permissionMarkers';
@@ -259,7 +260,7 @@ type StoredWebAuthnCredential = {
 };
 
 const WEBAUTHN_RP_NAME = process.env.WEBAUTHN_RP_NAME || 'نظام الدوام';
-const WEBAUTHN_ORIGIN = process.env.WEBAUTHN_ORIGIN || 'http://localhost:3011';
+const WEBAUTHN_ORIGIN = (() => { try { return new URL(process.env.WEBAUTHN_ORIGIN || process.env.APP_URL || 'http://localhost:3011').origin; } catch { return 'http://localhost:3011'; } })();
 const WEBAUTHN_RP_ID =
   process.env.WEBAUTHN_RP_ID || new URL(WEBAUTHN_ORIGIN).hostname;
 
@@ -318,6 +319,7 @@ function bufferFromBase64url(value: string) {
 }
 
 registerElectronicDocumentRoutes(app, requireAuth, getMainDataByCompanyId, () => JWT_SECRET);
+registerAttendancePasskey(app, requireAuth, getMainDataByCompanyId, saveEmployeeCredentials, { rpID: WEBAUTHN_RP_ID, origin: WEBAUTHN_ORIGIN });
 const startAttendanceReminders = registerAttendancePush(app, requireAuth, getMainDataByCompanyId, companyCanLogin);
 
 // Debug DB route (development only — leaks connection details, never expose in production)
@@ -1491,6 +1493,8 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       const mainData = await getMainDataByCompanyId(companyId);
       const employee = mainData?.employees?.find((e: any) => String(e.id) === String(auth.id));
       if (!isActiveEmployee(employee)) return { status: 403, body: { error: 'حساب الموظف غير نشط' } };
+      const passkeyFailure = await checkAttendancePasskey(tx, auth, employee, req.body, field);
+      if (passkeyFailure) return passkeyFailure;
       const now = Date.now();
       const date = new Date(now).toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
       let record: any;
@@ -1524,7 +1528,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       if (!out && lat != null && lng != null) { values[base + 'Lat' + suffix] = Number(lat); values[base + 'Lng' + suffix] = Number(lng); }
       const saved = record ? await tx.update(schema.attendance).set(values).where(eq(schema.attendance.id, record.id)).returning()
         : await tx.insert(schema.attendance).values({ ...values, empId: String(auth.id), empName: employee.name, dept: employee.dept || '', date, companyId, source: req.body.automatic === true ? 'GPS تلقائي' : 'GPS', status: 'present' }).returning();
-      await audit(tx, auth, companyId, 'punch.' + field, saved[0].id, { time: now, location: location.name, lat: lat ?? null, lng: lng ?? null, automatic: req.body.automatic === true, gpsAccuracy: req.body.automatic === true ? req.body.gpsAccuracy : undefined });
+      await audit(tx, auth, companyId, 'punch.' + field, saved[0].id, { time: now, location: location.name, lat: lat ?? null, lng: lng ?? null, automatic: req.body.automatic === true, passkeyVerified: !!req.body.passkeyProof, gpsAccuracy: req.body.automatic === true ? req.body.gpsAccuracy : undefined });
       return { status: 200, body: saved[0] };
     });
     return res.status(result.status).json(result.body);
@@ -2027,10 +2031,11 @@ app.delete('/api/companies/:id', requireAuth(['superadmin'], false), async (req,
       if(!companies.length) throw attendanceError(404,'الشركة غير موجودة');
       const data=await tx.select().from(schema.systemData).where(eq(schema.systemData.key,'mainData_'+id));
       const admins=await tx.select({id:schema.admins.id,username:schema.admins.username}).from(schema.admins).where(eq(schema.admins.companyId,id));
-      const keys=['mainData_'+id,'companyPrivacy:'+id,'ownerPasswordRevision:'+id,emailVerificationQuotaKey(id),notificationStateKey(id,{role:'admin'}),notificationStateKey(id,{role:'admin',username:companies[0].adminUsername || undefined})];
+      const keys=['mainData_'+id,'companyPrivacy:'+id,'ownerPasswordRevision:'+id,'attendancePasskeyPolicy:'+id,emailVerificationQuotaKey(id),notificationStateKey(id,{role:'admin'}),notificationStateKey(id,{role:'admin',username:companies[0].adminUsername || undefined})];
       for(const employee of (data[0]?.value as any)?.employees || []) keys.push(welcomeStateKey(id,String(employee.id)),emailVerificationKey(id,String(employee.id)),employeePhotoKey(id,String(employee.id)));
       for(const admin of admins) keys.push(adminAccessKey(id,admin.id),notificationStateKey(id,{role:'admin',id:admin.id}));
       await tx.delete(schema.systemData).where(sql`${schema.systemData.key} LIKE 'attendancePush:%' AND ${schema.systemData.value}->>'companyId' = ${id}`);
+      await tx.delete(schema.systemData).where(sql`(${schema.systemData.key} LIKE 'attendancePasskeyChallenge:%' OR ${schema.systemData.key} LIKE 'attendancePasskeyProof:%') AND ${schema.systemData.value}->>'companyId' = ${id}`);
       for(const role of ['superadmin','admin']) for(const username of [undefined, 'admin']) keys.push(notificationStateKey(id,{role,username}));
       for(const table of [schema.electronicDocumentAudit,schema.electronicDocuments,schema.attendance,schema.requests,schema.registrationRequests,schema.auditLog,schema.attendanceMonths,schema.admins]) await tx.delete(table).where(eq(table.companyId,id));
       await tx.delete(schema.systemData).where(inArray(schema.systemData.key,keys));
