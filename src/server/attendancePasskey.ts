@@ -15,7 +15,7 @@ export async function readAttendancePasskeyPolicy(company: string, tx: any = db)
 export async function checkAttendancePasskey(tx: any, auth: any, employee: any, body: any, field: string) {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${policyKey(auth.companyId)}))`);
   const policy = await readAttendancePasskeyPolicy(auth.companyId, tx);
-  if (!attendancePasskeyRequired(policy, String(auth.id))) return null;
+  if (!attendancePasskeyRequired(policy, String(auth.id))) return { verified: false };
   const fail = { status: 403, body: { code: 'PASSKEY_REQUIRED', error: 'يلزم تأكيد الحضور أو الانصراف بمفتاح Passkey معتمد من الإدارة' } };
   if (body.automatic === true || typeof body.passkeyProof !== 'string' || !/^[a-f0-9]{64}$/.test(body.passkeyProof)) return fail;
   const key = 'attendancePasskeyProof:' + body.passkeyProof;
@@ -23,7 +23,7 @@ export async function checkAttendancePasskey(tx: any, auth: any, employee: any, 
   const value: any = row?.value;
   if (!value || value.companyId !== auth.companyId || value.employeeId !== String(auth.id) || value.field !== field || value.recordId !== String(body.id || '') || value.expiresAt <= Date.now() || !approvedCredentials(policy, employee).some((c: any) => c.id === value.credentialId)) return fail;
   await tx.delete(schema.systemData).where(eq(schema.systemData.key, key));
-  return null;
+  return { verified: true };
 }
 export function registerAttendancePasskey(app: any, requireAuth: any, getMain: any, saveCredentials: any, config: { rpID: string; origin: string }) {
   const employeeAuth = requireAuth(['employee'], false), adminAuth = requireAuth(['admin', 'superadmin'], false);

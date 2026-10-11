@@ -1493,8 +1493,8 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       const mainData = await getMainDataByCompanyId(companyId);
       const employee = mainData?.employees?.find((e: any) => String(e.id) === String(auth.id));
       if (!isActiveEmployee(employee)) return { status: 403, body: { error: 'حساب الموظف غير نشط' } };
-      const passkeyFailure = await checkAttendancePasskey(tx, auth, employee, req.body, field);
-      if (passkeyFailure) return passkeyFailure;
+      const passkeyResult = await checkAttendancePasskey(tx, auth, employee, req.body, field);
+      if ('status' in passkeyResult) return passkeyResult;
       const now = Date.now();
       const date = new Date(now).toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
       let record: any;
@@ -1528,7 +1528,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       if (!out && lat != null && lng != null) { values[base + 'Lat' + suffix] = Number(lat); values[base + 'Lng' + suffix] = Number(lng); }
       const saved = record ? await tx.update(schema.attendance).set(values).where(eq(schema.attendance.id, record.id)).returning()
         : await tx.insert(schema.attendance).values({ ...values, empId: String(auth.id), empName: employee.name, dept: employee.dept || '', date, companyId, source: req.body.automatic === true ? 'GPS تلقائي' : 'GPS', status: 'present' }).returning();
-      await audit(tx, auth, companyId, 'punch.' + field, saved[0].id, { time: now, location: location.name, lat: lat ?? null, lng: lng ?? null, automatic: req.body.automatic === true, passkeyVerified: !!req.body.passkeyProof, gpsAccuracy: req.body.automatic === true ? req.body.gpsAccuracy : undefined });
+      await audit(tx, auth, companyId, 'punch.' + field, saved[0].id, { time: now, location: location.name, lat: lat ?? null, lng: lng ?? null, automatic: req.body.automatic === true, passkeyVerified: passkeyResult.verified, gpsAccuracy: req.body.automatic === true ? req.body.gpsAccuracy : undefined });
       return { status: 200, body: saved[0] };
     });
     return res.status(result.status).json(result.body);
