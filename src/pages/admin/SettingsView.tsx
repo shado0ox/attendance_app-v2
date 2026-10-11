@@ -1,3 +1,4 @@
+import SettingsSection from '../../components/SettingsSection';
 import AttendancePasskeySettings from '../../components/AttendancePasskeySettings';
 import AttendanceAnalysisSettings from '../../components/AttendanceAnalysisSettings';
 import AuditLogView from '../../components/AuditLogView';
@@ -87,13 +88,19 @@ export default function SettingsView({
     if (!geoDirty) setGeoDraft(appSettings?.officeLocation || {});
   }, [appSettings?.officeLocation, geoDirty]);
   const updateGeoDraft = (next: any) => { setGeoDirty(true); setGeoDraft(next); };
+  const sectionIds = ['whatsapp', 'analysis', 'company', 'geo', 'branches', 'passkey', 'audit', 'password', 'admins', 'registrations'];
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  useEffect(() => { setExpanded({}); }, [companyId]);
+  const sectionProps = (id: string) => ({ open: !!expanded[id], onChange: (open: boolean) => setExpanded(current => ({ ...current, [id]: open })) });
   const pendingRegs = registrationRequests.filter((r) => r.status === 'pending');
 
   return (
-    <div className="flex flex-col gap-6">
-      <WhatsAppReminderSettings companyId={companyId} />
-      <AttendanceAnalysisSettings settings={appSettings} save={onUpdateSettings} />
+    <div className="flex flex-col gap-3">
+      <div className="flex gap-2 flex-wrap"><button className="border rounded-xl px-4 py-3 text-sm" onClick={() => setExpanded(Object.fromEntries(sectionIds.map(id => [id, true])))}>توسيع الكل</button><button className="border rounded-xl px-4 py-3 text-sm" onClick={() => setExpanded({})}>طي الكل</button></div>
+      <SettingsSection title="تذكيرات واتساب" {...sectionProps('whatsapp')}><WhatsAppReminderSettings companyId={companyId} /></SettingsSection>
+      <SettingsSection title="قواعد تحليل الحضور" {...sectionProps('analysis')}><AttendanceAnalysisSettings settings={appSettings} save={onUpdateSettings} /></SettingsSection>
       {/* Company Info section */}
+      <SettingsSection title="بيانات الشركة والشعار" {...sectionProps('company')}>
       <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
         <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
           <Building2 size={16} className="text-sky-500" />
@@ -156,9 +163,10 @@ export default function SettingsView({
             )}
           </div>
         </div>
-      </div>
+      </div></SettingsSection>
 
       {/* Geo Fence check-in coordinates configuration */}
+      <SettingsSection title="موقع المقر ونطاق البصمة" {...sectionProps('geo')}>
       <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
         <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
           <Crosshair size={16} className="text-sky-500 animate-pulse" />
@@ -265,14 +273,15 @@ export default function SettingsView({
         {geoSettingStatus && (
           <div className="text-[11px] font-bold text-slate-600 bg-slate-50 border p-2.5 rounded-xl">{geoSettingStatus}</div>
         )}
-      </div>
+      </div></SettingsSection>
 
-      <AttendanceLocationsEditor settings={appSettings} onSave={onUpdateSettings} />
+      <SettingsSection title="مواقع الفروع" {...sectionProps('branches')}><AttendanceLocationsEditor settings={appSettings} onSave={onUpdateSettings} /></SettingsSection>
 
-      <AttendancePasskeySettings companyId={companyId} />
-      <AuditLogView companyId={companyId} />
+      <SettingsSection title="الباس كي وتأكيد البصمة" {...sectionProps('passkey')}><AttendancePasskeySettings companyId={companyId} /></SettingsSection>
+      <SettingsSection title="سجل التعديلات" {...sectionProps('audit')}><AuditLogView companyId={companyId} /></SettingsSection>
 
       {/* General Admin Password updates */}
+      <SettingsSection title="كلمة مرور الإدارة" {...sectionProps('password')}>
       <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
         <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
           <Key size={16} className="text-sky-500" />
@@ -319,9 +328,12 @@ export default function SettingsView({
         )}
       </div>
 
+      </SettingsSection>
+
       {/* Sub Admins CRUD queue */}
+
       {admin.role === 'superadmin' && (
-        <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
+        <SettingsSection title="المسؤولون والصلاحيات" {...sectionProps('admins')}><div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
           <div className="flex justify-between items-center pb-2 border-b">
             <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
               <Shield size={16} className="text-sky-500" />
@@ -378,12 +390,12 @@ export default function SettingsView({
               ))}
             </div>
           )}
-        </div>
+        </div></SettingsSection>
       )}
 
       {/* Registration Request inbox queues */}
       {admin.role === 'superadmin' && (
-        <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
+        <SettingsSection title="طلبات التسجيل" {...sectionProps('registrations')}><div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">
           <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5 border-b pb-2">
             <UserCheck size={16} className="text-sky-500" />
             <span>طلبات التسجيل المعلقة بانتظار الاعتماد</span>
@@ -423,7 +435,7 @@ export default function SettingsView({
               </div>
             )}
           </div>
-        </div>
+        </div></SettingsSection>
       )}
     </div>
   );

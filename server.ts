@@ -28,6 +28,7 @@ import { mainDataVersion } from './src/lib/mainDataVersion';
 import { punchFields, validatePunchTransition, checkPunchLocation } from './src/lib/punchPolicy';
 import { matchAttendanceLocation } from './src/lib/attendanceLocations';
 import { registerElectronicDocumentRoutes } from './src/server/electronicDocuments';
+import { registerCompanyBackup } from './src/server/companyBackup';
 import { registerWhatsAppReminders } from './src/server/whatsappReminders';
 import { registerAttendancePush } from './src/server/attendancePush';
 import dotenv from 'dotenv';
@@ -53,6 +54,7 @@ import {
 const app = express();
 app.use('/api', (_req,res,next)=>{res.set('Cache-Control','private, no-store');res.vary('Authorization');next();});
 // Main data includes the schedule and an optional base64 company logo.
+registerCompanyBackup(app, requireAuth);
 const whatsappReminders = registerWhatsAppReminders(app, requireAuth, getMainDataByCompanyId, companyCanLogin, () => process.env.WHATSAPP_ENCRYPTION_KEY || JWT_SECRET);
 app.use(express.json({ limit: '10mb' }));
 app.use((error: any, _req: Request, res: Response, next: NextFunction) => {
@@ -1388,7 +1390,7 @@ app.get('/api/system-health', requireAuth(['admin', 'superadmin']), async (req,r
     mail={available:true,...mailHealthRows(employees,entries.filter(e=>e.kind==='welcome'),entries.filter(e=>e.kind==='verification'),auth.role==='superadmin'||access.permissions.canManageEmployees)};
   }catch{}finally{client?.release();}
   const errors=(Array.isArray(errorLog?.items)?errorLog.items:[]).filter((e:any)=>e.companyId===companyId).slice(0,20).map((e:any)=>({route:e.route,method:e.method,status:e.status,at:e.at}));
-  return res.json({generatedAt:new Date().toISOString(),database,backup,version,mail:{...mail,configured:!!(process.env.RESEND_API_KEY && process.env.RESEND_FROM && process.env.APP_URL),provider:'Resend',deliveryConfirmed:false},errors,permissions:{canBackup:auth.role==='superadmin',canRetryWelcome:auth.role==='superadmin'||access.permissions.canManageEmployees}});
+  return res.json({generatedAt:new Date().toISOString(),database,backup,version,mail:{...mail,configured:!!(process.env.RESEND_API_KEY && process.env.RESEND_FROM && process.env.APP_URL),provider:'Resend',deliveryConfirmed:false},errors,permissions:{canBackup:auth.role==='superadmin',canCompanyBackup:auth.role==='superadmin' || (access.departmentIds===null && ['canManageSettings','canManageEmployees','canEditSchedule','canManageDepts','canApproveRequests','canViewReports'].every(p=>access.permissions[p])),canRetryWelcome:auth.role==='superadmin'||access.permissions.canManageEmployees}});
 });
 for(const [endpoint,job] of [['backup',runBackup],['verify-restore',verifyBackupRestore]] as const) app.post('/api/system-health/'+endpoint,requireAuth(['superadmin']),async(_req,res)=>{try{await job();return res.json({success:true});}catch(error:any){return res.status(error.status || 503).json({error:error.status ? error.message : 'تعذر تأكيد العملية'});}});
 
@@ -2036,6 +2038,7 @@ app.delete('/api/companies/:id', requireAuth(['superadmin'], false), async (req,
       const keys=['mainData_'+id,'companyPrivacy:'+id,'ownerPasswordRevision:'+id,'attendancePasskeyPolicy:'+id,emailVerificationQuotaKey(id),notificationStateKey(id,{role:'admin'}),notificationStateKey(id,{role:'admin',username:companies[0].adminUsername || undefined})];
       for(const employee of (data[0]?.value as any)?.employees || []) keys.push(welcomeStateKey(id,String(employee.id)),emailVerificationKey(id,String(employee.id)),employeePhotoKey(id,String(employee.id)));
       for(const admin of admins) keys.push(adminAccessKey(id,admin.id),notificationStateKey(id,{role:'admin',id:admin.id}));
+      await tx.delete(schema.systemData).where(sql`${schema.systemData.key} LIKE 'companyBackup%' AND ${schema.systemData.value}->>'companyId' = ${id}`);
       await tx.delete(schema.systemData).where(sql`${schema.systemData.key} LIKE 'whatsapp%' AND ${schema.systemData.value}->>'companyId' = ${id}`);
       await tx.delete(schema.systemData).where(sql`${schema.systemData.key} LIKE 'attendancePush:%' AND ${schema.systemData.value}->>'companyId' = ${id}`);
       await tx.delete(schema.systemData).where(sql`(${schema.systemData.key} LIKE 'attendancePasskeyChallenge:%' OR ${schema.systemData.key} LIKE 'attendancePasskeyProof:%') AND ${schema.systemData.value}->>'companyId' = ${id}`);
