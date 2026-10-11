@@ -2,6 +2,7 @@ import AttendanceAnalysisSettings from '../../components/AttendanceAnalysisSetti
 import AuditLogView from '../../components/AuditLogView';
 import AttendanceLocationsEditor from '../../components/AttendanceLocationsEditor';
 import AttendanceLocationMap from '../../components/AttendanceLocationMap';
+import WhatsAppReminderSettings from '../../components/WhatsAppReminderSettings';
 import { useState, useEffect, type ChangeEvent } from 'react';
 import {
   Building2, UploadCloud, X, Crosshair, Key, Save, Shield, Plus, Edit, Trash2, UserCheck,
@@ -89,6 +90,7 @@ export default function SettingsView({
 
   return (
     <div className="flex flex-col gap-6">
+      <WhatsAppReminderSettings companyId={companyId} />
       <AttendanceAnalysisSettings settings={appSettings} save={onUpdateSettings} />
       {/* Company Info section */}
       <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">

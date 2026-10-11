@@ -60,6 +60,7 @@ export function mergeAdminData(current: any, incoming: any, access: AdminAccess)
   return next;
 }
 export function allowedAdminRoute(access: AdminAccess, method: string, route: string) {
+  if (route.startsWith('/api/whatsapp/')) return access.departmentIds === null && access.permissions.canManageSettings;
   const read = method === 'GET';
   if (route === '/api/system-health') return read && access.departmentIds === null && access.permissions.canManageSettings;
   if (route === '/api/notifications' || route === '/api/notifications/read') return (read || (route.endsWith('/read') && method === 'POST')) && ['canApproveRequests', 'canViewReports', 'canEditSchedule', 'canPrint', 'canManageDepts'].some(p => access.permissions[p]);
