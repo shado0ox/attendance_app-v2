@@ -9,6 +9,7 @@ import express from 'express';
 import { db, schema, pool } from '../src/db/index';
 import { eq, sql } from 'drizzle-orm';
 import { registerWhatsAppReminders } from '../src/server/whatsappReminders';
+import { fullAdminAccess } from '../src/lib/adminAccess';
 import { whatsappDefaults } from '../src/lib/whatsappReminders';
 const directory = await fs.mkdtemp(path.join(tmpdir(), 'whatsapp-ci-'));
 const secret = 'whatsapp-ci-secret', companyId = 'whatsapp-ci-a', otherCompany = 'whatsapp-ci-b', employeeId = 'whatsapp-ci-employee';
@@ -35,11 +36,14 @@ try {
   const [stored] = await db.select().from(schema.systemData).where(eq(schema.systemData.key, 'whatsappConfig:' + companyId));
   assert.ok(!JSON.stringify(stored.value).includes('token-sensitive'), 'database secret encrypted');
   assert.equal((await request('settings', { ...config, phoneNumberId: '123456789' }, otherCompany)).status, 400, 'sender cannot be shared between tenants');
-  // Limited admin cannot view credentials or logs even within their company.
-  await db.insert(schema.systemData).values({ key: 'adminAccess:' + companyId + ':limited', value: { permissions: { canManageSettings: false }, departmentIds: null } }).onConflictDoUpdate({ target: schema.systemData.key, set: { value: { permissions: { canManageSettings: false }, departmentIds: null } } });
-  main.settings.subAdmins = [{ id: 'limited', username: 'limited' }];
-  // Use policy function/unit coverage for limited admins; server also validates their actual account.
-  assert.equal((await request('logs', undefined, companyId, 'admin', 'limited')).status, 403);
+  const [settingsAdmin, limitedAdmin] = await db.insert(schema.admins).values([
+    { name: 'Settings admin', username: 'whatsapp-ci-settings', password: 'ci-only-hash', companyId },
+    { name: 'Limited admin', username: 'whatsapp-ci-limited', password: 'ci-only-hash', companyId },
+  ]).returning();
+  const limited = fullAdminAccess(); limited.permissions.canManageSettings = false;
+  for (const [admin, access] of [[settingsAdmin, fullAdminAccess()], [limitedAdmin, limited]] as const) await db.insert(schema.systemData).values({ key: 'adminAccess:' + companyId + ':' + admin.id, value: access });
+  assert.equal((await request('settings', undefined, companyId, 'admin', String(settingsAdmin.id))).status, 200, 'company settings administrator allowed');
+  assert.equal((await request('logs', undefined, companyId, 'admin', String(limitedAdmin.id))).status, 403, 'existing limited administrator denied');
   const sent: any[] = [];
   let fail = false;
   const send: any = async (_settings: any, token: string, payload: any) => { assert.equal(token, 'token-sensitive'); sent.push(payload); if (fail) throw new Error('META_190'); return 'wamid.ci.' + sent.length; };
@@ -82,9 +86,10 @@ try {
 } finally {
   Date.now = originalNow; child.kill('SIGTERM');
   if (testServer) await new Promise<void>(resolve => testServer.close(() => resolve()));
-  await db.delete(schema.systemData).where(sql`${schema.systemData.key} IN ('mainData_whatsapp-ci-a','mainData_whatsapp-ci-b','adminAccess:whatsapp-ci-a:limited') OR ${schema.systemData.value}->>'companyId' IN ('whatsapp-ci-a','whatsapp-ci-b')`);
+  await db.delete(schema.systemData).where(sql`${schema.systemData.key} IN ('mainData_whatsapp-ci-a','mainData_whatsapp-ci-b') OR ${schema.systemData.key} LIKE 'adminAccess:whatsapp-ci-a:%' OR ${schema.systemData.value}->>'companyId' IN ('whatsapp-ci-a','whatsapp-ci-b')`);
   await db.delete(schema.auditLog).where(sql`${schema.auditLog.companyId} IN ('whatsapp-ci-a','whatsapp-ci-b')`);
   await db.delete(schema.attendance).where(sql`${schema.attendance.companyId} IN ('whatsapp-ci-a','whatsapp-ci-b')`);
+  await db.delete(schema.admins).where(eq(schema.admins.companyId, companyId));
   await db.delete(schema.companies).where(sql`${schema.companies.id} IN ('whatsapp-ci-a','whatsapp-ci-b')`);
   await pool.end(); await fs.rm(directory, { recursive: true, force: true });
 }

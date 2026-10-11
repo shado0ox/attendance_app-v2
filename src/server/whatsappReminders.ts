@@ -37,7 +37,9 @@ export function registerWhatsAppReminders(app: Express, requireAuth: any, getMai
         const value = await read(companyId, tx); await saveConfig(tx, value); return value;
       });
       const data = await getMain(companyId);
-      res.json({ ...view(config), employees: (data?.employees || []).map((e: any) => ({ id: String(e.id), name: e.name })) });
+      const employees = (data?.employees || []).map((e: any) => ({ id: String(e.id), name: e.name }));
+      const ids = new Set(employees.map((e: any) => e.id));
+      res.json({ ...view(config), employeeIds: config.settings.employeeIds.filter(id => ids.has(id)), contacts: Object.fromEntries(Object.entries(config.settings.contacts).filter(([id]) => ids.has(id))), employees });
     } catch { res.status(503).json({ error: 'تعذر تحميل إعدادات واتساب' }); }
   });
   app.post('/api/whatsapp/settings', admin, async (req, res) => {
@@ -191,7 +193,12 @@ export function registerWhatsAppReminders(app: Express, requireAuth: any, getMai
           // Claims commit before any external request: a crash never resends the same slot.
           for (const job of jobs) {
             const fresh = await read(companyId);
-            if (!fresh.settings.enabled || !dueWhatsAppReminders(await getMain(companyId), employeeId, await db.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, companyId), eq(schema.attendance.empId, employeeId), sql`${schema.attendance.date} BETWEEN ${from} AND ${to}`)), [...leaves, ...excusedForEmployee(absences, employeeId, from, to)], fresh.settings, Date.now()).some(r => r.key === job.reminder.key)) { await updateLog(job.key, { status: 'cancelled' }); continue; }
+            const [freshRecords, freshLeaves, freshAbsences] = await Promise.all([
+              db.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, companyId), eq(schema.attendance.empId, employeeId), sql`${schema.attendance.date} BETWEEN ${from} AND ${to}`)),
+              db.select().from(schema.requests).where(and(eq(schema.requests.companyId, companyId), eq(schema.requests.empId, employeeId), eq(schema.requests.type, 'leave'), eq(schema.requests.status, 'approved'), sql`${schema.requests.date} BETWEEN ${from} AND ${to}`)),
+              db.select().from(schema.electronicDocuments).where(and(eq(schema.electronicDocuments.companyId, companyId), eq(schema.electronicDocuments.employeeId, employeeId), eq(schema.electronicDocuments.status, 'approved'))),
+            ]);
+            if (!fresh.settings.enabled || !ready(fresh) || !await companyActive(companyId) || !dueWhatsAppReminders(await getMain(companyId), employeeId, freshRecords, [...freshLeaves, ...excusedForEmployee(freshAbsences, employeeId, from, to)], fresh.settings, Date.now()).some(r => r.key === job.reminder.key)) { await updateLog(job.key, { status: 'cancelled' }); continue; }
             await dispatch(fresh, employee, fresh.settings.contacts[employeeId].phone, job.reminder.kind, job.reminder.shiftName, job.key);
           }
         }
