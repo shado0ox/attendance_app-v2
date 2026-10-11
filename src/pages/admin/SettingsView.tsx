@@ -1,3 +1,4 @@
+import WhatsAppReminderSettings from '../../components/WhatsAppReminderSettings';
 import AttendanceAnalysisSettings from '../../components/AttendanceAnalysisSettings';
 import AuditLogView from '../../components/AuditLogView';
 import AttendanceLocationsEditor from '../../components/AttendanceLocationsEditor';
@@ -89,6 +90,7 @@ export default function SettingsView({
 
   return (
     <div className="flex flex-col gap-6">
+      <WhatsAppReminderSettings companyId={companyId} />
       <AttendanceAnalysisSettings settings={appSettings} save={onUpdateSettings} />
       {/* Company Info section */}
       <div className="p-6 bg-white border border-sky-100 rounded-2xl shadow-sm flex flex-col gap-4">

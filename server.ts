@@ -27,6 +27,7 @@ import { mainDataVersion } from './src/lib/mainDataVersion';
 import { punchFields, validatePunchTransition, checkPunchLocation } from './src/lib/punchPolicy';
 import { matchAttendanceLocation } from './src/lib/attendanceLocations';
 import { registerElectronicDocumentRoutes } from './src/server/electronicDocuments';
+import { registerWhatsAppReminders } from './src/server/whatsappReminders';
 import { registerAttendancePush } from './src/server/attendancePush';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -51,6 +52,7 @@ import {
 const app = express();
 app.use('/api', (_req,res,next)=>{res.set('Cache-Control','private, no-store');res.vary('Authorization');next();});
 // Main data includes the schedule and an optional base64 company logo.
+const whatsappReminders = registerWhatsAppReminders(app, requireAuth, getMainDataByCompanyId, companyCanLogin, () => process.env.WHATSAPP_ENCRYPTION_KEY || JWT_SECRET);
 app.use(express.json({ limit: '10mb' }));
 app.use((error: any, _req: Request, res: Response, next: NextFunction) => {
   if (error?.type === 'entity.too.large') {
@@ -2030,6 +2032,7 @@ app.delete('/api/companies/:id', requireAuth(['superadmin'], false), async (req,
       const keys=['mainData_'+id,'companyPrivacy:'+id,'ownerPasswordRevision:'+id,emailVerificationQuotaKey(id),notificationStateKey(id,{role:'admin'}),notificationStateKey(id,{role:'admin',username:companies[0].adminUsername || undefined})];
       for(const employee of (data[0]?.value as any)?.employees || []) keys.push(welcomeStateKey(id,String(employee.id)),emailVerificationKey(id,String(employee.id)),employeePhotoKey(id,String(employee.id)));
       for(const admin of admins) keys.push(adminAccessKey(id,admin.id),notificationStateKey(id,{role:'admin',id:admin.id}));
+      await tx.delete(schema.systemData).where(sql`${schema.systemData.key} LIKE 'whatsapp%' AND ${schema.systemData.value}->>'companyId' = ${id}`);
       await tx.delete(schema.systemData).where(sql`${schema.systemData.key} LIKE 'attendancePush:%' AND ${schema.systemData.value}->>'companyId' = ${id}`);
       for(const role of ['superadmin','admin']) for(const username of [undefined, 'admin']) keys.push(notificationStateKey(id,{role,username}));
       for(const table of [schema.electronicDocumentAudit,schema.electronicDocuments,schema.attendance,schema.requests,schema.registrationRequests,schema.auditLog,schema.attendanceMonths,schema.admins]) await tx.delete(table).where(eq(table.companyId,id));
@@ -2050,6 +2053,7 @@ async function startServer() {
   await migrateCompanyCodes(db);
   await ensureJwtSecret();
   startAttendanceReminders.start();
+  whatsappReminders.start();
 
   // Serve only this public association file; Express otherwise ignores dot-directories.
   app.get('/.well-known/assetlinks.json', (_req, res) => {

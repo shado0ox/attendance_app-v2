@@ -49,5 +49,6 @@ jobs:
       - run: node --import tsx tests/employeeSelfService.integration.ts
       - run: node --import tsx tests/electronicDocuments.integration.ts
       - run: node --import tsx tests/attendancePush.integration.ts
+      - run: node --import tsx tests/whatsappReminders.integration.ts
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test --config playwright.documents.config.ts
