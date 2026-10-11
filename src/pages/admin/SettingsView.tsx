@@ -1,8 +1,8 @@
-import WhatsAppReminderSettings from '../../components/WhatsAppReminderSettings';
 import AttendanceAnalysisSettings from '../../components/AttendanceAnalysisSettings';
 import AuditLogView from '../../components/AuditLogView';
 import AttendanceLocationsEditor from '../../components/AttendanceLocationsEditor';
 import AttendanceLocationMap from '../../components/AttendanceLocationMap';
+import WhatsAppReminderSettings from '../../components/WhatsAppReminderSettings';
 import { useState, useEffect, type ChangeEvent } from 'react';
 import {
   Building2, UploadCloud, X, Crosshair, Key, Save, Shield, Plus, Edit, Trash2, UserCheck,
