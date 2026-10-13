@@ -1,6 +1,8 @@
+import AppInstallPrompt from './components/AppInstallPrompt';
+import { useAppInstallation } from './hooks/useAppInstallation';
 import { useState, useEffect, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { Loader, Key, X, AlertCircle, Smartphone } from 'lucide-react';
+import { Loader, Key, X, AlertCircle } from 'lucide-react';
 
 import LoginScreen from './components/LoginScreen';
 import AdminPortal from './components/AdminPortal';
@@ -141,57 +143,7 @@ export default function App() {
     });
   };
 
-  // PWA & Mobile Installation Prompt helpers
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showInstallBanner, setShowInstallBanner] = useState<boolean>(false);
-  const [isMobileDevice, setIsMobileDevice] = useState<boolean>(false);
-
-  useEffect(() => {
-    const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera;
-    const isMobile = /android|iphone|ipad|ipod|windows phone/i.test(userAgent);
-    setIsMobileDevice(isMobile);
-
-    const handleBeforeInstallOption = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      const dismissed = localStorage.getItem('pwa_banner_dismissed_v2');
-      if (!dismissed) {
-        setShowInstallBanner(true);
-      }
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallOption);
-
-    // If standalone display mode
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-      setShowInstallBanner(false);
-    }
-
-    const dismissed = localStorage.getItem('pwa_banner_dismissed_v2');
-    if (isMobile && !dismissed) {
-      setShowInstallBanner(true);
-    }
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallOption);
-    };
-  }, []);
-
-  const handleInstallApp = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      console.log('PWA installation accepted by user');
-    }
-    setDeferredPrompt(null);
-    setShowInstallBanner(false);
-  };
-
-  const dismissInstallBanner = () => {
-    localStorage.setItem('pwa_banner_dismissed_v2', 'true');
-    setShowInstallBanner(false);
-  };
+  const installation = useAppInstallation();
 
   const [companiesList, setCompaniesList] = useState<any[]>([]);
   const [companyId, setCompanyId] = useState<string>(() => {
@@ -598,9 +550,10 @@ export default function App() {
   }
 
   return (
-    <div dir="rtl" className="font-tajawal text-slate-800 transition-all select-none">
+    <div dir="rtl" className="app-layout font-tajawal text-slate-800 transition-all select-none">
       
       {session.role !== 'employee' && <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="fixed bottom-2 left-2 z-40 px-2 py-1 rounded bg-white/90 border text-xs">الخصوصية</a>}
+      {!location.pathname.startsWith('/document-approval/') && <AppInstallPrompt installation={installation} employee={session.role === 'employee'} />}
       <SystemUpdateNotice blocked={saving || !!saveError || saveConflict || unsaved.current}/>
       {(saving || saveError) && (
         <div role="status" className="sticky top-0 z-[120] p-3 bg-amber-50 border-b border-amber-200 text-sm text-center">
@@ -802,41 +755,7 @@ export default function App() {
         </div>
       )}
 
-      {/* PWA Mobile Installation First-Time Banner */}
-      {showInstallBanner && (
-        <div style={session.role === 'employee' ? {bottom: 'calc(104px + env(safe-area-inset-bottom))'} : undefined} className="fixed bottom-4 left-4 right-4 z-[999] p-4 bg-white border border-sky-100 rounded-2xl shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-fade-in text-right max-w-lg mx-auto" dir="rtl">
-          <div className="flex gap-3 items-center">
-            <img src="/icons/icon-192.png" alt="أيقونة وفر دوام" width="48" height="48" className="w-12 h-12 rounded-xl flex-shrink-0" />
-            <div>
-              <h4 className="text-xs font-bold text-slate-800">تثبيت تطبيق وفر دوام</h4>
-              <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
-                تصفح أسرع، استهلاك أقل للبيانات، ووصول مباشر لجدولك والدخول للشاشة الرئيسية!
-              </p>
-            </div>
-          </div>
-          <div className="flex gap-2 w-full sm:w-auto justify-end">
-            {deferredPrompt ? (
-              <button
-                onClick={handleInstallApp}
-                className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-[10px] font-bold shadow-sm transition-all whitespace-nowrap"
-              >
-                تثبيت التطبيق
-              </button>
-            ) : (
-              <div className="text-[10px] text-indigo-700 font-bold bg-indigo-50 border border-indigo-100 px-3 py-2 rounded-xl whitespace-nowrap">
-                📲 للآيفون: اضغط "مشاركة" ثم "إضافة للشاشة الرئيسية"
-              </div>
-            )}
-            <button
-              onClick={dismissInstallBanner}
-              className="p-2 text-slate-400 hover:bg-slate-50 rounded-xl"
-              title="إغلاق التنبيه"
-            >
-              <X size={15} />
-            </button>
-          </div>
-        </div>
-      )}
+
     </div>
   );
 }

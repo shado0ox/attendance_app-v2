@@ -265,3 +265,11 @@ body {
 .employee-attendance-settings .attendance-reminder-row input[type="checkbox"] { width: 40px; height: 20px; }
 .employee-attendance-settings .attendance-reminder-row input[type="checkbox"]::before { width: 16px; height: 16px; }
 .employee-attendance-settings .attendance-reminder-row input[type="checkbox"]:checked::before { transform: translateX(20px); }
+
+/* Compact install entry points; keep the employee navigation and dialog reachable. */
+.app-layout:has(.app-install-fab) { padding-bottom: 80px; }
+.app-install-top { background: #fffdf8; border-color: #eadfca; position: static; }
+.app-install-dialog::backdrop { background: rgb(15 23 42 / .55); backdrop-filter: blur(4px); }
+.app-install-dialog { max-height: 85vh; color: #0f172a; background: white; }
+@media (max-width: 360px) { .app-install-top { padding-inline: 10px; gap: 8px; } .app-install-top button { padding-inline: 10px; font-size: 12px; } }
+@media print { .app-install-top, .app-install-fab, .app-install-dialog { display: none !important; } .app-layout:has(.app-install-fab) { padding-bottom: 0; } }

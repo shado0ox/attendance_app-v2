@@ -137,3 +137,41 @@ test('company backup requires preview and explicit confirmation before replaceme
   await expect(page.getByRole('button', { name: 'تنزيل نسخة ما قبل آخر استرجاع' })).toBeVisible();
   await expect(page.getByText('تم استرجاع بيانات الشركة.', { exact: true })).toBeVisible();
 });
+test('Get banner stays above content, closes independently and opens illustrated install steps', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, 'userAgent', { get: () => 'iPhone Safari' }));
+  await page.route('**/api/app-installation', route => route.fulfill({ json: { appStoreUrl: '', playStoreUrl: '' } }));
+  await page.goto('/tests/ui/installGuide.html');
+  const banner = page.getByRole('complementary', { name: 'تنزيل تطبيق وفر دوام' });
+  const bannerBox = await banner.boundingBox(), contentBox = await page.getByTestId('page-content').boundingBox();
+  expect(bannerBox!.y + bannerBox!.height).toBeLessThanOrEqual(contentBox!.y);
+  expect(await banner.evaluate(element => getComputedStyle(element).position)).toBe('static');
+  await page.getByRole('button', { name: 'تنزيل التطبيق', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'تنزيل وفر دوام' }); await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('img')).toHaveCount(3); await expect(dialog.getByText('اضغط مشاركة', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape'); await expect(dialog).not.toBeVisible();
+  await page.getByRole('button', { name: 'إخفاء رسالة تنزيل التطبيق' }).click(); await expect(banner).not.toBeVisible();
+  const fixed = page.getByRole('button', { name: 'تنزيل التطبيق — الزر الثابت', exact: true }); await fixed.click(); await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Android', exact: true }).click(); await expect(dialog.getByText('اختر تثبيت التطبيق', { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'إغلاق شرح التنزيل' }).click();
+  const fixedBox = await fixed.boundingBox(), navBox = await page.getByTestId('employee-nav').boundingBox(); expect(fixedBox!.y + fixedBox!.height).toBeLessThan(navBox!.y);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+test('Get opens the configured device store and installed app hides both prompts', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, 'userAgent', { get: () => 'Android Chrome' }));
+  const url = 'https://play.google.com/store/apps/details?id=com.wafr.attendance';
+  await page.route('**/api/app-installation', route => route.fulfill({ json: { appStoreUrl: '', playStoreUrl: url } }));
+  await page.route('https://play.google.com/**', route => route.fulfill({ body: '<p>Store</p>', contentType: 'text/html' }));
+  await page.goto('/tests/ui/installGuide.html'); await page.getByRole('button', { name: 'تنزيل التطبيق', exact: true }).click(); await expect(page).toHaveURL(url);
+  await page.goto('/tests/ui/installGuide.html'); await page.evaluate(() => window.dispatchEvent(new Event('appinstalled')));
+  await expect(page.getByRole('button', { name: 'تنزيل التطبيق — الزر الثابت', exact: true })).not.toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'تنزيل تطبيق وفر دوام' })).not.toBeVisible();
+});
+test('Android native install prompt is consumed once and dismissal leaves manual guidance available', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, 'userAgent', { get: () => 'Android Chrome' }));
+  await page.route('**/api/app-installation', route => route.fulfill({ json: { appStoreUrl: '', playStoreUrl: '' } }));
+  await page.goto('/tests/ui/installGuide.html');
+  await page.evaluate(() => { (window as any).promptCount = 0; const event = new Event('beforeinstallprompt', { cancelable: true }); Object.assign(event, { prompt: async () => { (window as any).promptCount++; }, userChoice: Promise.resolve({ outcome: 'dismissed' }) }); window.dispatchEvent(event); });
+  await page.getByRole('button', { name: 'تنزيل التطبيق', exact: true }).click(); await page.getByRole('button', { name: 'تثبيت الآن من المتصفح' }).click();
+  await expect(page.getByRole('status')).toContainText('يمكنك التثبيت لاحقًا'); expect(await page.evaluate(() => (window as any).promptCount)).toBe(1);
+  await expect(page.getByRole('button', { name: 'تثبيت الآن من المتصفح' })).not.toBeVisible();
+});
