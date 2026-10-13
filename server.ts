@@ -1,3 +1,4 @@
+import { registerAppInstallation } from './src/server/appInstallation';
 import { registerAttendancePasskey, checkAttendancePasskey } from './src/server/attendancePasskey';
 import {employeeRequestValues} from './src/lib/employeeRequests';
 import {approvedPermissionMarkers} from './src/server/permissionMarkers';
@@ -322,6 +323,7 @@ function bufferFromBase64url(value: string) {
   return Buffer.from(value, 'base64url');
 }
 
+registerAppInstallation(app, requireAuth);
 registerElectronicDocumentRoutes(app, requireAuth, getMainDataByCompanyId, () => JWT_SECRET);
 registerAttendancePasskey(app, requireAuth, getMainDataByCompanyId, saveEmployeeCredentials, { rpID: WEBAUTHN_RP_ID, origin: WEBAUTHN_ORIGIN });
 const startAttendanceReminders = registerAttendancePush(app, requireAuth, getMainDataByCompanyId, companyCanLogin);

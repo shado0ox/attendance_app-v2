@@ -1,0 +1,11 @@
+import { useEffect, useState } from 'react';
+import { emptyAppStoreLinks } from '../lib/appInstallation';
+export default function AppInstallationSettings() {
+  const [links, setLinks] = useState(emptyAppStoreLinks), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [loaded, setLoaded] = useState(false);
+  useEffect(() => { const controller = new AbortController(); fetch('/api/app-installation', { signal: controller.signal }).then(async r => { if (!r.ok) throw new Error('تعذر تحميل الروابط'); const data = await r.json(); if (!controller.signal.aborted) { setLinks(data); setLoaded(true); } }).catch(e => { if (!controller.signal.aborted) setMessage(e.message); }); return () => controller.abort(); }, []);
+  return <section className="p-4 space-y-4" dir="rtl"><p className="text-sm text-slate-600">اترك الروابط فارغة الآن ليظهر شرح التثبيت من المتصفح. بعد نشر التطبيق، أضف رابط المتجر؛ زر تنزيل التطبيق يفتح المتجر المناسب للجهاز. الإعداد موحد لجميع الشركات وصفحة الدخول.</p>
+    <label className="block">رابط App Store<input className="block border rounded-xl p-3 w-full mt-2" dir="ltr" type="url" value={links.appStoreUrl} onChange={e => setLinks({ ...links, appStoreUrl: e.target.value })} placeholder="https://apps.apple.com/sa/app/…/id…" /></label>
+    <label className="block">رابط Google Play<input className="block border rounded-xl p-3 w-full mt-2" dir="ltr" type="url" value={links.playStoreUrl} onChange={e => setLinks({ ...links, playStoreUrl: e.target.value })} placeholder="https://play.google.com/store/apps/details?id=…" /></label>
+    <button disabled={!loaded || busy} className="bg-teal-700 text-white px-4 py-3 rounded-xl disabled:opacity-50" onClick={async () => { setBusy(true); setMessage(''); try { const r = await fetch('/api/app-installation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(links) }); const data = await r.json(); if (!r.ok) throw new Error(data.error); setLinks(data); window.dispatchEvent(new Event('app-installation-updated')); setMessage('تم حفظ روابط تنزيل التطبيق'); } catch (e: any) { setMessage(e.message); } finally { setBusy(false); } }}>حفظ روابط المتاجر</button><p role="status" className="text-sm">{message}</p>
+  </section>;
+}
