@@ -1,0 +1,60 @@
+name: iOS Mac build
+on:
+  pull_request:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-build.yml'
+  workflow_dispatch:
+    inputs:
+      run_simulator:
+        description: 'Boot an iPhone simulator and capture a screenshot (optional; requires an available runtime)'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  simulator:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Xcode and project
+        run: |
+          xcodebuild -version
+          plutil -lint ios/WafrDawam/WafrDawam/Info.plist ios/WafrDawam/WafrDawam/PrivacyInfo.xcprivacy ios/WafrDawam/WafrDawam.xcodeproj/project.pbxproj
+          xcodebuild -list -project ios/WafrDawam/WafrDawam.xcodeproj
+      - name: Check portal origin policy
+        run: |
+          swiftc ios/WafrDawam/WafrDawam/AppConfiguration.swift ios/Tests/main.swift -o "$RUNNER_TEMP/wafr-ios-policy"
+          "$RUNNER_TEMP/wafr-ios-policy"
+      - name: Build unsigned simulator application
+        run: |
+          xcodebuild -project ios/WafrDawam/WafrDawam.xcodeproj -scheme WafrDawam -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/wafr-ios-build" CODE_SIGNING_ALLOWED=NO build
+      - name: Build unsigned device application
+        run: |
+          xcodebuild -project ios/WafrDawam/WafrDawam.xcodeproj -scheme WafrDawam -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/wafr-ios-device" CODE_SIGNING_ALLOWED=NO build
+      - name: Launch on an iPhone simulator
+        if: github.event_name == 'workflow_dispatch' && inputs.run_simulator
+        timeout-minutes: 5
+        run: |
+          xcrun simctl list devices available --json > "$RUNNER_TEMP/wafr-ios-devices.json"
+          WAFR_SIMULATOR_ID=$(python3 -c 'import json,os; d=json.load(open(os.environ["RUNNER_TEMP"]+"/wafr-ios-devices.json")); print(next(v["udid"] for runtime,devices in d["devices"].items() if ".iOS-" in runtime for v in devices if v["name"].startswith("iPhone") and v["isAvailable"]))')
+          xcrun simctl boot "$WAFR_SIMULATOR_ID"
+          xcrun simctl bootstatus "$WAFR_SIMULATOR_ID" -b
+          xcrun simctl install "$WAFR_SIMULATOR_ID" "$RUNNER_TEMP/wafr-ios-build/Build/Products/Debug-iphonesimulator/WafrDawam.app"
+          xcrun simctl launch "$WAFR_SIMULATOR_ID" com.xshadox.wafrdawam
+          sleep 5
+          xcrun simctl io "$WAFR_SIMULATOR_ID" screenshot "$RUNNER_TEMP/WafrDawam-Simulator.png"
+      - name: Package simulator and source for Mac
+        run: |
+          mkdir -p "$RUNNER_TEMP/wafr-ios-artifact"
+          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/wafr-ios-build/Build/Products/Debug-iphonesimulator/WafrDawam.app" "$RUNNER_TEMP/wafr-ios-artifact/WafrDawam-Simulator.zip"
+          ditto -c -k --keepParent ios "$RUNNER_TEMP/wafr-ios-artifact/WafrDawam-Xcode-Source.zip"
+          if [ -f "$RUNNER_TEMP/WafrDawam-Simulator.png" ]; then cp "$RUNNER_TEMP/WafrDawam-Simulator.png" "$RUNNER_TEMP/wafr-ios-artifact/"; fi
+          cp docs/ios-mac-build.md "$RUNNER_TEMP/wafr-ios-artifact/README-ar.md"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WafrDawam-iOS-Mac
+          path: ${{ runner.temp }}/wafr-ios-artifact/
+          retention-days: 30
+          if-no-files-found: error

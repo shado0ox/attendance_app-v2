@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyAppStoreLinks, installPlatform, parseAppStoreLinks, storeForPlatform } from '../src/lib/appInstallation';
+import { emptyAppStoreLinks, installPlatform, isNativeIOSApp, parseAppStoreLinks, storeForPlatform } from '../src/lib/appInstallation';
 test('installation platform recognizes iPhone, Android and iPad desktop browser user agent', () => {
   assert.equal(installPlatform('iPhone'), 'ios'); assert.equal(installPlatform('Android'), 'android'); assert.equal(installPlatform('Macintosh', 5), 'ios'); assert.equal(installPlatform('Macintosh', 0), 'other');
 });
@@ -13,4 +13,10 @@ test('store links default empty and accept only official application URLs', () =
 test('each device uses its own store, missing or unsafe store falls back to guidance', () => {
   const links = { appStoreUrl: 'https://apps.apple.com/sa/app/wafr/id123456', playStoreUrl: '' };
   assert.ok(storeForPlatform(links, 'ios')); assert.equal(storeForPlatform(links, 'android'), ''); assert.equal(storeForPlatform(links, 'other'), ''); assert.equal(storeForPlatform({ ...links, appStoreUrl: 'https://evil.test' }, 'ios'), '');
+});
+
+test('native iOS host hides installation prompts without mistaking Safari for the installed application', () => {
+  assert.equal(isNativeIOSApp('Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 WafrDawam-iOS'), true);
+  assert.equal(isNativeIOSApp('Mozilla/5.0 (iPhone) Version/26.0 Mobile Safari/605.1.15'), false);
+  assert.equal(isNativeIOSApp('Mozilla/5.0 WafrDawam-iOS-other'), false);
 });

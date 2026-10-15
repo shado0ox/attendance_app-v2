@@ -19,3 +19,6 @@ export function parseAppStoreLinks(value: any): AppStoreLinks {
 export function storeForPlatform(links: AppStoreLinks, platform: InstallPlatform) {
   try { return platform === 'ios' ? validStoreLink(links.appStoreUrl, 'ios') : platform === 'android' ? validStoreLink(links.playStoreUrl, 'android') : ''; } catch { return ''; }
 }
+
+// UI hint only; never use a user agent to authorize attendance or API access.
+export const isNativeIOSApp = (userAgent: string) => /(?:^|\s)WafrDawam-iOS(?:\s|$)/.test(userAgent);
