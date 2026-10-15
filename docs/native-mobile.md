@@ -47,7 +47,7 @@ npx eas-cli@latest build --platform all --profile production
 
 استخدم حساب الشركة و**نفس مفتاح رفع Google Play السابق** لتحديث التطبيق المنشور. لا تنشئ هوية جديدة أو مفتاحًا بديلًا دون مطابقة إعدادات Play. بناء EAS للإنتاج يطلب بيانات توقيع الشركة؛ لا يمكن إخراج IPA قابل للتوزيع قبل توافر شهادات وحساب Apple المناسبين. مشاريع Xcode وGradle تُولد بـ`npx expo prebuild`، ولا تُعدّل يدويًا في المستودع.
 
-Workflow `Native employee mobile` يفحص TypeScript وESLint والاختبارات ويصدر حزم JavaScript لكل منصة ثم يجمع Android وiOS. حزم CI للتحقق من البناء: Android يستخدم مفتاح debug الافتراضي الذي يولده Expo، وiOS غير موقّع. ليست هذه توقيعات رفع المتاجر. حزم المتاجر الموقّعة تُبنى بملف `production` عبر EAS وحسابات الشركة.
+Workflow `Native employee mobile` يفحص TypeScript وESLint والاختبارات ويصدر حزم JavaScript لكل منصة ثم يجمع Android وiOS ويشغّل APK على محاكي Android للتحقق من ظهور شاشة الدخول الأصلية. حزم CI للتحقق من البناء: Android يستخدم مفتاح debug الافتراضي الذي يولده Expo، وiOS غير موقّع. ليست هذه توقيعات رفع المتاجر. حزم المتاجر الموقّعة تُبنى بملف `production` عبر EAS وحسابات الشركة.
 
 ## تفعيل Passkey الأصلي
 
