@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { emptyAppStoreLinks, installPlatform, parseAppStoreLinks } from '../lib/appInstallation';
+import { emptyAppStoreLinks, installPlatform, isNativeIOSApp, parseAppStoreLinks } from '../lib/appInstallation';
 export function useAppInstallation() {
   const [platform] = useState(() => installPlatform(navigator.userAgent, navigator.maxTouchPoints));
-  const standalone = () => !!(navigator as any).standalone || ['standalone', 'fullscreen', 'minimal-ui'].some(mode => window.matchMedia(`(display-mode: ${mode})`).matches);
+  const standalone = () => isNativeIOSApp(navigator.userAgent) || !!(navigator as any).standalone || ['standalone', 'fullscreen', 'minimal-ui'].some(mode => window.matchMedia(`(display-mode: ${mode})`).matches);
   const [installed, setInstalled] = useState(standalone), [canPrompt, setCanPrompt] = useState(false), [links, setLinks] = useState(emptyAppStoreLinks), [busy, setBusy] = useState(false), [message, setMessage] = useState('');
   const promptRef = useRef<any>(null);
   useEffect(() => {
