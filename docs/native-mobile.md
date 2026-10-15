@@ -22,7 +22,7 @@
 cd mobile
 npm ci
 cp .env.example .env.local
-npx expo run:ios
+npx expo run:ios --configuration Release
 ```
 
 لأندرويد يلزم Android Studio وJDK 17:
@@ -30,7 +30,7 @@ npx expo run:ios
 ```bash
 cd mobile
 npm ci
-npx expo run:android
+npx expo run:android --variant release
 ```
 
 الحد الأدنى الحالي iOS 16.4 وAndroid 9 (API 28).
@@ -63,7 +63,7 @@ Workflow `Native employee mobile` يفحص TypeScript وESLint والاختبا�
 ## إشعارات iOS وAndroid
 
 1. أنشئ مشروع EAS وأضف معرفه الحقيقي إلى `EXPO_PUBLIC_EAS_PROJECT_ID` في إعدادات البناء.
-2. جهز APNs من حساب Apple وFCM v1 من Firebase للتطبيق نفسه، وارفعها عبر `npx eas-cli@latest credentials`.
+2. جهز APNs من حساب Apple وFCM v1 من Firebase للتطبيق نفسه، وارفع مفتاح الإرسال الخاص عبر `npx eas-cli@latest credentials`. لأندرويد نزّل أيضًا ملف إعداد العميل `google-services.json` المطابق للمعرف `com.xshadox.wafrdawam`، واضبط `GOOGLE_SERVICES_JSON` بمساره محليًا أو كمتغير File في EAS، ثم أعد بناء التطبيق. هذا الملف مختلف عن مفتاح Service Account الخاص؛ المفتاح الخاص يبقى في EAS ولا يضمّن في التطبيق.
 3. إذا فعّلت enhanced push security، ضع `EXPO_ACCESS_TOKEN` على السيرفر فقط؛ لا تضعه في متغير `EXPO_PUBLIC_*`.
 4. بعد إعداد الاعتمادات فعّل `NATIVE_PUSH_ENABLED=true` على السيرفر. افتراضيًا الإرسال متوقف وتظهر الحالة الحقيقية في التطبيق.
 5. من هاتف حقيقي اربط الإشعارات ثم اختبر الحضور والانصراف أثناء إغلاق التطبيق. قبول طلب مزود الإشعارات لا يضمن وصوله؛ عامل السيرفر يتابع receipts ويحذف DeviceNotRegistered.
@@ -89,3 +89,5 @@ npx expo-doctor
 ```
 
 اختبارات السيرفر تشمل عزل الشركات والموظفين، منع قراءة كلمات المرور ومسودات الجدول، ملكية اشتراكات الإشعارات والتبديل بين الحسابات، ورفض شهادات Passkey غير المعتمدة.
+
+مرجع إعداد FCM الرسمي: https://docs.expo.dev/push-notifications/fcm-credentials/

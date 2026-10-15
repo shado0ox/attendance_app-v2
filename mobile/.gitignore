@@ -43,3 +43,8 @@ yarn-error.*
 # Native build outputs
 build/
 build-*.log
+
+# Firebase configuration / credentials supplied by the operator
+google-services.json
+*service-account*.json
+*firebase-admin*.json

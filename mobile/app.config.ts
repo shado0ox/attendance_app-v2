@@ -3,6 +3,7 @@ const apiUrl =
   process.env.EXPO_PUBLIC_API_URL || "https://attendance.xshadox.com";
 const host = new URL(apiUrl).hostname;
 const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
+const googleServicesFile = process.env.GOOGLE_SERVICES_JSON;
 const config: ExpoConfig = {
   name: "وفر دوام",
   slug: "wafr-dawam",
@@ -24,6 +25,7 @@ const config: ExpoConfig = {
   android: {
     package: "com.xshadox.wafrdawam",
     versionCode: 3,
+    ...(googleServicesFile ? { googleServicesFile } : {}),
     adaptiveIcon: {
       foregroundImage: "./assets/icon.png",
       backgroundColor: "#087D71",
@@ -69,6 +71,10 @@ const config: ExpoConfig = {
     ],
     ["expo-build-properties", { android: { minSdkVersion: 28 } }],
   ],
-  extra: { apiUrl, ...(projectId ? { eas: { projectId } } : {}) },
+  extra: {
+    apiUrl,
+    ...(googleServicesFile ? { androidPushConfigured: true } : {}),
+    ...(projectId ? { eas: { projectId } } : {}),
+  },
 };
 export default config;

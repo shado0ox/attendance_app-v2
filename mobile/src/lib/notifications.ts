@@ -10,6 +10,13 @@ export async function devicePushToken() {
     throw new Error(
       "خدمة الإشعارات تنتظر إعداد مشروع Expo ومفاتيح Apple وFirebase من مسؤول النظام",
     );
+  if (
+    Platform.OS === "android" &&
+    !Constants.expoConfig?.extra?.androidPushConfigured
+  )
+    throw new Error(
+      "ملف Firebase غير مضاف إلى هذا البناء. جهّز GOOGLE_SERVICES_JSON وأعد بناء التطبيق لتفعيل إشعارات أندرويد",
+    );
   if (!isDevice) throw new Error("جرّب الإشعارات على هاتف حقيقي");
   if (Platform.OS === "android")
     await Notifications.setNotificationChannelAsync("attendance", {
