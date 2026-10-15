@@ -37,7 +37,10 @@ export default function Notifications() {
   }, []);
   const save = async (attendance: boolean, departure: boolean) =>
     task.run(async () => {
-      const value = token || (await devicePushToken());
+      // Resolve the current provider token when enabling or renewing, not a dead saved token.
+      const value = attendance || departure ? await devicePushToken() : token || await devicePushToken();
+      if (token && token !== value)
+        await api("/api/mobile/push/subscription", "DELETE", { token });
       await SecureStore.setItemAsync(PUSH_KEY, value);
       await api("/api/mobile/push/subscription", "POST", {
         token: value,
