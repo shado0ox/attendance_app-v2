@@ -3,9 +3,6 @@ on:
   pull_request:
     paths: ['mobile/**', 'src/lib/mobileEmployee.ts', 'src/server/mobileEmployee.ts', '.github/workflows/native-mobile.yml']
   workflow_dispatch:
-concurrency:
-  group: native-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -26,6 +23,16 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run export
+      - name: Package native source for Mac and Android
+        run: |
+          mkdir -p build
+          git -C .. archive --format=zip --prefix=WafrDawam-Native/ HEAD mobile docs/native-mobile.md > build/WafrDawam-Native-Source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wafr-native-source
+          path: mobile/build/WafrDawam-Native-Source.zip
+          retention-days: 14
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: wafr-native-javascript

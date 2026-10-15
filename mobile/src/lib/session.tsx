@@ -4,7 +4,6 @@ import React, {
   useCallback,
   useContext,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -101,10 +100,11 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
     },
     [],
   );
-  const api = useMemo(
-    () => scopedApi(session, () => current.current, request, async (token) => {
-      await transition(token, null);
-    }),
+  const api = useCallback(
+    <T,>(path: string, method?: string, body?: object, signal?: AbortSignal): Promise<T> =>
+      scopedApi(session, () => current.current, request, async (token) => {
+        await transition(token, null);
+      })<T>(path, method, body, signal),
     [session, transition],
   );
   const logout = useCallback(async () => {
