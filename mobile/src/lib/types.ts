@@ -41,6 +41,7 @@ export type Attendance = {
   breaks: BreakEntry[];
 };
 export type Bootstrap = {
+  punchPlans?: { date: string; period: number; start: number; end: number }[];
   employee: {
     id: string;
     name: string;

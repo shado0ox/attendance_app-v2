@@ -1,3 +1,4 @@
+import { autoPeriodWindow } from "./autoPunch";
 import { employeeScheduleContent } from "./schedulePublication";
 /** A deliberately small projection: no colleague directory, credentials or company settings. */
 export function mobileEmployeeData(
@@ -53,4 +54,21 @@ export function webauthnExpectedOrigins(
       "WEBAUTHN_ANDROID_ORIGINS must contain exact Android signing-certificate origins",
     );
   return [...new Set([webOrigin, ...origins])];
+}
+
+/** Include the previous schedule day even at month/year boundaries for overnight periods. */
+export function mobileScheduleRange(now = Date.now()) {
+  const today = new Date(now).toLocaleDateString("en-CA", { timeZone: "Asia/Riyadh" });
+  const noon = Date.parse(today + "T12:00:00Z");
+  const yesterday = new Date(noon - 86400000).toISOString().slice(0, 10);
+  return { today, yesterday, from: yesterday, to: new Date(noon + 31 * 86400000).toISOString().slice(0, 10) };
+}
+export function mobilePunchPlans(schedule: { date: string; shiftType: string; shift: any }[]) {
+  return schedule.flatMap(entry => {
+    if (!entry.shift || ["OFF", "A"].includes(entry.shiftType)) return [];
+    return [1, 2].flatMap(period => {
+      const window = autoPeriodWindow(entry.date, entry.shift, period === 2);
+      return window ? [{ date: entry.date, period, start: window.start, end: window.end }] : [];
+    });
+  });
 }

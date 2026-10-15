@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   mobileEmployeeData,
+  mobileScheduleRange,
+  mobilePunchPlans,
   webauthnExpectedOrigins,
 } from "../src/lib/mobileEmployee";
 test("native bootstrap exposes own published schedule without credentials, drafts or colleague data", () => {
@@ -63,4 +65,23 @@ test("native passkey origins require exact certificate hashes and retain the HTT
     assert.throws(() =>
       webauthnExpectedOrigins("https://example.com", invalid),
     );
+});
+
+test("mobile bootstrap retains the previous schedule day across Riyadh month and year boundaries", () => {
+  const october = mobileScheduleRange(Date.parse("2026-09-30T22:00:00Z"));
+  assert.equal(october.today, "2026-10-01");
+  assert.equal(october.from, "2026-09-30");
+  assert.equal(october.yesterday, "2026-09-30");
+  const january = mobileScheduleRange(Date.parse("2025-12-31T22:00:00Z"));
+  assert.equal(january.today, "2026-01-01");
+  assert.equal(january.from, "2025-12-31");
+});
+test("native punch plans use published server period windows for overnight double shifts", () => {
+  const plans = mobilePunchPlans([{ date: "2026-09-30", shiftType: "N", shift: { id: "N", type: "double", start: "17:00", end: "22:00", start2: "00:00", end2: "05:00" } }]);
+  assert.equal(plans.length, 2);
+  assert.equal(plans[1].date, "2026-09-30");
+  assert.equal(plans[1].period, 2);
+  assert.equal(plans[1].start, Date.parse("2026-10-01T00:00:00+03:00"));
+  assert.equal(plans[1].end, Date.parse("2026-10-01T05:00:00+03:00"));
+  assert.deepEqual(mobilePunchPlans([{ date: "2026-09-30", shiftType: "OFF", shift: null }]), []);
 });

@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db, schema } from "../db/index";
-import { mobileEmployeeData } from "../lib/mobileEmployee";
+import { mobileEmployeeData, mobileScheduleRange, mobilePunchPlans } from "../lib/mobileEmployee";
 import { isActiveEmployee } from "../lib/employeeLifecycle";
 import { employeeWorkState } from "../lib/attendanceBreaks";
 export function registerMobileEmployee(
@@ -47,16 +47,10 @@ export function registerMobileEmployee(
         req.query.companyId !== req.auth.companyId
       )
         return res.status(403).json({ error: "الحساب خارج الشركة" });
-      const now = Date.now(),
-        today = new Date(now).toLocaleDateString("en-CA", {
-          timeZone: "Asia/Riyadh",
-        });
-      const from = req.query.from || today.slice(0, 7) + "-01";
-      const to =
-        req.query.to ||
-        new Date(Date.parse(today + "T12:00:00Z") + 31 * 86400000)
-          .toISOString()
-          .slice(0, 10);
+      const now = Date.now();
+      const range = mobileScheduleRange(now), { today, yesterday } = range;
+      const from = req.query.from || range.from;
+      const to = req.query.to || range.to;
       const validDate = (value: any) =>
         typeof value === "string" &&
         /^\d{4}-\d{2}-\d{2}$/.test(value) &&
@@ -77,9 +71,6 @@ export function registerMobileEmployee(
           to,
         );
         if (!data) return res.status(404).json({ error: "الموظف غير موجود" });
-        const yesterday = new Date(Date.parse(today + "T12:00:00Z") - 86400000)
-          .toISOString()
-          .slice(0, 10);
         const records = await db
           .select()
           .from(schema.attendance)
@@ -94,6 +85,7 @@ export function registerMobileEmployee(
         res.set("Cache-Control", "no-store");
         res.json({
           ...data,
+          punchPlans: mobilePunchPlans(data.schedule),
           today,
           serverNow: now,
           records,

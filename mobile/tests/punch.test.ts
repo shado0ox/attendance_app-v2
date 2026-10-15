@@ -47,3 +47,20 @@ test("overnight period uses the original record; stale open period cannot create
     null,
   );
 });
+
+test("an overnight second period keeps yesterday's record instead of creating today's first punch", () => {
+  const at = Date.parse("2026-10-01T01:00:00+03:00");
+  const original = { ...row, date: "2026-09-30", checkIn: "17:00", checkOut: "22:00", checkInTs: String(Date.parse("2026-09-30T17:00:00+03:00")) };
+  const plans = [{ date: original.date, period: 2, start: Date.parse("2026-10-01T00:00:00+03:00"), end: Date.parse("2026-10-01T05:00:00+03:00") }];
+  const action = nextPunch([original], "2026-10-01", false, at, plans);
+  assert.equal(action?.field, "checkIn2");
+  assert.equal(action?.record?.date, "2026-09-30");
+  assert.equal(action?.record?.id, original.id);
+  assert.equal(nextPunch([original], "2026-10-01", false, plans[0].end, plans)?.field, "checkIn");
+});
+test("an expired original record cannot accept an overnight second-period punch", () => {
+  const at = Date.parse("2026-10-01T01:00:00+03:00");
+  const original = { ...row, date: "2026-09-30", checkOut: "22:00", checkInTs: String(at - 25 * 3600000) };
+  const plans = [{ date: original.date, period: 2, start: at - 3600000, end: at + 3600000 }];
+  assert.equal(nextPunch([original], "2026-10-01", false, at, plans), null);
+});

@@ -44,16 +44,18 @@ export default function Home() {
   }, [focused, refetchHome, refetchBreaks]);
   const data = query.data,
     now = (data?.serverNow || tick) + Math.max(0, tick - query.dataUpdatedAt),
-    assignment = data?.schedule.find((entry) => entry.date === data.today),
+    todayAssignment = data?.schedule.find((entry) => entry.date === data.today),
     currentBreak = breaks.data?.entries.find((entry) => !entry.endedAt);
   const punch = data
     ? nextPunch(
         data.records,
         data.today,
-        assignment?.shift?.type === "double",
+        todayAssignment?.shift?.type === "double",
         now,
+        data.punchPlans,
       )
     : null;
+  const assignment = data?.schedule.find(entry => entry.date === (punch?.record?.date || data.today)) || todayAssignment;
   const perform = async () => {
     if (!punch || task.busy) return;
     if (
@@ -132,6 +134,9 @@ export default function Home() {
                     ? ` · ${assignment.shift.start2} — ${assignment.shift.end2}`
                     : ""}
                 </Body>
+              )}
+              {punch?.record && punch.record.date !== data.today && (
+                <Body muted>هذه الفترة تتبع دوام {displayDate(punch.record.date)}</Body>
               )}
               {currentBreak && (
                 <>

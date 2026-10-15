@@ -5,6 +5,7 @@ export function nextPunch(
   date: string,
   double: boolean,
   now: number,
+  plans: { date: string; period: number; start: number; end: number }[] = [],
 ): { field: PunchField; record?: Attendance } | null {
   const active = records.find(
     (record) =>
@@ -20,6 +21,15 @@ export function nextPunch(
       field: active.checkIn2 ? "checkOut2" : "checkOut",
       record: active,
     };
+  }
+  // A second period after midnight still belongs to the original attendance record.
+  for (const pending of records) {
+    if (pending.date === date || !pending.checkIn || !pending.checkOut || pending.checkIn2) continue;
+    const window = plans.find(plan => plan.date === pending.date && plan.period === 2 && now >= plan.start && now < plan.end);
+    if (!window) continue;
+    const start = Number(pending.checkInTs);
+    if (!Number.isFinite(start) || now - start > 86400000 || start > now) return null;
+    return { field: "checkIn2", record: pending };
   }
   const record = records.find((record) => record.date === date);
   if (!record) return { field: "checkIn" };
