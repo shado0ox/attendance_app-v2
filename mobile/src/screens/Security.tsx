@@ -19,6 +19,7 @@ export default function Security({ enforced = false }: { enforced?: boolean }) {
     task = useTask();
   return (
     <Page
+      topInset={enforced}
       refresh={() => {
         void query.refetch();
       }}

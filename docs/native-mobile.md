@@ -33,6 +33,8 @@ npm ci
 npx expo run:android
 ```
 
+الحد الأدنى الحالي iOS 16.4 وAndroid 9 (API 28).
+
 وحدة Passkey تتطلب بناء التطبيق الأصلي؛ Expo Go لا يحتوي عليها. الاسم المعروض **وفر دوام**، والمعرف للمنصتين `com.xshadox.wafrdawam`. إصدار Android يحمل versionCode=3 وiOS buildNumber=2؛ ارفع الرقم إذا سبق نشر رقم أعلى.
 
 ## بناء المتاجر
@@ -42,6 +44,7 @@ npx expo run:android
 ```bash
 npx eas-cli@latest login
 npx eas-cli@latest init
+# ضع معرف المشروع الناتج في EXPO_PUBLIC_EAS_PROJECT_ID قبل البناء
 npx eas-cli@latest build --platform all --profile production
 ```
 

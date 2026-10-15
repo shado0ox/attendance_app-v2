@@ -198,7 +198,11 @@ export default function NewRequest() {
               matchContents={{ vertical: true }}
               layoutDirection="rightToLeft"
             >
-              <Picker selectedValue={period} onValueChange={setPeriod}>
+              <Picker
+                enabled={!task.busy}
+                selectedValue={period}
+                onValueChange={setPeriod}
+              >
                 <Picker.Item value={1} label="الفترة الأولى" />
                 <Picker.Item value={2} label="الفترة الثانية" />
               </Picker>
@@ -209,6 +213,7 @@ export default function NewRequest() {
               onChangeText={setCheckIn}
               maxLength={5}
               keyboardType="numbers-and-punctuation"
+              editable={!task.busy}
             />
             <Field
               label="وقت الانصراف المطلوب (HH:mm)"
@@ -216,6 +221,7 @@ export default function NewRequest() {
               onChangeText={setCheckOut}
               maxLength={5}
               keyboardType="numbers-and-punctuation"
+              editable={!task.busy}
             />
             <Host
               matchContents={{ vertical: true }}
@@ -225,11 +231,13 @@ export default function NewRequest() {
                 label="الحضور في اليوم التالي"
                 value={nextDay}
                 onValueChange={setNextDay}
+                disabled={task.busy}
               />
               <Switch
                 label="الانصراف في اليوم التالي"
                 value={returnNextDay}
                 onValueChange={setReturnNextDay}
+                disabled={task.busy}
               />
             </Host>
           </>
@@ -245,6 +253,7 @@ export default function NewRequest() {
             onChangeText={setCheckIn}
             keyboardType="numbers-and-punctuation"
             maxLength={5}
+            editable={!task.busy}
           />
         )}
         {type === "temporary_exit" && (
@@ -254,6 +263,7 @@ export default function NewRequest() {
             onChangeText={setCheckOut}
             keyboardType="numbers-and-punctuation"
             maxLength={5}
+            editable={!task.busy}
           />
         )}
         {type === "absence" && (
@@ -263,6 +273,7 @@ export default function NewRequest() {
               value={absenceTo}
               onChangeText={setAbsenceTo}
               maxLength={10}
+              editable={!task.busy}
             />
             <Host
               matchContents={{ vertical: true }}
@@ -290,7 +301,7 @@ export default function NewRequest() {
         />
         {electronic && (
           <>
-            <Signature ref={signature} />
+            <Signature disabled={task.busy} ref={signature} />
             <Host
               matchContents={{ vertical: true }}
               layoutDirection="rightToLeft"

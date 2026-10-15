@@ -1,3 +1,4 @@
+import { punchPosition } from "../lib/gps";
 import React, { useEffect, useState } from "react";
 import { View } from "react-native";
 import * as Location from "expo-location";
@@ -72,9 +73,7 @@ export default function Home() {
         throw new Error(
           "اسمح باستخدام الموقع أثناء تشغيل التطبيق لتسجيل البصمة",
         );
-      const fix = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
+      const fix = await punchPosition();
       if (fix.mocked) throw new Error("الموقع الوهمي غير مسموح");
       if (
         Date.now() - fix.timestamp > 60000 ||

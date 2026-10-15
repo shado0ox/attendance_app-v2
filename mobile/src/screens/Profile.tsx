@@ -1,3 +1,4 @@
+import EmailVerification from "../components/EmailVerification";
 import React, { useState } from "react";
 import { Image, View } from "react-native";
 import { router } from "expo-router";
@@ -41,7 +42,6 @@ function ProfileEditor({ profile }: { profile: ProfileData }) {
     [phone, setPhone] = useState(profile.phone || ""),
     [email, setEmail] = useState(profile.email || ""),
     [photo, setPhoto] = useState(profile.photoDataUrl || ""),
-    [code, setCode] = useState(""),
     [message, setMessage] = useState("");
   const choosePhoto = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -133,46 +133,13 @@ function ProfileEditor({ profile }: { profile: ProfileData }) {
         <Body>{message}</Body>
         <ErrorNote error={task.error} />
       </Card>
-      <Card>
-        <Title>تأكيد البريد</Title>
-        <Body muted>احفظ البريد أولًا، ثم اطلب رمز التأكيد.</Body>
-        <Action
-          secondary
-          label="إرسال رمز التأكيد"
-          disabled={task.busy}
-          onPress={() => {
-            void task.run(async () => {
-              await api(
-                "/api/employee-profile/email-verification/send",
-                "POST",
-              );
-              setMessage("تم إرسال رمز التأكيد إلى بريدك");
-            });
-          }}
-        />
-        <Field
-          label="الرمز من 6 أرقام"
-          value={code}
-          onChangeText={setCode}
-          maxLength={6}
-          keyboardType="number-pad"
-        />
-        <Action
-          label="تأكيد البريد"
-          disabled={task.busy || code.length !== 6}
-          onPress={() => {
-            void task.run(async () => {
-              await api(
-                "/api/employee-profile/email-verification/confirm",
-                "POST",
-                { code },
-              );
-              setCode("");
-              setMessage("تم تأكيد البريد");
-            });
-          }}
-        />
-      </Card>
+      <EmailVerification
+        emailDirty={
+          email.trim().toLowerCase() !==
+          (profile.email || "").trim().toLowerCase()
+        }
+        saving={task.busy}
+      />
       <Card>
         <Action
           secondary

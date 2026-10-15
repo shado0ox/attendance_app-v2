@@ -140,7 +140,12 @@ export function Page({
   children,
   refresh,
   refreshing = false,
-}: React.PropsWithChildren<{ refresh?: () => void; refreshing?: boolean }>) {
+  topInset = false,
+}: React.PropsWithChildren<{
+  refresh?: () => void;
+  refreshing?: boolean;
+  topInset?: boolean;
+}>) {
   const insets = useSafeAreaInsets();
   return (
     <KeyboardAvoidingView
@@ -152,6 +157,7 @@ export function Page({
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{
           padding: 20,
+          paddingTop: 20 + (topInset ? insets.top : 0),
           paddingBottom: Math.max(insets.bottom, 20) + 24,
           gap: 20,
         }}
