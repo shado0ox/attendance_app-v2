@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { Express } from 'express';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '../db/index';
-import { breakMetrics, employeeBreakPlans, openBreak, parseBreakRules, type BreakEntry, type BreakRule } from '../lib/attendanceBreaks';
+import { canStartBreak, breakMetrics, employeeBreakPlans, openBreak, parseBreakRules, type BreakEntry, type BreakRule } from '../lib/attendanceBreaks';
 import { validAttendanceDate } from '../lib/attendanceMonths';
 import { ownsDay, fullAdminAccess } from '../lib/adminAccess';
 const policyKey = (company: string) => 'attendanceBreakPolicy:' + company;
@@ -40,7 +40,7 @@ export function registerAttendanceBreaks(app: Express, requireAuth: any, getMain
     const leaves = await db.select().from(schema.requests).where(and(eq(schema.requests.companyId, company), eq(schema.requests.empId, employeeId), eq(schema.requests.type, 'leave'), eq(schema.requests.status, 'approved')));
     const absences = await db.select().from(schema.electronicDocuments).where(and(eq(schema.electronicDocuments.companyId, company), eq(schema.electronicDocuments.employeeId, employeeId), eq(schema.electronicDocuments.status, 'approved')));
     const excused = (date: string) => leaves.some(r => r.date === date) || absences.some(doc => { const f = doc.formData as any; return f?.requestType === 'absence' && date >= f.absenceFrom && date <= f.absenceTo; });
-    return { serverNow: time, entries, plans: plans.map(plan => { const record = records.find(record => record.date === plan.date && !!record[plan.period === 1 ? 'checkIn' : 'checkIn2'] && !record[plan.period === 1 ? 'checkOut' : 'checkOut2']); return { ...plan, rule: { id: plan.rule.id, name: plan.rule.name, durationMinutes: plan.rule.durationMinutes }, recordId: record?.id || null, eligible: !!record && !entries.some(e => !e.endedAt) && !(record.breaks as any[] || []).some(entry => entry.period === plan.period) && !excused(plan.date), canStart: !!record && !entries.some(e => !e.endedAt) && !(record.breaks as any[] || []).some(entry => entry.period === plan.period) && !!plan.window && !excused(plan.date) && time >= plan.window.start && time < plan.window.end }; }) };
+    return { serverNow: time, entries, plans: plans.map(plan => { const record = records.find(record => record.date === plan.date && !!record[plan.period === 1 ? 'checkIn' : 'checkIn2'] && !record[plan.period === 1 ? 'checkOut' : 'checkOut2']); return { ...plan, rule: { id: plan.rule.id, name: plan.rule.name, durationMinutes: plan.rule.durationMinutes, mode: plan.rule.mode }, recordId: record?.id || null, eligible: !!record && !entries.some(e => !e.endedAt) && !(record.breaks as any[] || []).some(entry => entry.period === plan.period) && !excused(plan.date), canStart: !!record && !entries.some(e => !e.endedAt) && !(record.breaks as any[] || []).some(entry => entry.period === plan.period) && !!plan.window && !excused(plan.date) && canStartBreak(plan, time) }; }) };
   };
   app.get('/api/attendance-breaks/status', auth(['employee']), wrap(async (req: any, res: any) => res.json(await status(req.auth))));
   app.post('/api/attendance-breaks/action', auth(['employee']), wrap(async (req: any, res: any) => {
@@ -70,11 +70,11 @@ export function registerAttendanceBreaks(app: Express, requireAuth: any, getMain
       const [main] = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, mainKey(company)));
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${policyKey(company)}))`);
       const plan = employeeBreakPlans(main?.value, await readRules(company, tx), employeeId, record.date).find(plan => plan.period === body.period);
-      if (!plan?.window || time < plan.window.start || time >= plan.window.end) fail(409, plan?.issue || 'الاستراحة غير مستحقة الآن أو موعدها انتهى');
+      if (!plan?.window || !canStartBreak(plan, time)) fail(409, plan?.issue || 'الاستراحة غير مستحقة الآن أو الوقت المتبقي من الدوام لا يسمح بها');
       const leaves = await tx.select().from(schema.requests).where(and(eq(schema.requests.companyId, company), eq(schema.requests.empId, employeeId), eq(schema.requests.date, record.date), eq(schema.requests.type, 'leave'), eq(schema.requests.status, 'approved')));
       const absences = await tx.select().from(schema.electronicDocuments).where(and(eq(schema.electronicDocuments.companyId, company), eq(schema.electronicDocuments.employeeId, employeeId), eq(schema.electronicDocuments.status, 'approved')));
       if (leaves.length || absences.some(doc => { const form = doc.formData as any; return form?.requestType === 'absence' && record.date >= form.absenceFrom && record.date <= form.absenceTo; })) fail(409, 'اليوم إجازة أو غياب معتمد');
-      const entry: BreakEntry = { id: crypto.randomUUID(), period: body.period, ruleId: plan.rule.id, name: plan.rule.name, plannedStart: plan.window.start, plannedEnd: plan.window.end, allowedMinutes: plan.rule.durationMinutes, startedAt: time, endedAt: null };
+      const entry: BreakEntry = { id: crypto.randomUUID(), period: body.period, ruleId: plan.rule.id, name: plan.rule.name, timingMode: plan.rule.mode, plannedStart: plan.rule.mode === 'flexible' ? time : plan.window.start, plannedEnd: plan.rule.mode === 'flexible' ? time + plan.rule.durationMinutes * 60000 : plan.window.end, allowedMinutes: plan.rule.durationMinutes, startedAt: time, endedAt: null };
       entries.push(entry); await tx.update(schema.attendance).set({ breaks: entries }).where(eq(schema.attendance.id, record.id));
       await audit(tx, req.auth, 'break.start', record.id, { ...entry, empId: employeeId }); return { entry };
     }); res.json({ ...result, serverNow: now() });

@@ -18,7 +18,7 @@ const request = (route: string, body?: any, role = 'admin', id?: any, company = 
 const action = (body: any, id = employeeId, company = companyId) => request('attendance-breaks/action', body, 'employee', id, company);
 const rule = { id: 'lunch', name: 'Lunch', enabled: true, scope: 'shifts', shiftIds: ['S'], employeeIds: [], period: 1, mode: 'clock', time: '13:00', offsetMinutes: 120, durationMinutes: 30 };
 const shifts = [{ id: 'S', name: 'Day', start: '08:00', end: '17:00' }, { id: 'D', name: 'Night double', type: 'double', start: '20:00', end: '23:00', start2: '00:30', end2: '04:00' }];
-const data = { employees: [{ id: employeeId, name: 'Employee one', username: employeeId, dept: 'd1' }, { id: secondId, name: 'Employee two', username: secondId, dept: 'd2' }], departments: [{ id: 'd1', name: 'One' }, { id: 'd2', name: 'Two' }], shiftTypes: shifts, settings: {}, schedule: { '2026-10-15': { [employeeId]: { shiftType: 'S' }, [secondId]: { shiftType: 'S' } }, '2026-10-14': { [employeeId]: { shiftType: 'D' } } } };
+const data = { employees: [{ id: employeeId, name: 'Employee one', username: employeeId, dept: 'd1' }, { id: secondId, name: 'Employee two', username: secondId, dept: 'd2' }], departments: [{ id: 'd1', name: 'One' }, { id: 'd2', name: 'Two' }], shiftTypes: shifts, settings: {}, schedule: { '2026-10-15': { [employeeId]: { shiftType: 'S' }, [secondId]: { shiftType: 'S' } }, '2026-10-14': { [employeeId]: { shiftType: 'D' } }, '2026-10-16': { [employeeId]: { shiftType: 'S' }, [secondId]: { shiftType: 'S' } } } };
 const policy = (rules: any[]) => request('attendance-breaks/policy', { rules });
 const report = async () => { const r = await request('attendance-report?' + new URLSearchParams({ companyId, from: '2026-10-15', to: '2026-10-15' })); const result = await r.json(); assert.equal(r.status, 200, JSON.stringify(result)); return result.items.find((day: any) => day.empId === employeeId); };
 try {
@@ -77,6 +77,31 @@ try {
   await setTime('2026-10-15T01:05:00+03:00'); assert.equal((await request('attendance-breaks/close', { ...nightEnd, reason: 'Forgot return' })).status, 200);
   const closedReport = await (await request('attendance-breaks/report?from=2026-10-14&to=2026-10-14')).json(); assert.equal(closedReport.items[0].lateReturnMinutes, 5); assert.equal(closedReport.items[0].closedByAdmin, true);
   const saved = (await db.select().from(schema.attendance).where(eq(schema.attendance.id, record.id)))[0]; assert.equal((saved.breaks as any[]).length, 1); assert.equal(saved.checkIn, '08:00');
+  // Duration-only breaks start when work allows, not at a preconfigured clock time.
+  const flexible = { ...rule, mode: 'flexible', time: undefined, offsetMinutes: undefined };
+  assert.equal((await policy([flexible])).status, 200);
+  const [flexRecord, unpunched] = await db.insert(schema.attendance).values([
+    { companyId, empId: employeeId, empName: 'Employee one', dept: 'd1', date: '2026-10-16', checkIn: '08:00' },
+    { companyId, empId: secondId, empName: 'Employee two', dept: 'd2', date: '2026-10-16' },
+  ]).returning();
+  const flexStart = { recordId: flexRecord.id, action: 'start', period: 1 };
+  await setTime('2026-10-16T07:59:00+03:00'); assert.equal((await action(flexStart)).status, 409);
+  await setTime('2026-10-16T10:10:00+03:00');
+  const flexStatus = await (await request('attendance-breaks/status', undefined, 'employee', employeeId)).json(); assert.equal(flexStatus.plans[0].canStart, true); assert.equal(flexStatus.plans[0].rule.mode, 'flexible');
+  assert.equal((await action({ recordId: unpunched.id, action: 'start', period: 1 }, secondId)).status, 409, 'duration-only still needs attendance');
+  const flexResponse = await action({ ...flexStart, startedAt: 1, plannedEnd: 1, durationMinutes: 500 }); const flexEntry = (await flexResponse.json()).entry; assert.equal(flexResponse.status, 200);
+  assert.equal(flexEntry.plannedStart, Date.parse('2026-10-16T10:10:00+03:00')); assert.equal(flexEntry.plannedEnd, Date.parse('2026-10-16T10:40:00+03:00')); assert.equal(flexEntry.allowedMinutes, 30);
+  assert.equal((await policy([{ ...flexible, durationMinutes: 10 }])).status, 200, 'later policy edits do not shorten a running break');
+  await setTime('2026-10-16T10:46:00+03:00');
+  const flexibleReport = await (await request('attendance-report?' + new URLSearchParams({ companyId, from: '2026-10-16', to: '2026-10-16' }))).json(); assert.equal(flexibleReport.items.find((item: any) => item.empId === employeeId).activeBreakLateMinutes, 6);
+  assert.equal((await action({ recordId: flexRecord.id, action: 'end', period: 1, entryId: flexEntry.id })).status, 200);
+  assert.equal((await (await action(flexStart)).json()).entry.id, flexEntry.id, 'cannot take another break for the same period');
+  assert.equal((await policy([flexible])).status, 200);
+  await db.update(schema.attendance).set({ checkIn: '08:00' }).where(eq(schema.attendance.id, unpunched.id));
+  await setTime('2026-10-16T16:31:00+03:00'); const nearEnd = { recordId: unpunched.id, action: 'start', period: 1 }; assert.equal((await action(nearEnd, secondId)).status, 409, 'full duration must fit before end of period');
+  const unavailable = await (await request('attendance-breaks/status', undefined, 'employee', secondId)).json(); assert.equal(unavailable.plans[0].canStart, false);
+  await setTime('2026-10-16T16:30:00+03:00'); const lastStart = await action(nearEnd, secondId); const lastEntry = (await lastStart.json()).entry; assert.equal(lastStart.status, 200); assert.equal(lastEntry.plannedEnd, Date.parse('2026-10-16T17:00:00+03:00'));
+  await setTime('2026-10-16T17:06:00+03:00'); assert.equal((await action({ ...nearEnd, action: 'end', entryId: lastEntry.id }, secondId)).status, 200, 'return remains possible after period ends');
   console.log('Attendance breaks: live states, overdue return, time authority, replay safety, tenant/department isolation, checkout protection, night shifts and month immutability passed');
 } finally {
   child.kill('SIGTERM'); await new Promise(resolve => child.exitCode !== null ? resolve(null) : child.once('exit', resolve));
