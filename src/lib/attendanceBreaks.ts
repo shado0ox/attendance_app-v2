@@ -1,20 +1,23 @@
 import { autoPeriodWindow } from './autoPunch';
 import { effectiveScheduleData } from './schedulePublication';
 import { employeeAtDate, isActiveEmployee } from './employeeLifecycle';
-export type BreakRule = { id: string; name: string; enabled: boolean; scope: 'employees' | 'shifts'; employeeIds: string[]; shiftIds: string[]; period: 1 | 2; mode: 'clock' | 'offset'; time: string; offsetMinutes: number; durationMinutes: number };
-export type BreakEntry = { id: string; period: number; ruleId: string; name: string; plannedStart: number; plannedEnd: number; allowedMinutes: number; startedAt: number; endedAt: number | null };
+export type BreakRule = { id: string; name: string; enabled: boolean; scope: 'employees' | 'shifts'; employeeIds: string[]; shiftIds: string[]; period: 1 | 2; mode: 'clock' | 'offset' | 'flexible'; time: string; offsetMinutes: number; durationMinutes: number };
+export type BreakEntry = { id: string; period: number; ruleId: string; name: string; plannedStart: number; plannedEnd: number; allowedMinutes: number; startedAt: number; endedAt: number | null; timingMode?: BreakRule['mode'] };
 export function parseBreakRules(input: any, employees: any[], shifts: any[]): BreakRule[] {
   if (!Array.isArray(input) || input.length > 100) throw new Error('الحد الأقصى 100 إعداد للاستراحة');
   const seen = new Set<string>(), assignments = new Set<string>();
   return input.map((rule: any) => {
     if (!rule || typeof rule.id !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(rule.id) || seen.has(rule.id)) throw new Error('معرف الاستراحة غير صالح أو مكرر'); seen.add(rule.id);
-    if (typeof rule.name !== 'string' || !rule.name.trim() || rule.name.length > 80 || typeof rule.enabled !== 'boolean' || !['employees', 'shifts'].includes(rule.scope) || ![1, 2].includes(rule.period) || !['clock', 'offset'].includes(rule.mode)) throw new Error('أكمل اسم ونوع الاستراحة والفترة');
-    if (!Number.isInteger(rule.durationMinutes) || rule.durationMinutes < 1 || rule.durationMinutes > 180 || !Number.isInteger(rule.offsetMinutes) || rule.offsetMinutes < 1 || rule.offsetMinutes > 1440 || typeof rule.time !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(rule.time)) throw new Error('حدد موعدًا صحيحًا ومدة من 1 إلى 180 دقيقة');
+    if (typeof rule.name !== 'string' || !rule.name.trim() || rule.name.length > 80 || typeof rule.enabled !== 'boolean' || !['employees', 'shifts'].includes(rule.scope) || ![1, 2].includes(rule.period) || !['clock', 'offset', 'flexible'].includes(rule.mode)) throw new Error('أكمل اسم ونوع الاستراحة والفترة');
+    if (!Number.isInteger(rule.durationMinutes) || rule.durationMinutes < 1 || rule.durationMinutes > 180) throw new Error('حدد مدة من 1 إلى 180 دقيقة');
+    const validTime = typeof rule.time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(rule.time);
+    const validOffset = Number.isInteger(rule.offsetMinutes) && rule.offsetMinutes >= 1 && rule.offsetMinutes <= 1440;
+    if ((rule.mode === 'clock' && !validTime) || (rule.mode === 'offset' && !validOffset)) throw new Error('حدد موعدًا صحيحًا للاستراحة');
     const ids = (field: string, all: any[]) => { if (!Array.isArray(rule[field]) || rule[field].some((id: any) => typeof id !== 'string' || !all.some(e => String(e.id) === id))) throw new Error('الموظف أو الشيفت خارج الشركة'); return [...new Set<string>(rule[field])]; };
     const employeeIds = ids('employeeIds', employees), shiftIds = ids('shiftIds', shifts), target = rule.scope === 'employees' ? employeeIds : shiftIds;
     if (rule.enabled && !target.length) throw new Error('اختر الموظفين أو الشيفتات المشمولة');
     if (rule.enabled) for (const id of target) { const key = `${rule.scope}:${id}:${rule.period}`; if (assignments.has(key)) throw new Error('يوجد أكثر من إعداد لنفس الموظف أو الشيفت في الفترة نفسها'); assignments.add(key); }
-    const parsed: BreakRule = { id: rule.id, name: rule.name.trim(), enabled: rule.enabled, scope: rule.scope, employeeIds, shiftIds, period: rule.period, mode: rule.mode, time: rule.time, offsetMinutes: rule.offsetMinutes, durationMinutes: rule.durationMinutes };
+    const parsed: BreakRule = { id: rule.id, name: rule.name.trim(), enabled: rule.enabled, scope: rule.scope, employeeIds, shiftIds, period: rule.period, mode: rule.mode, time: validTime ? rule.time : '13:00', offsetMinutes: validOffset ? rule.offsetMinutes : 120, durationMinutes: rule.durationMinutes };
     if (parsed.enabled && parsed.scope === 'shifts') for (const id of parsed.shiftIds) if (!breakWindow('2026-01-01', shifts.find(s => String(s.id) === id), parsed)) throw new Error('موعد الاستراحة ومدتها يجب أن يكونا داخل فترة الشيفت المختارة');
     return parsed;
   });
@@ -22,10 +25,16 @@ export function parseBreakRules(input: any, employees: any[], shifts: any[]): Br
 export function breakWindow(date: string, shift: any, rule: BreakRule) {
   if (!shift) return null;
   const window = autoPeriodWindow(date, shift, rule.period === 2); if (!window) return null;
+  if (rule.mode === 'flexible') return rule.durationMinutes * 60000 < window.end - window.start ? { start: window.start, end: window.end, shiftStart: window.start, shiftEnd: window.end } : null;
   let start = rule.mode === 'offset' ? window.start + rule.offsetMinutes * 60000 : Date.parse(date + 'T' + rule.time + ':00+03:00');
   if (rule.mode === 'clock') while (start <= window.start) start += 86400000;
   const end = start + rule.durationMinutes * 60000;
   return Number.isFinite(start) && start > window.start && end < window.end ? { start, end, shiftStart: window.start, shiftEnd: window.end } : null;
+}
+// The same boundary check drives the employee button and server authorization.
+export function canStartBreak(plan: { window: ReturnType<typeof breakWindow>; rule: Pick<BreakRule, 'mode' | 'durationMinutes'> }, time: number) {
+  const window = plan.window;
+  return !!window && time >= window.start && time < window.end && (plan.rule.mode !== 'flexible' || time + plan.rule.durationMinutes * 60000 <= window.shiftEnd);
 }
 export function employeeBreakPlans(data: any, rules: BreakRule[], employeeId: string, date: string) {
   const employee = data?.employees?.find((e: any) => String(e.id) === employeeId);

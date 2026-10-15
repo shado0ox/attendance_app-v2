@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { breakMetrics, breakWindow, employeeBreakPlans, employeeWorkState, openBreak, parseBreakRules, type BreakRule } from '../src/lib/attendanceBreaks';
+import { canStartBreak, breakMetrics, breakWindow, employeeBreakPlans, employeeWorkState, openBreak, parseBreakRules, type BreakRule } from '../src/lib/attendanceBreaks';
 import { allowedAdminRoute, fullAdminAccess } from '../src/lib/adminAccess';
 const date = '2026-10-15', shift = { id: 'S', name: 'Morning', start: '08:00', end: '17:00' }, start = Date.parse(date + 'T13:00:00+03:00');
 const rule: BreakRule = { id: 'r', name: 'Lunch', enabled: true, scope: 'shifts', employeeIds: [], shiftIds: ['S'], period: 1, mode: 'clock', time: '13:00', offsetMinutes: 120, durationMinutes: 30 };
@@ -46,4 +46,30 @@ test('department managers can read scoped reports but cannot edit policies or cl
   assert.equal(allowedAdminRoute(scoped, 'GET', '/api/attendance-breaks/report'), true);
   assert.equal(allowedAdminRoute(scoped, 'POST', '/api/attendance-breaks/policy'), false);
   assert.equal(allowedAdminRoute(scoped, 'POST', '/api/attendance-breaks/close'), false);
+});
+
+test('duration-only rules require no time fields and permit a full break anywhere inside the period', () => {
+  const [flexible] = parseBreakRules([{ ...rule, mode: 'flexible', time: undefined, offsetMinutes: undefined }], data.employees, [shift]);
+  assert.equal(flexible.mode, 'flexible');
+  const plan = { rule: flexible, window: breakWindow(date, shift, flexible) };
+  const at = (clock: string) => Date.parse(date + 'T' + clock + ':00+03:00');
+  assert.equal(canStartBreak(plan, at('07:59')), false);
+  assert.equal(canStartBreak(plan, at('08:00')), true);
+  assert.equal(canStartBreak(plan, at('10:10')), true);
+  assert.equal(canStartBreak(plan, at('16:30')), true);
+  assert.equal(canStartBreak(plan, at('16:31')), false);
+  assert.equal(canStartBreak(plan, at('17:00')), false);
+  assert.throws(() => parseBreakRules([{ ...flexible, durationMinutes: 0 }], data.employees, [shift]));
+  assert.throws(() => parseBreakRules([{ ...flexible, shiftIds: ['foreign'] }], data.employees, [shift]));
+  assert.equal(breakWindow(date, { ...shift, end: '08:20' }, flexible), null);
+  const personal = { ...flexible, scope: 'employees' as const, employeeIds: ['e'], shiftIds: [] };
+  assert.equal(employeeBreakPlans(data, [rule, personal], 'e', date)[0].rule.mode, 'flexible');
+});
+test('duration-only eligibility follows the second period after midnight', () => {
+  const flexible = { ...rule, mode: 'flexible' as const, period: 2 as const };
+  const night = { id: 'D', type: 'double', start: '20:00', end: '23:00', start2: '00:30', end2: '04:00' };
+  const plan = { rule: flexible, window: breakWindow(date, night, flexible) };
+  assert.equal(canStartBreak(plan, Date.parse('2026-10-16T01:15:00+03:00')), true);
+  assert.equal(canStartBreak(plan, Date.parse('2026-10-16T03:31:00+03:00')), false);
+  assert.equal(canStartBreak(plan, Date.parse('2026-10-15T21:00:00+03:00')), false);
 });
