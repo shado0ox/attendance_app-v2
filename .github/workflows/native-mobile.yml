@@ -60,6 +60,18 @@ jobs:
         with:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
+      - name: Install required NDK with bounded download retries
+        run: |
+          WAFR_SDK_DIR=${ANDROID_SDK_ROOT:-${ANDROID_HOME:?Android SDK path is missing}}
+          test -d "$WAFR_SDK_DIR"
+          if [ -f "$WAFR_SDK_DIR/ndk/27.1.12297006/source.properties" ]; then exit 0; fi
+          for attempt in 1 2 3; do
+            if sdkmanager --sdk_root="$WAFR_SDK_DIR" 'ndk;27.1.12297006'; then exit 0; fi
+            echo "NDK download failed on attempt $attempt; removing incomplete SDK download."
+            rm -rf "$WAFR_SDK_DIR/ndk/27.1.12297006" "$WAFR_SDK_DIR/.temp/PackageOperation"*
+            sleep 5
+          done
+          exit 1
       - uses: gradle/actions/setup-gradle@v4
       - run: npm ci
       - run: npx expo prebuild --platform android --no-install
