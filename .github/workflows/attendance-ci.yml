@@ -44,6 +44,7 @@ jobs:
       - run: node --import tsx tests/mainDataConcurrency.integration.ts
       - run: node --import tsx tests/emailVerification.integration.ts
       - run: node --import tsx tests/whatsappReminders.integration.ts
+      - run: node --import tsx tests/attendanceBreaks.integration.ts
       - run: node --import tsx tests/companyBackup.integration.ts
       - run: node --import tsx tests/appInstallation.integration.ts
       - run: node --import tsx tests/systemHealth.integration.ts

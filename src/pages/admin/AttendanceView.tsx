@@ -1,3 +1,4 @@
+import AttendanceBreakReport from '../../components/AttendanceBreakReport';
 import { useEffect, useState } from 'react';
 import { printAttendance } from '../../lib/attendancePrint';
 import AttendanceMonthPanel from './AttendanceMonthPanel';
@@ -70,6 +71,7 @@ export default function AttendanceView({
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [companyId, applied, page, refresh]);
+  useEffect(() => { const refreshReport = () => { if (!document.hidden) setRefresh(value => value + 1); }; const timer = setInterval(refreshReport, 60000); document.addEventListener('visibilitychange', refreshReport); return () => { clearInterval(timer); document.removeEventListener('visibilitychange', refreshReport); }; }, [companyId]);
   const searchReport = () => {
     setApplied(filters); setPage(1); setRefresh(value => value + 1); loadAttendance();
   };
@@ -101,12 +103,12 @@ export default function AttendanceView({
     try {
     const data = await allResults();
     const filteredRecords = data.items;
-    const rows = [['التاريخ', 'اليوم', 'الموظف', 'القسم', 'أول حضور', 'آخر انصراف', 'مدة العمل', 'الساعات العشرية', 'مكان أول حضور', 'مكان آخر انصراف', 'الحالة', 'الاستئذان', 'بصمات مستبعدة', 'حالة التحليل', 'دقائق الدوام المجدول', 'دقائق التأخير بعد السماح', 'دقائق الخروج المبكر', 'دقائق إضافي محتمل']];
+    const rows = [['التاريخ', 'اليوم', 'الموظف', 'القسم', 'أول حضور', 'آخر انصراف', 'مدة العمل', 'الساعات العشرية', 'مكان أول حضور', 'مكان آخر انصراف', 'الحالة', 'الاستئذان', 'بصمات مستبعدة', 'حالة التحليل', 'دقائق الدوام المجدول', 'دقائق التأخير بعد السماح', 'دقائق الخروج المبكر', 'دقائق إضافي محتمل', 'حالة الموظف', 'تأخر الرجوع من الاستراحة بالدقائق']];
     filteredRecords.forEach(r => {
       const department = { name: r.departmentName || r.dept };
       rows.push([r.date, new Date(r.date + 'T12:00:00').toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { weekday: 'long' }), r.empName, department?.name || r.dept,
         formatPunch(r.first), formatPunch(r.last), formatMinutes(r.minutes), r.minutes === null ? '' : (r.minutes / 60).toFixed(2),
-        r.first?.location || 'غير مسجل', r.last?.location || 'غير مسجل', r.reportStatus, r.permissions?.length ? `استئذان معتمد (${r.permissions.length})` : '', String(r.ignored), r.analysis?.status || '', r.analysis?.scheduledMinutes ?? '', r.analysis?.lateMinutes ?? '', r.analysis?.earlyMinutes ?? '', r.analysis?.overtimeMinutes ?? '']);
+        r.first?.location || 'غير مسجل', r.last?.location || 'غير مسجل', r.reportStatus, r.permissions?.length ? `استئذان معتمد (${r.permissions.length})` : '', String(r.ignored), r.analysis?.status || '', r.analysis?.scheduledMinutes ?? '', r.analysis?.lateMinutes ?? '', r.analysis?.earlyMinutes ?? '', r.analysis?.overtimeMinutes ?? '', r.workStatusText || 'خارج العمل', String(r.breakLateMinutes || 0)]);
     });
     const csv = '\uFEFF' + rows.map(row => row.map(csvCell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -125,6 +127,7 @@ export default function AttendanceView({
 
   return (
     <div className="flex flex-col gap-6 min-w-0 w-full">
+      <AttendanceBreakReport companyId={companyId} employees={employees} canClose={!departmentScoped} />
       {/* Widgets Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" dir="rtl">
         <div className="p-5 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center justify-between shadow-sm text-right">
@@ -280,7 +283,8 @@ export default function AttendanceView({
                 <th className="p-3 font-extrabold">التاريخ</th>
                 <th className="p-3 font-extrabold">الموظف</th>
                 <th className="p-3 font-extrabold">القسم</th>
-                <th className="p-3 font-extrabold">الحالة</th>
+                <th className="p-3 font-extrabold">حالة الموظف</th>
+                <th className="p-3 font-extrabold">حالة سجل الحضور</th>
                 <th className="p-3 font-extrabold">الحضور</th>
                 <th className="p-3 font-extrabold">الانصراف</th>
                 <th className="p-3 font-extrabold">مدة العمل</th>
@@ -298,6 +302,7 @@ export default function AttendanceView({
                     <td className="p-3 font-bold">{rec.date}<div className="text-slate-400 mt-1">{new Date(rec.date + 'T12:00:00').toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', { weekday: 'long' })}</div></td>
                     <td className="p-3 font-black text-slate-800">{rec.empName}{rec.permissions?.length>0&&<div className="text-sky-700 text-xs mt-1">استئذان معتمد ({rec.permissions.length})</div>}</td>
                     <td className="p-3 text-slate-500 font-medium">{deptObj ? deptObj.name : rec.dept}</td>
+                    <td className="p-3"><span className={`inline-flex rounded-lg border px-2 py-1 font-bold ${rec.workStatus === 'working' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : rec.workStatus === 'break' ? 'bg-amber-50 text-amber-900 border-amber-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>{rec.workStatusText || 'خارج العمل'}</span>{rec.breakLateMinutes > 0 && <p className="mt-2 font-bold text-rose-700">{rec.activeBreakLateMinutes > 0 ? 'متأخر عن الرجوع' : 'تأخر الرجوع من الاستراحة'}: {rec.activeBreakLateMinutes || rec.breakLateMinutes} دقيقة</p>}</td>
                     <td className="p-3">
                       {rec.minutes !== null ? (
                         <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-lg px-2.5 py-0.5 font-extrabold text-[10px]">
@@ -343,7 +348,7 @@ export default function AttendanceView({
 
               {!pageRecords.length && (
                 <tr>
-                  <td colSpan={10} className="p-10 text-center text-slate-400 font-medium">
+                  <td colSpan={11} className="p-10 text-center text-slate-400 font-medium">
                     {loading ? 'جارٍ تحميل النتائج...' : error ? 'تعذر تحميل النتائج؛ أعد المحاولة.' : 'لا توجد سجلات للفترة والفلاتر المختارة.'}
                   </td>
                 </tr>

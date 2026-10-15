@@ -1,3 +1,4 @@
+import EmployeeBreakPanel from './EmployeeBreakPanel';
 import AttendancePasskeyGate from './AttendancePasskeyGate';
 import { punchWithPasskey } from '../lib/attendancePasskeyClient';
 import EmployeeWeekSchedule from './EmployeeWeekSchedule';
@@ -1050,6 +1051,7 @@ export default function EmployeePortal({
 
         
         </section>
+        {(activeTab === 'schedule' || activeTab === 'attendance') && <EmployeeBreakPanel companyId={companyId} recordId={todayRecord?.id} onChanged={loadAttendanceStatus} />}
         <section hidden={activeTab!=='schedule'} style={{display:activeTab==='schedule'?'flex':'none'}} className="flex flex-col gap-6">
         {/* Punch Clock Module */}
         <div className="wafr-punch p-6 bg-white border border-sky-100 rounded-2xl flex flex-col gap-4">

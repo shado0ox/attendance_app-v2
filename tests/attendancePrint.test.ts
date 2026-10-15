@@ -24,3 +24,8 @@ test('printing preserves all supplied rows beyond a display page and frozen appr
   assert.ok(html.includes('توقيع الموظف'));
   assert.ok(html.includes('table-header-group'));
 });
+test('work state and return delay print when supplied, with old approved snapshots retaining their columns', () => {
+  const html = attendancePrintHtml({ companyName: 'A', days: [{ ...day, workStatusText: 'في الاستراحة', breakLateMinutes: 12 }], period: 'October' });
+  assert.ok(html.includes('حالة الموظف')); assert.ok(html.includes('في الاستراحة')); assert.ok(html.includes('<td>12</td>'));
+  assert.ok(!attendancePrintHtml({ companyName: 'A', days: [day], period: 'October' }).includes('تأخر رجوع الاستراحة'));
+});

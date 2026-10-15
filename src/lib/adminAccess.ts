@@ -63,6 +63,9 @@ export function allowedAdminRoute(access: AdminAccess, method: string, route: st
   if (route.startsWith('/api/whatsapp/')) return access.departmentIds === null && access.permissions.canManageSettings;
   if (route.startsWith('/api/company-backup/')) return access.departmentIds === null && ['canManageSettings','canManageEmployees','canEditSchedule','canManageDepts','canApproveRequests','canViewReports'].every(p => access.permissions[p]);
   const read = method === 'GET';
+  if (route === '/api/attendance-breaks/policy') return access.departmentIds === null && access.permissions.canManageSettings;
+  if (route === '/api/attendance-breaks/report') return read && access.permissions.canViewReports;
+  if (route === '/api/attendance-breaks/close') return method === 'POST' && access.departmentIds === null && access.permissions.canViewReports;
   if (route.startsWith('/api/attendance-passkey/')) return access.departmentIds === null && access.permissions.canManageSettings;
   if (route === '/api/system-health') return read && access.departmentIds === null && access.permissions.canManageSettings;
   if (route === '/api/notifications' || route === '/api/notifications/read') return (read || (route.endsWith('/read') && method === 'POST')) && ['canApproveRequests', 'canViewReports', 'canEditSchedule', 'canPrint', 'canManageDepts'].some(p => access.permissions[p]);

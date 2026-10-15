@@ -55,7 +55,8 @@ export function registerCompanyBackup(app: Express, requireAuth: any) {
       const [photo] = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, employeePhotoKey(companyId, String(employee.id))));
       if (photo) photos.push({ employeeId: String(employee.id), value: photo.value });
     }
-    return JSON.parse(JSON.stringify({ schemaVersion: 1, companyId, mainData, tables: records, photos }));
+    const [policy] = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, 'attendanceBreakPolicy:' + companyId));
+    return JSON.parse(JSON.stringify({ schemaVersion: 1, companyId, mainData, tables: records, photos, breakPolicy: policy?.value || null }));
   }
   const validate = (payload: any, companyId: string) => {
     if (new Set(payload.mainData.employees.map((e: any) => String(e.id))).size !== payload.mainData.employees.length || payload.mainData.employees.some((e: any) => !e?.id)) fail(400, 'معرفات الموظفين غير صحيحة');
@@ -162,6 +163,10 @@ export function registerCompanyBackup(app: Express, requireAuth: any) {
       const photoKeys = new Set([...current.photos.map((p: any) => employeePhotoKey(companyId, p.employeeId)), ...opened.payload.photos.map((p: any) => employeePhotoKey(companyId, p.employeeId))]);
       if (photoKeys.size) await tx.delete(schema.systemData).where(inArray(schema.systemData.key, [...photoKeys]));
       for (const photo of opened.payload.photos) await tx.insert(schema.systemData).values({ key: employeePhotoKey(companyId, photo.employeeId), value: photo.value });
+      if ('breakPolicy' in opened.payload) {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${'attendanceBreakPolicy:' + companyId}))`);
+        await tx.insert(schema.systemData).values({ key: 'attendanceBreakPolicy:' + companyId, value: { companyId, rules: opened.payload.breakPolicy?.rules || [] } }).onConflictDoUpdate({ target: schema.systemData.key, set: { value: { companyId, rules: opened.payload.breakPolicy?.rules || [] }, updatedAt: new Date() } });
+      }
       await tx.update(schema.systemData).set({ value: restored, updatedAt: new Date() }).where(eq(schema.systemData.key, mainKey(companyId)));
       // Existing audit history stays append-only. Imported history is grouped with its original IDs.
       const existingAudit = new Set(current.tables.auditLog.map((row: any) => mainDataVersion({ ...row, id: undefined })));

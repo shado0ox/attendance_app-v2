@@ -1,3 +1,4 @@
+import AttendanceBreakSettings from '../../components/AttendanceBreakSettings';
 import AppInstallationSettings from '../../components/AppInstallationSettings';
 import SettingsSection from '../../components/SettingsSection';
 import AttendancePasskeySettings from '../../components/AttendancePasskeySettings';
@@ -89,7 +90,7 @@ export default function SettingsView({
     if (!geoDirty) setGeoDraft(appSettings?.officeLocation || {});
   }, [appSettings?.officeLocation, geoDirty]);
   const updateGeoDraft = (next: any) => { setGeoDirty(true); setGeoDraft(next); };
-  const sectionIds = ['whatsapp', 'analysis', 'company', 'geo', 'branches', 'passkey', 'audit', 'password', 'admins', 'registrations', 'installation'];
+  const sectionIds = ['whatsapp', 'analysis', 'company', 'geo', 'branches', 'passkey', 'audit', 'password', 'admins', 'registrations', 'installation', 'breaks'];
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   useEffect(() => { setExpanded({}); }, [companyId]);
   const sectionProps = (id: string) => ({ open: !!expanded[id], onChange: (open: boolean) => setExpanded(current => ({ ...current, [id]: open })) });
@@ -99,6 +100,7 @@ export default function SettingsView({
     <div className="flex flex-col gap-3">
       <div className="flex gap-2 flex-wrap"><button className="border rounded-xl px-4 py-3 text-sm" onClick={() => setExpanded(Object.fromEntries(sectionIds.map(id => [id, true])))}>توسيع الكل</button><button className="border rounded-xl px-4 py-3 text-sm" onClick={() => setExpanded({})}>طي الكل</button></div>
       {admin.role === 'superadmin' && <SettingsSection title="تنزيل التطبيق وروابط المتاجر" {...sectionProps('installation')}><AppInstallationSettings /></SettingsSection>}
+      <SettingsSection title="الاستراحات أثناء الدوام" {...sectionProps('breaks')}><AttendanceBreakSettings companyId={companyId} /></SettingsSection>
       <SettingsSection title="تذكيرات واتساب" {...sectionProps('whatsapp')}><WhatsAppReminderSettings companyId={companyId} /></SettingsSection>
       <SettingsSection title="قواعد تحليل الحضور" {...sectionProps('analysis')}><AttendanceAnalysisSettings settings={appSettings} save={onUpdateSettings} /></SettingsSection>
       {/* Company Info section */}

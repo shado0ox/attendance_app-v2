@@ -43,6 +43,8 @@ export const attendance = pgTable('attendance', {
   date: text('date').notNull(),
   companyId: text('company_id').default('default'),
   
+  breaks: jsonb('breaks').default([]),
+
   // Period 1
   checkIn: text('check_in'),
   checkInTs: text('check_in_ts'),

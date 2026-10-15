@@ -22,7 +22,10 @@ try {
     await pool.query('INSERT INTO shift_app.companies(id,name,admin_username,admin_password) VALUES ($1,$1,$1,$2) ON CONFLICT(id) DO NOTHING', [id, 'ci-only-hash']);
     await db.insert(schema.systemData).values({ key: 'mainData_' + id, value: id === companyId ? main : { ...main, employees: [{ ...main.employees[0], username: 'backup-ci-foreign' }] } }).onConflictDoUpdate({ target: schema.systemData.key, set: { value: main } });
   }
-  const [original] = await db.insert(schema.attendance).values({ companyId, empId: employeeId, empName: 'Employee', date: '2026-10-10', checkIn: '08:00' }).returning();
+  const breakEntry = { id: 'backup-break', period: 1, ruleId: 'lunch', name: 'Lunch', plannedStart: 1, plannedEnd: 2, startedAt: 1, endedAt: 2, allowedMinutes: 30 };
+  const breakPolicy = { companyId, rules: [{ id: 'lunch', name: 'Lunch' }] };
+  await db.insert(schema.systemData).values({ key: 'attendanceBreakPolicy:' + companyId, value: breakPolicy });
+  const [original] = await db.insert(schema.attendance).values({ companyId, empId: employeeId, empName: 'Employee', date: '2026-10-10', checkIn: '08:00', breaks: [breakEntry] }).returning();
   const [foreign] = await db.insert(schema.attendance).values({ companyId: otherCompany, empId: employeeId, empName: 'Foreign', date: '2026-10-10', checkIn: '09:00' }).returning();
   const [document] = await db.insert(schema.electronicDocuments).values({ companyId, employeeId, employeeName: 'Employee', formData: { requestType: 'absence' }, employeeSignature: 'signed', status: 'approved', shareTokenHash: 'old-link' }).returning();
   await db.insert(schema.electronicDocumentAudit).values({ companyId, documentId: document.id, actorId: employeeId, actorRole: 'employee', action: 'employee_signed' });
@@ -36,6 +39,7 @@ try {
   assert.equal((await request('download', { companyId: otherCompany })).status, 403);
   const downloaded = await request('download', {}); assert.equal(downloaded.status, 200); assert.match(downloaded.headers.get('content-disposition') || '', /attachment/);
   const file = await downloaded.text(), decoded = openCompanyBackup(file, companyId, secret).payload;
+  assert.deepEqual(decoded.breakPolicy, breakPolicy); assert.deepEqual(decoded.tables.attendance[0].breaks, [breakEntry]);
   assert.equal(decoded.tables.attendance.length, 1); assert.equal(decoded.tables.attendance[0].companyId, companyId); assert.equal(decoded.photos.length, 1); assert.equal(decoded.mainData.settings.password, undefined); assert.equal(decoded.mainData.employees[0].webauthnCredentials, undefined);
   assert.equal((await request('preview', { file }, otherCompany)).status, 400, 'cross-tenant restore rejected');
   assert.equal((await request('preview', { file: file.replace('"version":1', '"version":2') })).status, 400);
@@ -43,6 +47,7 @@ try {
   let preview = await (await request('preview', { file })).json();
   await db.insert(schema.attendance).values({ companyId, empId: employeeId, empName: 'New', date: '2026-10-11', checkIn: '08:30' });
   assert.equal((await request('restore', { file, token: preview.token, confirm: 'استرجاع' })).status, 409, 'new attendance invalidates preview');
+  await db.update(schema.systemData).set({ value: { companyId, rules: [] } }).where(eq(schema.systemData.key, 'attendanceBreakPolicy:' + companyId));
   const changed = structuredClone(main); changed.settings.companyName = 'Changed'; changed.settings.password = 'current-root'; changed.employees[0].password = 'current-employee-password'; changed.employees[0].webauthnCredentials[0].counter = 99; await putMain(changed);
   await db.update(schema.systemData).set({ value: { dataUrl: 'data:image/png;base64,changed' } }).where(eq(schema.systemData.key, photoKey));
   preview = await (await request('preview', { file })).json(); assert.equal(preview.current.attendance, 2); assert.equal(preview.incoming.attendance, 1);
@@ -51,6 +56,8 @@ try {
   const [saved] = await db.select().from(schema.systemData).where(eq(schema.systemData.key, mainKey)); const value = saved.value as any;
   assert.equal(value.settings.companyName, 'Backup Company'); assert.equal(value.settings.password, 'current-root'); assert.equal(value.employees[0].password, 'current-employee-password'); assert.equal(value.employees[0].webauthnCredentials[0].counter, 99);
   const records = await db.select().from(schema.attendance).where(eq(schema.attendance.companyId, companyId)); assert.equal(records.length, 1); assert.notEqual(records[0].id, original.id);
+  assert.deepEqual(records[0].breaks, [breakEntry]);
+  assert.deepEqual((await db.select().from(schema.systemData).where(eq(schema.systemData.key, 'attendanceBreakPolicy:' + companyId)))[0].value, breakPolicy);
   const [month] = await db.select().from(schema.attendanceMonths).where(eq(schema.attendanceMonths.companyId, companyId)); assert.deepEqual((month.value as any).snapshot.days[0].ids, [records[0].id]);
   const [doc] = await db.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.companyId, companyId)); assert.equal(doc.shareTokenHash, null);
   const [docAudit] = await db.select().from(schema.electronicDocumentAudit).where(eq(schema.electronicDocumentAudit.companyId, companyId)); assert.equal(docAudit.documentId, doc.id);
