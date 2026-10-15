@@ -83,7 +83,10 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
         // Serialize writes: an old logout must not erase a newer account's credential.
         await queryClient.cancelQueries();
         queryClient.clear();
-        if (clearPush) await SecureStore.deleteItemAsync("wafr.native.push.v1");
+        if (clearPush) {
+          try { await SecureStore.deleteItemAsync("wafr.native.push.v1"); }
+          catch { /* Device metadata must not block deletion of the login credential. */ }
+        }
         if (next) {
           await SecureStore.setItemAsync(KEY, JSON.stringify(next), {
             keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
@@ -93,6 +96,7 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
         }
         current.current = next;
         setSession(next);
+        if (next) setStorageError("");
         return true;
       });
       storageQueue.current = job.then(() => undefined, () => undefined);
@@ -112,11 +116,23 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
     if (!used) return;
     if (current.current?.token !== used.token)
       throw new ApiError("تغير الحساب؛ أعد المحاولة من حسابك الحالي", 409);
-    const token = await SecureStore.getItemAsync("wafr.native.push.v1");
-    if (token) await api("/api/mobile/push/subscription", "DELETE", { token });
-    if (!await transition(used.token, null, true))
+    let token: string | null = null, revokeFailed = false;
+    try { token = await SecureStore.getItemAsync("wafr.native.push.v1"); }
+    catch { revokeFailed = true; }
+    if (token) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      try {
+        await request(used, "/api/mobile/push/subscription", "DELETE", { token }, controller.signal);
+      } catch { revokeFailed = true; }
+      finally { clearTimeout(timeout); }
+    }
+    const changed = await transition(used.token, null, true);
+    if (!changed && current.current)
       throw new ApiError("تغير الحساب أثناء تسجيل الخروج", 409);
-  }, [session, api, transition]);
+    if (revokeFailed && !current.current)
+      setStorageError("تم الخروج من الحساب على هذا الجهاز. تعذر تأكيد إيقاف إشعاراته على السيرفر؛ يمكنك إيقاف إشعارات التطبيق من إعدادات الهاتف.");
+  }, [session, transition]);
   const login = async (username: string, password: string) => {
     const expectedToken = current.current?.token || null;
     const value = await request<Session>(
