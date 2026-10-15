@@ -5,7 +5,7 @@ import pg from 'pg';
 import jwt from 'jsonwebtoken';
 const origin = 'http://127.0.0.1:3011', secret = 'passkey-ci-only-secret', company = 'passkey-ci', employeeId = 'passkey-employee';
 const pool = new pg.Pool({ host: process.env.SQL_HOST, port: Number(process.env.SQL_PORT || 5432), user: process.env.SQL_USER, password: process.env.SQL_PASSWORD, database: process.env.SQL_DB_NAME });
-const child = spawn(process.execPath, ['dist/server.cjs'], { env: { ...process.env, NODE_ENV: 'production', JWT_SECRET: secret, BACKUP_ENABLED: 'false', ATTENDANCE_PUSH_ENABLED: 'false', WEBAUTHN_ORIGIN: origin }, stdio: 'inherit' });
+const child = spawn(process.execPath, ['dist/server.cjs'], { env: { ...process.env, NODE_ENV: 'production', JWT_SECRET: secret, BACKUP_ENABLED: 'false', ATTENDANCE_PUSH_ENABLED: 'false', WEBAUTHN_ORIGIN: origin, WEBAUTHN_ANDROID_ORIGINS: 'android:apk-key-hash:' + 'a'.repeat(43) }, stdio: 'inherit' });
 const token = (role: string, companyId = company, id?: string) => ({ 'Content-Type': 'application/json', Authorization: 'Bearer ' + jwt.sign({ role, companyId, ...(id && { id }) }, secret) });
 const employee = token('employee', company, employeeId), admin = token('admin');
 const request = (endpoint: string, body?: any, headers = employee) => fetch(origin + endpoint, { method: body ? 'POST' : 'GET', headers, ...(body && { body: JSON.stringify(body) }) });
@@ -13,11 +13,11 @@ const pair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }), jwk
 const publicKey = Buffer.concat([Buffer.from('a5010203262001215820', 'hex'), Buffer.from(jwk.x!, 'base64url'), Buffer.from('225820', 'hex'), Buffer.from(jwk.y!, 'base64url')]).toString('base64url');
 const credentialId = crypto.randomBytes(32).toString('base64url');
 let counter = 0;
-async function signedProof(field: string, recordId?: number, flags = 5) {
+async function signedProof(field: string, recordId?: number, flags = 5, assertionOrigin = origin) {
   const optionsResponse = await request('/api/attendance-passkey/options', { field, recordId });
   assert.equal(optionsResponse.status, 200);
   const options = await optionsResponse.json();
-  const clientDataJSON = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge: options.options.challenge, origin }));
+  const clientDataJSON = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge: options.options.challenge, origin: assertionOrigin }));
   const count = Buffer.alloc(4); count.writeUInt32BE(++counter);
   const authenticatorData = Buffer.concat([crypto.createHash('sha256').update('127.0.0.1').digest(), Buffer.from([flags]), count]);
   const signature = crypto.sign('sha256', Buffer.concat([authenticatorData, crypto.createHash('sha256').update(clientDataJSON).digest()]), pair.privateKey);
@@ -39,7 +39,8 @@ try {
   assert.equal((await request('/api/attendance-passkey/credential', { employeeId, credentialId, approved: true }, token('admin', 'default'))).status, 400, 'cannot approve foreign credential');
   assert.equal((await request('/api/attendance-passkey/credential', { employeeId, credentialId, approved: true }, admin)).status, 200);
   const uvMissing = await signedProof('checkIn', undefined, 1); assert.equal(uvMissing.response.status, 400, 'user verification required');
-  const result = await signedProof('checkIn'); assert.equal(result.response.status, 200);
+  assert.equal((await signedProof('checkIn', undefined, 5, 'android:apk-key-hash:' + 'b'.repeat(43))).response.status, 400, 'unknown native certificate rejected');
+  const result = await signedProof('checkIn', undefined, 5, 'android:apk-key-hash:' + 'a'.repeat(43)); assert.equal(result.response.status, 200);
   const proof = (await result.response.json()).proof;
   assert.equal((await request('/api/attendance-passkey/verify', result.payload)).status, 400, 'challenge is single use');
   assert.equal((await request('/api/attendance', { companyId: company, checkOut: '16:00', passkeyProof: proof })).status, 403, 'proof action bound');

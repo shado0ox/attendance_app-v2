@@ -1,9 +1,5 @@
-name: iOS Mac build
+name: Legacy iOS web wrapper (archived)
 on:
-  pull_request:
-    paths:
-      - 'ios/**'
-      - '.github/workflows/ios-build.yml'
   workflow_dispatch:
     inputs:
       run_simulator:

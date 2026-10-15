@@ -1,11 +1,5 @@
-name: Google Play release bundle
+name: Legacy Android TWA release (archived)
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/android-release.yml'
-      - 'scripts/generate-android-preview.cjs'
-      - 'public/icons/**'
-      - 'public/manifest.json'
   workflow_dispatch:
 permissions:
   contents: read

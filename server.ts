@@ -1,3 +1,8 @@
+import { readFile } from 'node:fs/promises';
+import { nativeAssociations } from './src/lib/nativeAssociations';
+import { registerNativePush } from './src/server/nativePush';
+import { registerMobileEmployee } from './src/server/mobileEmployee';
+import { webauthnExpectedOrigins } from './src/lib/mobileEmployee';
 import { registerAttendanceBreaks } from './src/server/attendanceBreaks';
 import { openBreak, employeeWorkState } from './src/lib/attendanceBreaks';
 import { registerAppInstallation } from './src/server/appInstallation';
@@ -271,6 +276,9 @@ const WEBAUTHN_ORIGIN = (() => { try { return new URL(process.env.WEBAUTHN_ORIGI
 const WEBAUTHN_RP_ID =
   process.env.WEBAUTHN_RP_ID || new URL(WEBAUTHN_ORIGIN).hostname;
 
+const NATIVE_ASSOCIATIONS = nativeAssociations(process.env.APPLE_TEAM_ID, process.env.ANDROID_APP_CERT_SHA256);
+const WEBAUTHN_EXPECTED_ORIGINS = webauthnExpectedOrigins(WEBAUTHN_ORIGIN, [process.env.WEBAUTHN_ANDROID_ORIGINS, ...NATIVE_ASSOCIATIONS.origins].filter(Boolean).join(','));
+
 const webauthnChallenges = new Map<
   string,
   { challenge: string; type: 'registration' | 'authentication'; expiresAt: number }
@@ -327,8 +335,10 @@ function bufferFromBase64url(value: string) {
 
 registerAppInstallation(app, requireAuth);
 registerAttendanceBreaks(app, requireAuth, getMainDataByCompanyId);
+registerMobileEmployee(app, requireAuth, getMainDataByCompanyId);
 registerElectronicDocumentRoutes(app, requireAuth, getMainDataByCompanyId, () => JWT_SECRET);
-registerAttendancePasskey(app, requireAuth, getMainDataByCompanyId, saveEmployeeCredentials, { rpID: WEBAUTHN_RP_ID, origin: WEBAUTHN_ORIGIN });
+registerAttendancePasskey(app, requireAuth, getMainDataByCompanyId, saveEmployeeCredentials, { rpID: WEBAUTHN_RP_ID, origin: WEBAUTHN_EXPECTED_ORIGINS });
+const nativeReminders = registerNativePush(app, requireAuth, getMainDataByCompanyId, companyCanLogin);
 const startAttendanceReminders = registerAttendancePush(app, requireAuth, getMainDataByCompanyId, companyCanLogin);
 
 // Debug DB route (development only — leaks connection details, never expose in production)
@@ -627,7 +637,7 @@ app.post('/api/auth/webauthn-register-verify', requireAuth(['employee', 'admin',
     const verification = await verifyRegistrationResponse({
       response: credential,
       expectedChallenge,
-      expectedOrigin: WEBAUTHN_ORIGIN,
+      expectedOrigin: WEBAUTHN_EXPECTED_ORIGINS,
       expectedRPID: WEBAUTHN_RP_ID,
       requireUserVerification: true,
     });
@@ -781,7 +791,7 @@ app.post('/api/auth/webauthn-verify', async (req, res) => {
      clientExtensionResults: {},
      },
      expectedChallenge,
-     expectedOrigin: WEBAUTHN_ORIGIN,
+     expectedOrigin: WEBAUTHN_EXPECTED_ORIGINS,
      expectedRPID: WEBAUTHN_RP_ID,
      requireUserVerification: true,
      credential: {
@@ -2050,6 +2060,7 @@ app.delete('/api/companies/:id', requireAuth(['superadmin'], false), async (req,
       for(const admin of admins) keys.push(adminAccessKey(id,admin.id),notificationStateKey(id,{role:'admin',id:admin.id}));
       await tx.delete(schema.systemData).where(sql`${schema.systemData.key} LIKE 'companyBackup%' AND ${schema.systemData.value}->>'companyId' = ${id}`);
       await tx.delete(schema.systemData).where(sql`${schema.systemData.key} LIKE 'whatsapp%' AND ${schema.systemData.value}->>'companyId' = ${id}`);
+      await tx.delete(schema.systemData).where(sql`${schema.systemData.key} LIKE 'attendanceNativePush:%' AND ${schema.systemData.value}->>'companyId' = ${id}`);
       await tx.delete(schema.systemData).where(sql`${schema.systemData.key} LIKE 'attendancePush:%' AND ${schema.systemData.value}->>'companyId' = ${id}`);
       await tx.delete(schema.systemData).where(sql`(${schema.systemData.key} LIKE 'attendancePasskeyChallenge:%' OR ${schema.systemData.key} LIKE 'attendancePasskeyProof:%') AND ${schema.systemData.value}->>'companyId' = ${id}`);
       for(const role of ['superadmin','admin']) for(const username of [undefined, 'admin']) keys.push(notificationStateKey(id,{role,username}));
@@ -2071,14 +2082,18 @@ async function startServer() {
   await migrateCompanyCodes(db);
   await ensureJwtSecret();
   startAttendanceReminders.start();
+  nativeReminders.start();
   whatsappReminders.start();
 
-  // Serve only this public association file; Express otherwise ignores dot-directories.
-  app.get('/.well-known/assetlinks.json', (_req, res) => {
-    const assetRoot = process.env.NODE_ENV === 'production' ? 'dist' : 'public';
-    res.set('Cache-Control', 'public, max-age=300');
-    res.type('application/json');
-    res.sendFile(path.join(process.cwd(), assetRoot, '.well-known', 'assetlinks.json'), { dotfiles: 'allow' });
+  app.get('/.well-known/apple-app-site-association', (_req, res) => {
+    res.set('Cache-Control', 'public, max-age=300').json(NATIVE_ASSOCIATIONS.apple);
+  });
+  app.get('/.well-known/assetlinks.json', async (_req, res) => {
+    try {
+      const assetRoot = process.env.NODE_ENV === 'production' ? 'dist' : 'public';
+      const legacy = JSON.parse(await readFile(path.join(process.cwd(), assetRoot, '.well-known', 'assetlinks.json'), 'utf8'));
+      res.set('Cache-Control', 'public, max-age=300').json([...legacy, ...NATIVE_ASSOCIATIONS.android]);
+    } catch { res.status(503).json({ error: 'تعذر قراءة روابط التطبيقات' }); }
   });
 
   if (process.env.NODE_ENV !== 'production') {

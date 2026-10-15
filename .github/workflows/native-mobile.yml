@@ -1,0 +1,99 @@
+name: Native employee mobile
+on:
+  pull_request:
+    paths: ['mobile/**', 'src/lib/mobileEmployee.ts', 'src/server/mobileEmployee.ts', '.github/workflows/native-mobile.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run export
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wafr-native-javascript
+          path: mobile/dist/
+          retention-days: 14
+  android:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - run: npx expo prebuild --platform android --no-install
+      - name: Compile native Android application
+        run: ./android/gradlew -p android assembleRelease bundleRelease --no-daemon --max-workers=2
+        env:
+          GRADLE_OPTS: -Xmx4g -Dorg.gradle.daemon=false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wafr-native-android
+          path: |
+            mobile/android/app/build/outputs/apk/release/*.apk
+            mobile/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 14
+          if-no-files-found: error
+  ios:
+    needs: validate
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npx expo prebuild --platform ios
+      - name: Compile native iPhone application
+        run: |
+          WORKSPACE=$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)
+          PROJECT=$(find ios -maxdepth 1 -name '*.xcodeproj' -print -quit)
+          SCHEME=$(basename "$PROJECT" .xcodeproj)
+          xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/simulator CODE_SIGNING_ALLOWED=NO build > build-ios.log 2>&1 || { tail -150 build-ios.log; exit 1; }
+          xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/device CODE_SIGNING_ALLOWED=NO build > build-device.log 2>&1 || { tail -150 build-device.log; exit 1; }
+          mkdir -p build/artifacts
+          ditto -c -k --keepParent build/simulator/Build/Products/Release-iphonesimulator/*.app build/artifacts/WafrDawam-Native-Simulator.zip
+          ditto -c -k --keepParent build/device/Build/Products/Release-iphoneos/*.app build/artifacts/WafrDawam-Native-Device-Unsigned.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafr-native-ios
+          path: |
+            mobile/build/artifacts/
+            mobile/build-ios.log
+            mobile/build-device.log
+          retention-days: 14
