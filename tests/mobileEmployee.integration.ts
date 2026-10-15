@@ -30,16 +30,17 @@ const headers = (id: string, role = "employee", companyId = company) => ({
   Authorization: "Bearer " + jwt.sign({ role, companyId, id }, secret),
 });
 const call = (
-  path: string,
-  method = "GET",
-  body?: any,
-  account = headers("e1"),
-) =>
-  fetch(origin + path, {
+  path: string, method = "GET", body?: any, account = headers("e1"),
+) => {
+  const url = new URL(origin + path);
+  const token = url.searchParams.get("token");
+  url.searchParams.delete("token");
+  return fetch(url, {
     method,
-    headers: account,
+    headers: { ...account, ...(token ? { "X-Wafr-Push-Token": token } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
+};
 try {
   let ready = false;
   for (let i = 0; i < 60; i++) {

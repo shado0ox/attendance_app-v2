@@ -1,8 +1,10 @@
+import { scopedApi } from "./scopedApi";
 import React, {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -74,74 +76,59 @@ export function SessionProvider({ children }: React.PropsWithChildren) {
       live = false;
     };
   }, []);
-  const logout = useCallback(async () => {
-    // Delete first: do not claim logout succeeded if the persisted token could return on restart.
-    const token = await SecureStore.getItemAsync("wafr.native.push.v1");
-    if (token && current.current) {
-      await request(
-        current.current,
-        "/api/mobile/push/subscription",
-        "DELETE",
-        { token },
-      );
-      await SecureStore.deleteItemAsync("wafr.native.push.v1");
-    }
-    await SecureStore.deleteItemAsync(KEY);
-    current.current = null;
-    setSession(null);
-    await queryClient.cancelQueries();
-    queryClient.clear();
-  }, []);
-  const api = useCallback(
-    async <T,>(
-      path: string,
-      method?: string,
-      body?: object,
-      signal?: AbortSignal,
-    ): Promise<T> => {
-      const used = current.current;
-      if (!used) throw new ApiError("سجل الدخول أولًا", 401);
-      try {
-        return await request<T>(used, path, method, body, signal);
-      } catch (error) {
-        if (
-          error instanceof ApiError &&
-          error.status === 401 &&
-          used.token === current.current?.token
-        ) {
+  const storageQueue = useRef<Promise<void>>(Promise.resolve());
+  const transition = useCallback(
+    (expectedToken: string | null, next: Session | null, clearPush = false) => {
+      const job = storageQueue.current.then(async () => {
+        if ((current.current?.token || null) !== expectedToken) return false;
+        // Serialize writes: an old logout must not erase a newer account's credential.
+        await queryClient.cancelQueries();
+        queryClient.clear();
+        if (clearPush) await SecureStore.deleteItemAsync("wafr.native.push.v1");
+        if (next) {
+          await SecureStore.setItemAsync(KEY, JSON.stringify(next), {
+            keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+          });
+        } else {
           await SecureStore.deleteItemAsync(KEY);
-          current.current = null;
-          setSession(null);
-          await queryClient.cancelQueries();
-          queryClient.clear();
         }
-        throw error;
-      }
+        current.current = next;
+        setSession(next);
+        return true;
+      });
+      storageQueue.current = job.then(() => undefined, () => undefined);
+      return job;
     },
     [],
   );
+  const api = useMemo(
+    () => scopedApi(session, () => current.current, request, async (token) => {
+      await transition(token, null);
+    }),
+    [session, transition],
+  );
+  const logout = useCallback(async () => {
+    const used = session;
+    if (!used) return;
+    if (current.current?.token !== used.token)
+      throw new ApiError("تغير الحساب؛ أعد المحاولة من حسابك الحالي", 409);
+    const token = await SecureStore.getItemAsync("wafr.native.push.v1");
+    if (token) await api("/api/mobile/push/subscription", "DELETE", { token });
+    if (!await transition(used.token, null, true))
+      throw new ApiError("تغير الحساب أثناء تسجيل الخروج", 409);
+  }, [session, api, transition]);
   const login = async (username: string, password: string) => {
+    const expectedToken = current.current?.token || null;
     const value = await request<Session>(
-      null,
-      "/api/auth/employee-login",
-      "POST",
-      { username: username.trim(), password },
+      null, "/api/auth/employee-login", "POST", { username: username.trim(), password },
     );
     if (!value.token || !value.id || !value.companyId)
       throw new Error("بيانات الجلسة ناقصة");
     const saved = {
-      token: value.token,
-      id: String(value.id),
-      companyId: value.companyId,
-      name: value.name,
+      token: value.token, id: String(value.id), companyId: value.companyId, name: value.name,
     };
-    await SecureStore.setItemAsync(KEY, JSON.stringify(saved), {
-      keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-    });
-    await queryClient.cancelQueries();
-    queryClient.clear();
-    current.current = saved;
-    setSession(saved);
+    if (!await transition(expectedToken, saved))
+      throw new ApiError("تغير الحساب أثناء الدخول؛ أعد المحاولة", 409);
   };
   const refresh = useCallback(async () => {
     await queryClient.invalidateQueries();

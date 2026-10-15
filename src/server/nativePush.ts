@@ -54,7 +54,7 @@ export function registerNativePush(
     sql`${schema.systemData.value}->>'companyId' = ${account.companyId} AND ${schema.systemData.value}->>'employeeId' = ${String(account.id)}`;
   app.get("/api/mobile/push/status", auth, async (req: any, res) => {
     res.set("Cache-Control", "no-store");
-    const token = req.query.token;
+    const token = req.get("X-Wafr-Push-Token");
     try {
       const [row] = validNativeToken(token)
         ? await db

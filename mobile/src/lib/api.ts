@@ -1,14 +1,8 @@
 import { apiRequest } from "./apiRequest";
 import Constants from "expo-constants";
 import type { Session } from "./types";
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-  ) {
-    super(message);
-  }
-}
+import { ApiError } from "./apiError";
+export { ApiError };
 const configured =
   Constants.expoConfig?.extra?.apiUrl || "https://attendance.xshadox.com";
 const parsed = new URL(configured);

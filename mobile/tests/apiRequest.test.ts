@@ -42,3 +42,11 @@ test("credential transport cannot point to another origin or use traversal paths
     undefined,
   );
 });
+
+test("a push device address stays out of request URLs and access logs", () => {
+  const token = "ExpoPushToken[" + "a".repeat(22) + "]";
+  const result = apiRequest(origin, session,
+    "/api/mobile/push/status?token=" + encodeURIComponent(token), "GET");
+  assert.equal(new URL(result.url).searchParams.has("token"), false);
+  assert.equal(result.headers["X-Wafr-Push-Token"], token);
+});

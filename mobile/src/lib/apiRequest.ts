@@ -17,12 +17,15 @@ export function apiRequest(
   const url = new URL(path, origin);
   if (url.origin !== origin) throw new Error("Invalid API origin");
   if (session) url.searchParams.set("companyId", session.companyId);
+  const pushToken = url.pathname === "/api/mobile/push/status" ? url.searchParams.get("token") : null;
+  if (pushToken) url.searchParams.delete("token");
   const profilePatch =
     url.pathname === "/api/employee-profile" && method === "PATCH";
   return {
     url: url.toString(),
     headers: {
       Accept: "application/json",
+      ...(pushToken ? { "X-Wafr-Push-Token": pushToken } : {}),
       ...(method !== "GET" ? { "Content-Type": "application/json" } : {}),
       ...(session ? { Authorization: `Bearer ${session.token}` } : {}),
     },
