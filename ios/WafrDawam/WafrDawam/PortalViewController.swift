@@ -1,7 +1,7 @@
 import UIKit
 import WebKit
 
-/// Preview host: HTTPS and the original origin preserve the website's API/session boundary.
+/// App host: HTTPS and the original origin preserve the website's API/session boundary.
 /// Remote pages receive no native filesystem, token, location or notification bridge.
 final class PortalViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
     private let startURL: URL
@@ -17,7 +17,7 @@ final class PortalViewController: UIViewController, WKNavigationDelegate, WKUIDe
         let config = configuration ?? WKWebViewConfiguration()
         if configuration == nil { config.websiteDataStore = .default() }
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
-        config.applicationNameForUserAgent = "WafrDawam-iOS-Preview"
+        config.applicationNameForUserAgent = "WafrDawam-iOS"
         webView = WKWebView(frame: .zero, configuration: config)
         super.init(nibName: nil, bundle: nil)
     }
@@ -72,8 +72,8 @@ final class PortalViewController: UIViewController, WKNavigationDelegate, WKUIDe
             },
             UIAction(title: "طباعة الصفحة", image: UIImage(systemName: "printer")) { [weak self] _ in self?.printPage() },
             UIAction(title: "مشاركة PDF للصفحة", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in self?.sharePDF() },
-            UIAction(title: "عن النسخة التجريبية", image: UIImage(systemName: "info.circle")) { [weak self] _ in
-                self?.showAlert(title: "نسخة للتجربة على الماك والآيفون", message: "تحتاج اتصالًا بالإنترنت. الموقع يعمل أثناء فتح التطبيق فقط. إشعارات Apple غير مربوطة بعد. إذا كان حسابك يتطلب Passkey، استخدم فتح في Safari لحين تفعيل الحساب وربط الدومين بالتطبيق. جلسة Safari منفصلة وقد تحتاج تسجيل الدخول مجددًا.")
+            UIAction(title: "عن وفر دوام", image: UIImage(systemName: "info.circle")) { [weak self] _ in
+                self?.showAlert(title: "وفر دوام", message: "وفر دوام لإدارة الجدول والحضور والطلبات. يحتاج اتصالًا بالإنترنت، وتتوفر خدمات الموقع أثناء استخدام التطبيق. يمكنك فتح بوابة النظام في Safari عند الحاجة، وقد يتطلب ذلك تسجيل الدخول مجددًا.")
             }
         ])
     }

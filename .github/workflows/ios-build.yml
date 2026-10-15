@@ -1,9 +1,9 @@
-name: iOS Mac preview
+name: iOS Mac build
 on:
   pull_request:
     paths:
       - 'ios/**'
-      - '.github/workflows/ios-preview.yml'
+      - '.github/workflows/ios-build.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -35,7 +35,7 @@ jobs:
           xcrun simctl boot "$WAFR_SIMULATOR_ID"
           xcrun simctl bootstatus "$WAFR_SIMULATOR_ID" -b
           xcrun simctl install "$WAFR_SIMULATOR_ID" "$RUNNER_TEMP/wafr-ios-build/Build/Products/Debug-iphonesimulator/WafrDawam.app"
-          xcrun simctl launch "$WAFR_SIMULATOR_ID" com.xshadox.wafrdawam.preview
+          xcrun simctl launch "$WAFR_SIMULATOR_ID" com.xshadox.wafrdawam
           sleep 5
           xcrun simctl io "$WAFR_SIMULATOR_ID" screenshot "$RUNNER_TEMP/WafrDawam-Simulator.png"
       - name: Package simulator and source for Mac
@@ -44,10 +44,10 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/wafr-ios-build/Build/Products/Debug-iphonesimulator/WafrDawam.app" "$RUNNER_TEMP/wafr-ios-artifact/WafrDawam-Simulator.zip"
           ditto -c -k --keepParent ios "$RUNNER_TEMP/wafr-ios-artifact/WafrDawam-Xcode-Source.zip"
           cp "$RUNNER_TEMP/WafrDawam-Simulator.png" "$RUNNER_TEMP/wafr-ios-artifact/"
-          cp docs/ios-mac-preview.md "$RUNNER_TEMP/wafr-ios-artifact/README-ar.md"
+          cp docs/ios-mac-build.md "$RUNNER_TEMP/wafr-ios-artifact/README-ar.md"
       - uses: actions/upload-artifact@v4
         with:
-          name: WafrDawam-iOS-Mac-preview
+          name: WafrDawam-iOS-Mac
           path: ${{ runner.temp }}/wafr-ios-artifact/
           retention-days: 30
           if-no-files-found: error
