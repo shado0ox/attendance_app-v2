@@ -1,3 +1,5 @@
+import { registerAttendanceBreaks } from './src/server/attendanceBreaks';
+import { openBreak, employeeWorkState } from './src/lib/attendanceBreaks';
 import { registerAppInstallation } from './src/server/appInstallation';
 import { registerAttendancePasskey, checkAttendancePasskey } from './src/server/attendancePasskey';
 import {employeeRequestValues} from './src/lib/employeeRequests';
@@ -324,6 +326,7 @@ function bufferFromBase64url(value: string) {
 }
 
 registerAppInstallation(app, requireAuth);
+registerAttendanceBreaks(app, requireAuth, getMainDataByCompanyId);
 registerElectronicDocumentRoutes(app, requireAuth, getMainDataByCompanyId, () => JWT_SECRET);
 registerAttendancePasskey(app, requireAuth, getMainDataByCompanyId, saveEmployeeCredentials, { rpID: WEBAUTHN_RP_ID, origin: WEBAUTHN_ORIGIN });
 const startAttendanceReminders = registerAttendancePush(app, requireAuth, getMainDataByCompanyId, companyCanLogin);
@@ -1330,7 +1333,8 @@ app.post('/api/attendance-months', requireAuth(['admin', 'superadmin']), async (
       if (action === 'approve') {
         const records = await tx.select().from(schema.attendance).where(and(eq(schema.attendance.companyId, companyId), sql`${schema.attendance.date} LIKE ${month + '-%'}`));
         const mainData = await getMainDataByCompanyId(companyId);
-        const days = buildAttendanceDays(records, mainData?.settings).map(day => ({ ...day, departmentName: mainData?.departments?.find((d: any) => d.id === day.dept)?.name || day.dept }));
+        const days = buildAttendanceDays(records, mainData?.settings).map(day => ({ ...day, ...employeeWorkState(records.filter(record => record.empId === day.empId && record.date === day.date)), departmentName: mainData?.departments?.find((d: any) => d.id === day.dept)?.name || day.dept }));
+        if (records.some(record => openBreak(record))) throw attendanceError(409, 'يوجد موظف لم يسجل الرجوع من الاستراحة؛ أنهِ الاستراحات المفتوحة قبل اعتماد الشهر');
         if (!days.length) throw attendanceError(409, 'لا توجد سجلات لهذا الشهر');
         if (days.some(day => day.minutes === null)) throw attendanceError(409, 'راجع السجلات الناقصة أو غير الصالحة قبل اعتماد الشهر');
         value = { month, status: 'approved', revision: (old.revision || 0) + 1, approvedAt: new Date().toISOString(), approvedBy: auth.username || auth.id || auth.role,
@@ -1366,8 +1370,11 @@ app.get('/api/attendance-report', requireAuth(['admin', 'superadmin']), async (r
       reportDays = analyzeAttendance(reportDays, effectiveScheduleData(mainData), query, leaves);
     }
     reportDays=attachPermissionMarkers(reportDays,permissions).filter(day=>!query.dept||day.dept===query.dept).sort((a,b)=>b.date.localeCompare(a.date)||String(a.empName).localeCompare(String(b.empName),'ar'));
-    const days = reportDays.map(day => ({ ...day, departmentName: mainData?.departments?.find((dept: any) => dept.id === day.dept)?.name || day.dept }));
-    return res.json({ ...attendanceReportPage(days.filter(day => ownsDay(requestAccess(req), mainData, day)), query), companyName: mainData?.settings?.companyName || companyId, from: query.from, to: query.to });
+    const workRecords = new Map<string, any[]>();
+    for (const record of records) { const key = record.empId + ':' + record.date; workRecords.set(key, [...(workRecords.get(key) || []), record]); }
+    const generatedAt = Date.now();
+    const days = reportDays.map(day => ({ ...day, ...employeeWorkState(workRecords.get(day.empId + ':' + day.date) || [], generatedAt), departmentName: mainData?.departments?.find((dept: any) => dept.id === day.dept)?.name || day.dept }));
+    return res.json({ ...attendanceReportPage(days.filter(day => ownsDay(requestAccess(req), mainData, day)), query), companyName: mainData?.settings?.companyName || companyId, from: query.from, to: query.to, generatedAt });
   } catch (error) { console.error('Attendance report query failed', error); return res.status(500).json({ error: 'تعذر تحميل كشف الحضور' }); }
 });
 
@@ -1518,6 +1525,7 @@ app.post('/api/attendance', requireAuth(['employee', 'admin', 'superadmin']), as
       const transition = validatePunchTransition(record, field);
       if (transition === 'duplicate') return { status: 200, body: record };
       if (transition) return { status: 409, body: { error: transition } };
+      if (field.startsWith('checkOut') && openBreak(record)) return { status: 409, body: { error: 'سجل الرجوع من الاستراحة قبل تسجيل الانصراف' } };
       const suffix = field.endsWith('2') ? '2' : '';
       const out = field.startsWith('checkOut');
       const base = out ? 'checkOut' : 'checkIn';
@@ -2037,7 +2045,7 @@ app.delete('/api/companies/:id', requireAuth(['superadmin'], false), async (req,
       if(!companies.length) throw attendanceError(404,'الشركة غير موجودة');
       const data=await tx.select().from(schema.systemData).where(eq(schema.systemData.key,'mainData_'+id));
       const admins=await tx.select({id:schema.admins.id,username:schema.admins.username}).from(schema.admins).where(eq(schema.admins.companyId,id));
-      const keys=['mainData_'+id,'companyPrivacy:'+id,'ownerPasswordRevision:'+id,'attendancePasskeyPolicy:'+id,emailVerificationQuotaKey(id),notificationStateKey(id,{role:'admin'}),notificationStateKey(id,{role:'admin',username:companies[0].adminUsername || undefined})];
+      const keys=['mainData_'+id,'companyPrivacy:'+id,'ownerPasswordRevision:'+id,'attendancePasskeyPolicy:'+id,'attendanceBreakPolicy:'+id,emailVerificationQuotaKey(id),notificationStateKey(id,{role:'admin'}),notificationStateKey(id,{role:'admin',username:companies[0].adminUsername || undefined})];
       for(const employee of (data[0]?.value as any)?.employees || []) keys.push(welcomeStateKey(id,String(employee.id)),emailVerificationKey(id,String(employee.id)),employeePhotoKey(id,String(employee.id)));
       for(const admin of admins) keys.push(adminAccessKey(id,admin.id),notificationStateKey(id,{role:'admin',id:admin.id}));
       await tx.delete(schema.systemData).where(sql`${schema.systemData.key} LIKE 'companyBackup%' AND ${schema.systemData.value}->>'companyId' = ${id}`);

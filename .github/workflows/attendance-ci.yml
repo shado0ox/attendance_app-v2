@@ -8,20 +8,6 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        # Docker Official Image mirror avoids Docker Hub's unauthenticated pull quota.
-        image: public.ecr.aws/docker/library/postgres:16
-        env:
-          POSTGRES_USER: attendance_ci
-          POSTGRES_PASSWORD: ci-only-password
-          POSTGRES_DB: attendance_ci
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U attendance_ci"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     env:
       SQL_HOST: 127.0.0.1
       SQL_PORT: 5432
@@ -36,7 +22,12 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Start local PostgreSQL for integration checks
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-16 postgresql-client
+          sudo systemctl start postgresql
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE attendance_ci WITH LOGIN SUPERUSER PASSWORD 'ci-only-password';"
+          sudo -u postgres createdb -O attendance_ci attendance_ci
       - run: npm ci
       - run: npm run lint
       - run: npm run build
@@ -44,6 +35,7 @@ jobs:
       - run: node --import tsx tests/mainDataConcurrency.integration.ts
       - run: node --import tsx tests/emailVerification.integration.ts
       - run: node --import tsx tests/whatsappReminders.integration.ts
+      - run: node --import tsx tests/attendanceBreaks.integration.ts
       - run: node --import tsx tests/companyBackup.integration.ts
       - run: node --import tsx tests/appInstallation.integration.ts
       - run: node --import tsx tests/systemHealth.integration.ts

@@ -106,6 +106,7 @@ test('required first-use Passkey gate stays until registration and administrator
   await expect(page.getByText('بوابة الموظف متاحة')).toBeVisible();
 });
 test('settings sections start collapsed, open with keyboard and preserve draft values across collapse', async ({ page }) => {
+  await page.route('**/api/attendance-breaks/policy', route => route.fulfill({ json: { rules: [], employees: [], shifts: [] } }));
   await page.route('**/api/whatsapp/settings', route => route.fulfill({ json: { enabled: false, mode: 'selected', employeeIds: [], phoneNumberId: '', sender: '', apiVersion: 'v26.0', language: 'ar', attendanceTemplate: '', departureTemplate: '', portalUrl: '', attendanceEnabled: true, departureEnabled: true, attendanceDelay: 10, departureDelay: 0, interval: 10, contacts: {}, ready: false, webhookPath: '/api/whatsapp-webhook/test', employees: [] } }));
   await page.route('**/api/whatsapp/logs', route => route.fulfill({ json: [] }));
   await page.route('**/api/attendance-passkey/policy', route => route.fulfill({ json: { mode: 'off', employeeIds: [], employees: [] } }));
@@ -120,7 +121,7 @@ test('settings sections start collapsed, open with keyboard and preserve draft v
   await expect(page.locator('.settings-section[open]')).toHaveCount(0);
   await company.locator('summary').click(); await expect(company.getByPlaceholder('مثال: شركة النجوم للاستقدام')).toHaveValue('اسم جديد');
   await page.getByRole('button', { name: 'توسيع الكل', exact: true }).click();
-  await expect(page.locator('.settings-section[open]')).toHaveCount(8);
+  await expect(page.locator('.settings-section[open]')).toHaveCount(9);
 });
 test('company backup requires preview and explicit confirmation before replacement', async ({ page }) => {
   let restored = false;
