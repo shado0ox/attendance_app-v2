@@ -1,4 +1,5 @@
 import React from "react";
+import Approvals from "../components/Approvals";
 import { Share } from "react-native";
 import { router } from "expo-router";
 import {
@@ -44,6 +45,7 @@ export default function Requests() {
       }}
       refreshing={query.isRefetching || docs.isRefetching}
     >
+      <Approvals />
       <Action label="طلب جديد" onPress={() => router.push("/new-request")} />
       <ErrorNote error={task.error} />
       <Title>طلباتك</Title>

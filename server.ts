@@ -1,3 +1,4 @@
+import { employeeApprovalAccess, canReviewEmployeeRequest, approvalRequestView } from "./src/server/employeeApprovals";
 import { readFile } from 'node:fs/promises';
 import { nativeAssociations } from './src/lib/nativeAssociations';
 import { registerNativePush } from './src/server/nativePush';
@@ -1768,7 +1769,17 @@ app.post('/api/requests', requireAuth(['employee', 'admin', 'superadmin']), asyn
   }
 });
 
-app.put('/api/requests/:id', requireAuth(['admin', 'superadmin'], false), requireOwnedRow(schema.requests), async (req, res) => {
+app.put(['/api/requests/:id', '/api/mobile/approvals/requests/:id'], requireAuth(['employee', 'admin', 'superadmin'], false), async (req, res, next) => {
+  const auth = (req as any).auth as AuthTokenPayload;
+  if (auth.role !== 'employee') return next();
+  if (!req.path.startsWith('/api/mobile/approvals/requests/')) return res.status(403).json({ error: 'الموافقات متاحة من بوابة الموافقات فقط' });
+  try {
+    const access = await employeeApprovalAccess(auth.companyId, String(auth.id));
+    if (!access) return res.status(403).json({ error: 'ليس لديك صلاحية الموافقة على الطلبات' });
+    (req as any).adminAccess = access;
+    next();
+  } catch { return res.status(503).json({ error: 'تعذر التحقق من صلاحية الموافقات' }); }
+}, requireOwnedRow(schema.requests), async (req, res) => {
   const id = Number(req.params.id), auth = (req as any).auth as AuthTokenPayload;
   const { status } = req.body;
   if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'قرار المراجعة غير صحيح' });
@@ -1778,11 +1789,20 @@ app.put('/api/requests/:id', requireAuth(['admin', 'superadmin'], false), requir
     const outcome = await db.transaction(async tx => {
       const companyId = (req as any).ownedRow.companyId || 'default';
       await lockAttendance(tx, companyId);
+      if (auth.role === 'employee') {
+        const access = await employeeApprovalAccess(companyId, String(auth.id), tx, true);
+        if (!access) throw attendanceError(403, 'تم إلغاء صلاحية الموافقات');
+        (req as any).adminAccess = access;
+      }
       const rows = await tx.select().from(schema.requests).where(eq(schema.requests.id, id)).limit(1).for('update');
       const request = rows[0];
       const mainRows = await tx.select().from(schema.systemData).where(eq(schema.systemData.key, getMainDataKey(companyId))).limit(1).for('update');
       const requestData: any = mainRows[0]?.value;
       if (!request || !ownsDay(requestAccess(req), requestData, request)) throw attendanceError(404, 'الطلب غير موجود أو خارج أقسامك');
+      if (auth.role === 'employee') {
+        if (!canReviewEmployeeRequest(requestAccess(req), requestData, String(auth.id), request)) throw attendanceError(403, 'لا يمكنك مراجعة طلبك الشخصي أو طلب خارج نطاقك');
+        auth.name = requestData?.employees?.find((e: any) => String(e.id) === String(auth.id))?.name || auth.name;
+      }
       if (request.status === status) return request;
       if (request.status !== 'pending') throw attendanceError(409, 'تمت مراجعة الطلب بالفعل؛ لا يمكن تغيير قراره');
       if (status === 'approved' && request.type === 'attendance_adjustment') {
@@ -1821,7 +1841,7 @@ app.put('/api/requests/:id', requireAuth(['admin', 'superadmin'], false), requir
       await audit(tx, auth, companyId, 'request.' + status, id, { empId: request.empId, type: request.type, reason: reviewReason, actorName: auth.name || auth.username || 'المسؤول' });
       return updated[0];
     });
-    return res.json(outcome);
+    return res.json(auth.role === 'employee' ? approvalRequestView(outcome) : outcome);
   } catch (error: any) { return res.status(error.status || (error instanceof CorrectionValidationError ? 400 : 500)).json({ error: error.status || error instanceof CorrectionValidationError ? error.message : 'تعذر مراجعة الطلب' }); }
 });
 
@@ -1854,10 +1874,15 @@ app.post('/api/admins', requireAuth(['admin', 'superadmin']), async (req, res) =
   try {
     const data = await getMainDataByCompanyId(companyId);
     const access = parseAdminAccess(req.body, data?.departments || []);
+    if (access.employeeId && !data?.employees?.some((e: any) => String(e.id) === access.employeeId && isActiveEmployee(e))) return res.status(400).json({ error: 'اختر حساب موظف نشط من نفس الشركة' });
     const actorAccess = requestAccess(req);
     if (auth.role === 'admin' && auth.id !== undefined && Object.keys(access.permissions).some(p => access.permissions[p] && !actorAccess.permissions[p])) return res.status(403).json({ error: 'لا يمكنك منح صلاحية لا تملكها' });
     const result = await db.transaction(async tx => {
       await identityLock(tx);
+      if (access.employeeId) {
+        const links = await tx.select({ id: schema.admins.id }).from(schema.admins).innerJoin(schema.systemData, eq(schema.systemData.key, sql`'adminAccess:' || ${companyId} || ':' || ${schema.admins.id}::text`)).where(and(eq(schema.admins.companyId, companyId), sql`${schema.systemData.value}->>'employeeId' = ${access.employeeId}`));
+        if (links.some(row => Number(row.id) !== Number(id))) throw attendanceError(409, 'حساب الموظف مرتبط بمسؤول آخر؛ ألغِ الربط القديم أولًا');
+      }
       let saved: any;
       if (id) {
         const rows = await tx.select().from(schema.admins).where(and(eq(schema.admins.id, Number(id)), eq(schema.admins.companyId, companyId))).limit(1).for('update');
@@ -1872,7 +1897,7 @@ app.post('/api/admins', requireAuth(['admin', 'superadmin']), async (req, res) =
         [saved] = await tx.insert(schema.admins).values({ name: name.trim(), username: identityValue(username), email:identityValue(email),password: hashPassword(password.trim()), companyId }).returning();
       }
       await tx.insert(schema.systemData).values({ key: adminAccessKey(companyId, saved.id), value: access }).onConflictDoUpdate({ target: schema.systemData.key, set: { value: access, updatedAt: new Date() } });
-      await audit(tx, auth, companyId, 'admin.access.update', saved.id, { departmentIds: access.departmentIds, permissions: access.permissions, actorName: auth.name || auth.username });
+      await audit(tx, auth, companyId, 'admin.access.update', saved.id, { employeeId: access.employeeId || null, departmentIds: access.departmentIds, permissions: access.permissions, actorName: auth.name || auth.username });
       const { password: secret, ...safe } = saved;
       return { ...safe, ...access };
     });

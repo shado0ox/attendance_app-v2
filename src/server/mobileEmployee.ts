@@ -1,3 +1,4 @@
+import { employeeApprovalAccess, canReviewEmployeeRequest, approvalRequestView } from "./employeeApprovals";
 import type { Express } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db, schema } from "../db/index";
@@ -9,6 +10,23 @@ export function registerMobileEmployee(
   requireAuth: any,
   getMain: (company: string) => Promise<any>,
 ) {
+  app.get("/api/mobile/approvals", requireAuth(["employee"], false), async (req: any, res) => {
+    const { companyId, id } = req.auth;
+    if ((req.query.companyId && req.query.companyId !== companyId)) return res.status(403).json({ error: "الحساب خارج الشركة" });
+    res.set("Cache-Control", "no-store");
+    try {
+      const access = await employeeApprovalAccess(companyId, String(id));
+      if (!access) return res.json({ canApproveRequests: false, requests: [], documents: [] });
+      const data = await getMain(companyId);
+      const requests = await db.select().from(schema.requests).where(and(eq(schema.requests.companyId, companyId), eq(schema.requests.status, 'pending'))).orderBy(desc(schema.requests.id));
+      const documents = await db.select({ id: schema.electronicDocuments.id, employeeId: schema.electronicDocuments.employeeId, employeeName: schema.electronicDocuments.employeeName, formData: schema.electronicDocuments.formData, status: schema.electronicDocuments.status }).from(schema.electronicDocuments).where(and(eq(schema.electronicDocuments.companyId, companyId), eq(schema.electronicDocuments.status, 'pending_manager'))).orderBy(desc(schema.electronicDocuments.id));
+      const visibleRequests = requests.filter(row => canReviewEmployeeRequest(access, data, String(id), row));
+      const visibleDocs = documents.filter(row => canReviewEmployeeRequest(access, data, String(id), { empId: row.employeeId, date: (row.formData as any)?.date }));
+      return res.json({ canApproveRequests: true, total: visibleRequests.length + visibleDocs.length,
+        requests: visibleRequests.slice(0, 100).map(approvalRequestView),
+        documents: visibleDocs.slice(0, 100).map(({ employeeId, ...row }) => row) });
+    } catch { return res.status(503).json({ error: "تعذر تحميل طلبات الموافقة" }); }
+  });
   app.get(
     "/api/mobile/request-options",
     requireAuth(["employee"], false),

@@ -118,3 +118,7 @@ export type Profile = {
   photoDataUrl: string;
   departmentName: string;
 };
+
+export type ApprovalRequest = EmployeeRequest & { empName: string; targetShift?: string; swapWithEmpName?: string; checkInTime?: string; checkOutTime?: string; period: number; checkInNextDay: boolean; checkOutNextDay: boolean };
+export type ApprovalDocument = { id: number; employeeName: string; status: string; formData: Record<string,string> };
+export type ApprovalInbox = { canApproveRequests: boolean; total?: number; requests: ApprovalRequest[]; documents: ApprovalDocument[] };

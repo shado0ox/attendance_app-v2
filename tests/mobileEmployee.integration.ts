@@ -1,3 +1,5 @@
+import { fullAdminAccess } from "../src/lib/adminAccess";
+import { signatureFixture } from "./electronicDocumentFixtures";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import pg from "pg";
@@ -75,7 +77,7 @@ try {
     [company, "ci-hash"],
   );
   const date = new Date(Date.now() + 3 * 3600000).toISOString().slice(0, 10);
-  const data = {
+  const data: any = {
     employees: [
       {
         id: "e1",
@@ -231,6 +233,69 @@ try {
     ).status,
     200,
   );
+  // Delegation is explicitly configured from the web, never supplied by the employee.
+  assert.deepEqual(await (await call('/api/mobile/approvals')).json(), { canApproveRequests: false, requests: [], documents: [] });
+  data.departments = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }];
+  data.employees[0].dept = 'a'; data.employees[1].dept = 'a';
+  data.employees.push({ id: 'e3', name: 'Outside department', dept: 'b' });
+  await pool.query('UPDATE shift_app.system_data SET value=$2 WHERE key=$1', ['mainData_' + company, JSON.stringify(data)]);
+  const owner = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + jwt.sign({ role: 'admin', companyId: company }, secret) };
+  const access = { permissions: { ...fullAdminAccess().permissions, canManageEmployees: false, canManageDepts: false, canManageSettings: false }, departmentIds: ['a'], employeeId: 'e1' };
+  const payload = { name: 'Reviewer', username: 'native-ci-reviewer', password: 'ci-only-password', companyId: company, ...access };
+  assert.equal((await call('/api/admins', 'POST', payload)).status, 403);
+  const saved = await call('/api/admins', 'POST', payload, owner);
+  assert.equal(saved.status, 200, await saved.clone().text());
+  const admin = await saved.json();
+  assert.equal((await call('/api/admins', 'POST', { ...payload, username: 'native-ci-second-reviewer' }, owner)).status, 409, 'one employee cannot accidentally inherit multiple scopes');
+  assert.equal((await call('/api/admins', 'POST', { ...payload, id: admin.id, employeeId: 'foreign' }, owner)).status, 400);
+  const addRequest = async (empId: string, type='leave', swapWithEmpId: string|null=null) => (await pool.query('INSERT INTO shift_app.requests(company_id,emp_id,emp_name,dept,date,type,status,notes,swap_with_emp_id) VALUES($1,$2,$2,$3,$4,$5,$6,$7,$8) RETURNING id', [company, empId, empId==='e3'?'b':'a', date, type, 'pending', 'Request reason', swapWithEmpId])).rows[0].id;
+  const otherRequest = await addRequest('e2'), ownRequest = await addRequest('e1'), foreignDeptRequest = await addRequest('e3'), ownSwap = await addRequest('e2', 'swap', 'e1');
+  const inbox = await (await call('/api/mobile/approvals')).json();
+  assert.equal(inbox.canApproveRequests, true);
+  assert.deepEqual(inbox.requests.map((r:any)=>r.id), [otherRequest]);
+  assert.ok(!JSON.stringify(inbox).includes('baseline'));
+  const decide = (id:number, status='approved', reviewReason='', account=headers('e1')) => call('/api/mobile/approvals/requests/'+id, 'PUT', {status, reviewReason}, account);
+  assert.equal((await decide(ownRequest)).status, 403);
+  assert.equal((await decide(ownSwap)).status, 403);
+  assert.equal((await decide(foreignDeptRequest)).status, 404);
+  assert.equal((await decide(otherRequest, 'approved', '', headers('e2'))).status, 403);
+  assert.equal((await decide(otherRequest, 'approved', '', headers('e1', 'employee', 'default'))).status, 403);
+  assert.equal((await call('/api/requests/'+otherRequest, 'PUT', {status:'approved'})).status, 403, 'delegation does not unlock administrative routes');
+  assert.equal((await decide(otherRequest, 'rejected')).status, 400);
+  const approved = await decide(otherRequest);
+  assert.equal(approved.status, 200, await approved.clone().text());
+  assert.equal((await pool.query('SELECT status FROM shift_app.requests WHERE id=$1',[otherRequest])).rows[0].status,'approved');
+  assert.equal((await pool.query('SELECT value FROM shift_app.system_data WHERE key=$1',['mainData_'+company])).rows[0].value.schedule[date].e2.shiftType,'A');
+  assert.equal((await decide(otherRequest, 'rejected', 'Changed my mind')).status, 409);
+  assert.equal((await call('/api/main-data?companyId='+company)).status, 200);
+  assert.equal((await call('/api/admins?companyId='+company)).status, 403);
+  const signature = signatureFixture();
+  const form = {date,requestType:'temporary_exit',exitTime:'10:00',expectedReturnTime:'11:00',reason:'Permission reason',employeeCommitment:true};
+  const addDoc = async (empId:string) => (await pool.query('INSERT INTO shift_app.electronic_documents(company_id,employee_id,employee_name,status,form_data,employee_signature) VALUES($1,$2,$2,$3,$4,$5) RETURNING id',[company,empId,'pending_manager',JSON.stringify(form),signature])).rows[0].id;
+  const document = await addDoc('e2'), ownDocument = await addDoc('e1'), outsideDocument = await addDoc('e3');
+  const docPath = '/api/mobile/approvals/documents/';
+  const docsInbox = await (await call('/api/mobile/approvals')).json();
+  assert.deepEqual(docsInbox.documents.map((r:any)=>r.id), [document]);
+  assert.equal((await call(docPath+ownDocument)).status, 403);
+  assert.equal((await call(docPath+outsideDocument)).status, 403);
+  assert.equal((await call(docPath+document+'?companyId=default')).status, 403);
+  const detail = await call(docPath+document);
+  assert.equal(detail.status, 200, await detail.clone().text());
+  assert.equal((await detail.json()).employeeSignature,signature);
+  assert.equal((await call(docPath+document,'POST',{decision:'approved',managerSignature:'fake'})).status,400);
+  const signed = await call(docPath+document,'POST',{decision:'approved',managerSignature:signature,reason:''});
+  assert.equal(signed.status,200,await signed.clone().text());
+  assert.equal((await pool.query('SELECT status,manager_name,final_html FROM shift_app.electronic_documents WHERE id=$1',[document])).rows[0].manager_name,'One');
+  assert.equal((await call(docPath+document,'POST',{decision:'rejected',managerSignature:signature,reason:'second decision'})).status,404);
+  const afterRevocation = await addDoc('e2');
+  assert.equal((await call('/api/admins','POST',{...payload,id:admin.id,permissions:{...access.permissions,canApproveRequests:false}},owner)).status,200);
+  assert.equal((await (await call('/api/mobile/approvals')).json()).canApproveRequests,false);
+  assert.equal((await decide(ownRequest)).status,403);
+  assert.equal((await call(docPath+afterRevocation,'POST',{decision:'approved',managerSignature:signature})).status,403);
+  // Deleted admin credentials revoke the linked employee's delegation too.
+  await pool.query('UPDATE shift_app.system_data SET value=$2 WHERE key=$1',['adminAccess:'+company+':'+admin.id,JSON.stringify(access)]);
+  await pool.query('DELETE FROM shift_app.admins WHERE id=$1',[admin.id]);
+  assert.equal((await (await call('/api/mobile/approvals')).json()).canApproveRequests,false);
   console.log(
     "PASS: native employee projection, tenant and role isolation, published schedule, scoped push registration, account switch and revocation.",
   );
@@ -243,6 +308,12 @@ try {
   await pool.query("DELETE FROM shift_app.attendance WHERE company_id=$1", [
     company,
   ]);
+  await pool.query('DELETE FROM shift_app.electronic_document_audit WHERE company_id=$1',[company]);
+  await pool.query('DELETE FROM shift_app.electronic_documents WHERE company_id=$1',[company]);
+  await pool.query('DELETE FROM shift_app.requests WHERE company_id=$1',[company]);
+  await pool.query('DELETE FROM shift_app.audit_log WHERE company_id=$1',[company]);
+  await pool.query('DELETE FROM shift_app.system_data WHERE left(key,length($1))=$1',['adminAccess:'+company+':']);
+  await pool.query('DELETE FROM shift_app.admins WHERE company_id=$1',[company]);
   await pool.query("DELETE FROM shift_app.companies WHERE id=$1", [company]);
   await pool.end();
 }

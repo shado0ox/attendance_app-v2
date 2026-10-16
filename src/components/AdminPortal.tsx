@@ -129,6 +129,7 @@ export default function AdminPortal({
   const [subAdminsLoading, setSubAdminsLoading] = useState(false);
   const [subAdminModalOpen, setSubAdminModalOpen] = useState(false);
   const [editingAdmId, setEditingAdmId] = useState<string | null>(null);
+  const [admEmployeeId, setAdmEmployeeId] = useState('');
   const [admName, setAdmName] = useState('');
   const [admUsername, setAdmUsername] = useState('');
   const [admEmail, setAdmEmail] = useState('');
@@ -583,6 +584,7 @@ export default function AdminPortal({
       role: 'admin',
       permissions: admPerms,
       departmentIds: admDepartmentIds,
+      employeeId: admEmployeeId,
       companyId: companyId || 'default'
     };
     if (admPwd.trim()) {
@@ -1204,6 +1206,7 @@ export default function AdminPortal({
                 setEditingAdmId(null);
                 setAdmDepartmentIds(null);
                 setAdmName('');
+                setAdmEmployeeId('');
                 setAdmUsername('');
                 setAdmEmail('');
                 setAdmPwd('');
@@ -1222,6 +1225,7 @@ export default function AdminPortal({
                 setEditingAdmId(item.id);
                 setAdmDepartmentIds(item.departmentIds ?? null);
                 setAdmName(item.name || '');
+                setAdmEmployeeId(item.employeeId || '');
                 setAdmUsername(item.username || '');
                 setAdmEmail(item.email || '');
                 setAdmPwd('');
@@ -1368,6 +1372,14 @@ export default function AdminPortal({
                 />
               </div>
 
+              <div className="border rounded-xl p-3 space-y-2 text-xs" dir="rtl">
+                <label className="font-bold" htmlFor="approval-employee">ربط الموافقات بحساب الموظف في التطبيق</label>
+                <select id="approval-employee" className="w-full border rounded-lg p-2" value={admEmployeeId} onChange={e => setAdmEmployeeId(e.target.value)}>
+                  <option value="">بدون ربط</option>
+                  {employees.filter((e: any) => !e.status || e.status === 'active').map((e: any) => <option key={e.id} value={String(e.id)}>{e.name}</option>)}
+                </select>
+                <p>يدخل بحساب الموظف المعتاد. تفعيل «الموافقة على طلبات الموظفين ورفضها» يتيح له مراجعة طلبات أقسامه فقط، دون إعدادات الإدارة، ودون اعتماد طلبه الشخصي. التسجيل وطلب الحساب من الويب فقط.</p>
+              </div>
               <div className="border rounded-xl p-3 space-y-2 text-xs">
                 <label className="flex gap-2 items-center"><input type="checkbox" checked={admDepartmentIds === null} onChange={e => {
                   setAdmDepartmentIds(e.target.checked ? null : []);
