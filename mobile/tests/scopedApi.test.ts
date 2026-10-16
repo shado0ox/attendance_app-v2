@@ -47,3 +47,12 @@ test("old data is discarded after switching accounts; the current account expire
   assert.equal(expired, 1);
   assert.equal(current, null);
 });
+
+test('locking and unlocking the same saved token cannot resume an earlier pending punch', async () => {
+  let epoch = 1, calls = 0;
+  const api = scopedApi(a, () => a, async <T>() => { calls++; return {} as T; }, async () => {}, { captured: 1, current: () => epoch });
+  await api('/api/attendance-passkey/options', 'POST');
+  epoch++;
+  await assert.rejects(api('/api/attendance', 'POST', { checkIn: true }), (error: unknown) => error instanceof ApiError && error.status === 409);
+  assert.equal(calls, 1);
+});

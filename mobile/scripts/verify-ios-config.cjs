@@ -33,8 +33,9 @@ function checkPrivacy(manifest, expected) {
 function checkInfo(info, expected) {
   assert.equal(info.CFBundleShortVersionString, expected.version, 'Info.plist version mismatch');
   assert.equal(info.CFBundleVersion, expected.build, 'Info.plist build mismatch');
-  for (const key of ['NSLocationAlwaysUsageDescription', 'NSLocationAlwaysAndWhenInUseUsageDescription', 'NSMotionUsageDescription', 'LSMinimumSystemVersion']) assert.equal(info[key], undefined, `Unused/misleading Info.plist key: ${key}`);
-  assert.ok(!(info.UIBackgroundModes || []).includes('location'), 'Background location must be disabled');
+  for (const key of ['NSLocationAlwaysUsageDescription', 'NSMotionUsageDescription', 'LSMinimumSystemVersion']) assert.equal(info[key], undefined, `Unused/misleading Info.plist key: ${key}`);
+  assert.ok((info.UIBackgroundModes || []).includes('location'), 'Opt-in arrival reminders require background location capability');
+  assert.ok(arabic(info.NSLocationAlwaysAndWhenInUseUsageDescription), 'Background location must explain the optional arrival reminder in Arabic');
   for (const key of ['NSLocationWhenInUseUsageDescription', 'NSPhotoLibraryUsageDescription', 'NSFaceIDUsageDescription']) assert.ok(arabic(info[key]), `${key} must explain the purpose in Arabic`);
   if (info.NSLocalNetworkUsageDescription) assert.ok(arabic(info.NSLocalNetworkUsageDescription), 'Development network permission must be Arabic');
   assert.ok(arabic(info.NSLocationTemporaryUsageDescriptionDictionary?.ExpoLocationFullAccuracy), 'Precise location permission must be Arabic');

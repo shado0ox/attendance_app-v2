@@ -1,3 +1,4 @@
+import { getEmployeeLocations } from "./attendanceLocations";
 import { autoPeriodWindow } from "./autoPunch";
 import { employeeScheduleContent } from "./schedulePublication";
 /** A deliberately small projection: no colleague directory, credentials or company settings. */
@@ -32,6 +33,7 @@ export function mobileEmployeeData(
         data.departments?.find((d: any) => d.id === employee.dept)?.name || "",
     },
     companyName: data.settings?.companyName || "وفر دوام",
+    attendanceLocations: getEmployeeLocations(data.settings, employee).map(({ id, name, lat, lng, radius }) => ({ id, name, lat, lng, radius })),
     schedule: schedule.sort((a, b) => a.date.localeCompare(b.date)),
   };
 }

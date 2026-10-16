@@ -15,7 +15,7 @@ function fixture() {
   const app = join(root, 'ios/App');
   mkdirSync(join(app, 'Supporting'), { recursive: true });
   mkdirSync(join(root, 'ios/App.xcodeproj'));
-  const info = { CFBundleShortVersionString: '1.0.0', CFBundleVersion: '2', NSLocationWhenInUseUsageDescription: 'التحقق من موقع العمل عند تسجيل البصمة', NSPhotoLibraryUsageDescription: 'اختيار صورة الملف الشخصي', NSFaceIDUsageDescription: 'تأكيد هوية الموظف', NSLocationTemporaryUsageDescriptionDictionary: { ExpoLocationFullAccuracy: 'التحقق من الموقع الدقيق' } };
+  const info = { CFBundleShortVersionString: '1.0.0', CFBundleVersion: '2', UIBackgroundModes: ['location'], NSLocationAlwaysAndWhenInUseUsageDescription: 'تذكير اختياري بالوصول إلى العمل في الخلفية', NSLocationWhenInUseUsageDescription: 'التحقق من موقع العمل عند تسجيل البصمة', NSPhotoLibraryUsageDescription: 'اختيار صورة الملف الشخصي', NSFaceIDUsageDescription: 'تأكيد هوية الموظف', NSLocationTemporaryUsageDescriptionDictionary: { ExpoLocationFullAccuracy: 'التحقق من الموقع الدقيق' } };
   put(join(app, 'Info.plist'), info);
   put(join(app, 'App.entitlements'), { 'com.apple.developer.associated-domains': expected.domains, 'aps-environment': 'development' });
   put(join(app, 'PrivacyInfo.xcprivacy'), privacy);

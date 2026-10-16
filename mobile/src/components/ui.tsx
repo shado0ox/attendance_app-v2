@@ -4,6 +4,8 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
+  Switch,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -12,7 +14,7 @@ import {
   View,
   type TextInputProps,
 } from "react-native";
-import { Button, Host } from "@expo/ui";
+
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 export const colors = {
   ink: "#142E36",
@@ -33,7 +35,8 @@ export const styles = StyleSheet.create({
   },
   title: {
     color: colors.ink,
-    fontSize: 26,
+    fontSize: 23,
+    lineHeight: 32,
     fontWeight: "700",
     textAlign: "right",
     writingDirection: "rtl",
@@ -47,9 +50,9 @@ export const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: colors.surface,
-    borderRadius: 22,
+    borderRadius: 24,
     padding: 20,
-    gap: 14,
+    gap: 16,
     borderWidth: 1,
     borderColor: colors.line,
   },
@@ -97,21 +100,25 @@ export function Action({
   secondary?: boolean;
 }) {
   return (
-    <Host
-      matchContents={{ vertical: true }}
-      seedColor={colors.accent}
-      layoutDirection="rightToLeft"
-    >
-      <Button
-        label={label}
-        onPress={onPress}
-        disabled={disabled}
-        variant={secondary ? "outlined" : "filled"}
-        style={{ paddingVertical: 10 }}
-      />
-    </Host>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled}
+      onPress={onPress} style={({ pressed }) => ({ minHeight: 52, paddingVertical: 13, paddingHorizontal: 18,
+        borderRadius: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 1,
+        borderColor: secondary ? colors.line : colors.accent,
+        backgroundColor: secondary ? colors.surface : colors.accent, opacity: disabled ? 0.45 : pressed ? 0.75 : 1 })}>
+      <Text style={[styles.text, { fontWeight: '600', textAlign: 'center', color: secondary ? colors.ink : '#FFFFFF' }]}>{label}</Text>
+    </Pressable>
   );
 }
+export function SettingToggle({ label, detail, value, disabled = false, onChange }: {
+  label: string; detail?: string; value: boolean; disabled?: boolean; onChange: (value: boolean) => void;
+}) {
+  return <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 16, paddingVertical: 12 }}>
+    <View style={{ flex: 1, minWidth: 0 }}><Body>{label}</Body>{detail ? <Body muted>{detail}</Body> : null}</View>
+    <Switch accessibilityLabel={label} value={value} disabled={disabled} onValueChange={onChange}
+      trackColor={{ true: colors.accent, false: '#CCD7D6' }} />
+  </View>;
+}
+
 export function Field({ label, ...props }: TextInputProps & { label: string }) {
   return (
     <View style={{ gap: 7 }}>
@@ -158,7 +165,10 @@ export function Page({
         contentContainerStyle={{
           padding: 20,
           paddingTop: 20 + (topInset ? insets.top : 0),
-          paddingBottom: Math.max(insets.bottom, 20) + 24,
+          paddingBottom: Math.max(insets.bottom, 20) + 100,
+          width: "100%",
+          maxWidth: 700,
+          alignSelf: "center",
           gap: 20,
         }}
         refreshControl={

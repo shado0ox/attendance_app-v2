@@ -148,6 +148,10 @@ function ProfileEditor({ profile }: { profile: ProfileData }) {
         />
         <Action
           secondary
+          label="الموقع وتذكير الوصول"
+          onPress={() => router.push("/location")}
+        />
+        <Action secondary
           label="إعدادات الإشعارات"
           onPress={() => router.push("/notifications")}
         />

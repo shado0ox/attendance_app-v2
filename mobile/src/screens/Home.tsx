@@ -1,3 +1,4 @@
+import { syncArrivalReminders } from "../lib/backgroundLocation";
 import { punchPosition } from "../lib/gps";
 import React, { useEffect, useState } from "react";
 import { View } from "react-native";
@@ -19,11 +20,12 @@ import { useApiQuery, useSession } from "../lib/session";
 import type { Bootstrap, BreakStatus } from "../lib/types";
 import { clock, displayDate } from "../lib/dates";
 import { nextPunch, punchLabel } from "../lib/punch";
+import { router } from "expo-router";
 import { punchProof } from "../lib/passkey";
 export default function Home() {
   const query = useApiQuery<Bootstrap>("/api/mobile/employee"),
     breaks = useApiQuery<BreakStatus>("/api/attendance-breaks/status");
-  const { api, refresh } = useSession(),
+  const { api, refresh, session } = useSession(),
     task = useTask(),
     focused = useIsFocused();
   const [tick, setTick] = useState(() => Date.now()),
@@ -46,6 +48,9 @@ export default function Home() {
     now = (data?.serverNow || tick) + Math.max(0, tick - query.dataUpdatedAt),
     todayAssignment = data?.schedule.find((entry) => entry.date === data.today),
     currentBreak = breaks.data?.entries.find((entry) => !entry.endedAt);
+  useEffect(() => {
+    if (data && session) void syncArrivalReminders(data, `${session.companyId}:${session.id}`).catch(() => undefined);
+  }, [data, session]);
   const punch = data
     ? nextPunch(
         data.records,
@@ -113,7 +118,8 @@ export default function Home() {
           <>
             <View style={{ gap: 6 }}>
               <Body muted>{data.companyName}</Body>
-              <Title>أهلًا، {data.employee.displayName}</Title>
+              <Body muted>أهلًا بك</Body>
+              <Title>{data.employee.displayName}</Title>
               <Body muted>{displayDate(data.today)}</Body>
             </View>
             <Card>
@@ -173,9 +179,10 @@ export default function Home() {
                 </Body>
               )}
               <ErrorNote error={task.error} />
+              {!!task.error && <Action secondary label="فحص إعدادات الموقع" onPress={() => router.push('/location')} /> }
               {success ? <Body>{success}</Body> : null}
               <Body muted>
-                الموقع يُطلب عند التسجيل فقط. وقت البصمة ومكانها واعتماد الباس
+                الموقع الدقيق يُطلب لتسجيل البصمة. تذكير الوصول في الخلفية اختياري من الإعدادات. وقت البصمة ومكانها واعتماد الباس
                 كي يتحقق منهم السيرفر.
               </Body>
             </Card>
