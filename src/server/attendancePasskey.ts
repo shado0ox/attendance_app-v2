@@ -25,7 +25,7 @@ export async function checkAttendancePasskey(tx: any, auth: any, employee: any, 
   await tx.delete(schema.systemData).where(eq(schema.systemData.key, key));
   return { verified: true };
 }
-export function registerAttendancePasskey(app: any, requireAuth: any, getMain: any, saveCredentials: any, config: { rpID: string; origin: string }) {
+export function registerAttendancePasskey(app: any, requireAuth: any, getMain: any, saveCredentials: any, config: { rpID: string; origin: string | string[] }) {
   const employeeAuth = requireAuth(['employee'], false), adminAuth = requireAuth(['admin', 'superadmin'], false);
   const respond = (handler: any) => async (req: any, res: any) => { try { await handler(req, res); } catch (error: any) { res.status(400).json({ error: error.message || 'تعذر التحقق' }); } };
   app.get('/api/attendance-passkey/status', employeeAuth, respond(async (req: any, res: any) => {

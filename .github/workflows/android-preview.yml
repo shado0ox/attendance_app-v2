@@ -1,11 +1,5 @@
-name: Android preview APK
+name: Legacy Android TWA preview (archived) APK
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/android-preview.yml'
-      - 'scripts/generate-android-preview.cjs'
-      - 'public/icons/**'
-      - 'public/manifest.json'
   workflow_dispatch:
 permissions:
   contents: read

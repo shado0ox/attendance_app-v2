@@ -1,7 +1,7 @@
 import { validAttendanceDate } from './attendanceMonths';
 import { employeeAtDate } from './employeeLifecycle';
 export const permissionNames = ['canEditSchedule', 'canManageEmployees', 'canManageDepts', 'canApproveRequests', 'canViewReports', 'canManageSettings', 'canPrint'] as const;
-export type AdminAccess = { permissions: Record<string, boolean>; departmentIds: string[] | null };
+export type AdminAccess = { permissions: Record<string, boolean>; departmentIds: string[] | null; employeeId?: string };
 export const fullAdminAccess = (): AdminAccess => ({ permissions: Object.fromEntries(permissionNames.map(p => [p, true])), departmentIds: null });
 export function parseAdminAccess(input: any, departments: any[]): AdminAccess {
   if (!input?.permissions || typeof input.permissions !== 'object' || Array.isArray(input.permissions) || permissionNames.some(p => typeof input.permissions[p] !== 'boolean')) throw new Error('حدد صلاحيات المسؤول كاملة');
@@ -9,7 +9,8 @@ export function parseAdminAccess(input: any, departments: any[]): AdminAccess {
   if (ids !== null && (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string' || !departments.some(d => d.id === id)))) throw new Error('اختر قسمًا واحدًا على الأقل من الأقسام المسجلة');
   const permissions = Object.fromEntries(permissionNames.map(p => [p, input.permissions[p] === true]));
   if (ids !== null && ['canManageEmployees', 'canManageDepts', 'canManageSettings'].some(p => permissions[p])) throw new Error('مدير القسم يدير الجدول والتقارير والطلبات؛ إدارة الحسابات والموظفين والإعدادات لإدارة الشركة');
-  return { permissions, departmentIds: ids === null ? null : [...new Set<string>(ids)] };
+  if (input.employeeId != null && (typeof input.employeeId !== 'string' || input.employeeId.length > 100)) throw new Error('ربط الموظف غير صحيح');
+  return { permissions, departmentIds: ids === null ? null : [...new Set<string>(ids)], ...(input.employeeId ? { employeeId: input.employeeId } : {}) };
 }
 export const ownsEmployee = (access: AdminAccess, data: any, id: unknown) => access.departmentIds === null || !!data?.employees?.some((e: any) => String(e.id) === String(id) && access.departmentIds!.includes(e.dept));
 export function ownsDay(access: AdminAccess, data: any, row: any) {

@@ -1,3 +1,4 @@
+import { employeeApprovalAccess, canReviewEmployeeRequest } from "./employeeApprovals";
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
 import { and, desc, eq, inArray } from 'drizzle-orm';
@@ -102,6 +103,28 @@ export function registerElectronicDocumentRoutes(
       });
     } catch { return res.status(503).json({error:'تعذر التحقق من رابط الطلب'}); }
   };
+  const mobileManagerAccess = async (req:Request,res:Response,next:NextFunction) => {
+    return requireAuth(['employee'], false)(req,res,async () => {
+      try {
+        const auth=(req as any).auth as Auth;
+        if ((req.query.companyId && req.query.companyId!==auth.companyId) || (req.body?.companyId && req.body.companyId!==auth.companyId)) return res.status(403).json({error:'الطلب خارج الشركة'});
+        const id=Number(req.params.id);
+        if (!Number.isSafeInteger(id) || id<=0) return res.status(400).json({error:'رقم الطلب غير صحيح'});
+        const [doc]=await db.select().from(schema.electronicDocuments).where(and(eq(schema.electronicDocuments.id,id),eq(schema.electronicDocuments.companyId,auth.companyId))).limit(1);
+        const data=await getMainDataByCompanyId(auth.companyId);
+        const access=await employeeApprovalAccess(auth.companyId,String(auth.id));
+        if (!doc || !canReviewEmployeeRequest(access,data,String(auth.id),{empId:doc.employeeId,date:(doc.formData as any)?.date})) return res.status(403).json({error:'الطلب خارج صلاحياتك أو طلبك الشخصي'});
+        const employee=data?.employees?.find((e:any)=>String(e.id)===String(auth.id));
+        (req as any).documentManager={...auth,name:employee?.name};
+        next();
+      } catch { return res.status(503).json({error:'تعذر التحقق من صلاحيات الموافقات'}); }
+    });
+  };
+  const approvalAccess = (req:Request,res:Response,next:NextFunction) => req.path.startsWith('/api/mobile/approvals/documents/') ? mobileManagerAccess(req,res,next) : managerAccess(req,res,next);
+  const approvalCondition = (req:Request) => req.path.startsWith('/api/mobile/approvals/documents/')
+    ? and(eq(schema.electronicDocuments.id,Number(req.params.id)),eq(schema.electronicDocuments.companyId,((req as any).documentManager as Auth).companyId))
+    : eq(schema.electronicDocuments.shareTokenHash,tokenHash(String(req.params.token||'')));
+  const availableApproval = (req:Request,doc:any) => doc && doc.status==='pending_manager' && (req.path.startsWith('/api/mobile/approvals/documents/') || (doc.shareExpiresAt && !doc.shareUsedAt && doc.shareExpiresAt.getTime()>Date.now()));
   const companyExists = async (companyId:string, executor:any=db) => {
     const deleted=await executor.select({key:schema.systemData.key}).from(schema.systemData).where(eq(schema.systemData.key,'deletedCompany:'+companyId)).limit(1);
     if (deleted.length) return false;
@@ -242,19 +265,19 @@ export function registerElectronicDocumentRoutes(
     } catch(error:any){return res.status(error?.status||500).json({error:error?.status?error.message:'تعذر إنشاء رابط المدير'});}
   });
 
-  app.get('/api/document-approval/:token', managerAccess, async (req:Request,res:Response)=>{
+  app.get(['/api/document-approval/:token','/api/mobile/approvals/documents/:id'], approvalAccess, async (req:Request,res:Response)=>{
     const hash=tokenHash(String(req.params.token||''));
     try {
-      const rows=await db.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.shareTokenHash,hash)).limit(1);
+      const rows=await db.select().from(schema.electronicDocuments).where(approvalCondition(req)).limit(1);
       const doc=rows[0];
-      if(!doc || !doc.shareExpiresAt || doc.shareUsedAt || doc.status!=='pending_manager' || doc.shareExpiresAt.getTime()<Date.now()) return res.status(404).json({error:'الرابط غير صالح أو منتهي'});
+      if(!availableApproval(req,doc)) return res.status(404).json({error:'الرابط غير صالح أو منتهي'});
       if (!await companyExists(String(doc.companyId))) return res.status(404).json({error:'الرابط غير صالح أو منتهي'});
       const company=await getMainDataByCompanyId(String(doc.companyId));
       return res.json({id:doc.id,employeeName:doc.employeeName,departmentName:doc.departmentName,documentType:doc.documentType,status:doc.status,formData:doc.formData,employeeSignature:doc.employeeSignature,companyName:company?.settings?.companyName || 'الشركة',logoDataUrl:company?.settings?.logoDataUrl || '',expiresAt:doc.shareExpiresAt,managerName:((req as any).documentManager as Auth).name || 'المدير'});
     } catch(error:any){return res.status(500).json({error:'تعذر تحميل المستند'});}
   });
 
-  app.post('/api/document-approval/:token', managerAccess, async (req:Request,res:Response)=>{
+  app.post(['/api/document-approval/:token','/api/mobile/approvals/documents/:id'], approvalAccess, async (req:Request,res:Response)=>{
     const manager=(req as any).documentManager as Auth;
     const actorId=String(manager.id || manager.username || manager.role);
     const hash=tokenHash(String(req.params.token||'')), managerName=clean(manager.name || manager.username || 'المدير',200), managerSignature=req.body?.managerSignature, decision=clean(req.body?.decision,20), reason=typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
@@ -263,11 +286,15 @@ export function registerElectronicDocumentRoutes(
     if(decision==='rejected' && !reason) return res.status(400).json({error:'سبب الرفض مطلوب'});
     try {
       const result=await db.transaction(async tx=>{
-        const rows=await tx.select().from(schema.electronicDocuments).where(eq(schema.electronicDocuments.shareTokenHash,hash)).limit(1).for('update');
+        const rows=await tx.select().from(schema.electronicDocuments).where(approvalCondition(req)).limit(1).for('update');
         const doc=rows[0];
-        if(!doc || !doc.shareExpiresAt || doc.shareUsedAt || doc.status!=='pending_manager' || doc.shareExpiresAt.getTime()<Date.now()) throw Object.assign(new Error('الرابط غير صالح أو منتهي'),{status:404});
+        if(!availableApproval(req,doc)) throw Object.assign(new Error('الرابط غير صالح أو منتهي'),{status:404});
         if (!await companyExists(String(doc.companyId),tx)) throw Object.assign(new Error('الرابط غير صالح أو منتهي'),{status:404});
         const company=await getMainDataByCompanyId(String(doc.companyId));
+        if (manager.role==='employee') {
+          const access=await employeeApprovalAccess(String(doc.companyId),String(manager.id),tx,true);
+          if (!canReviewEmployeeRequest(access,company,String(manager.id),{empId:doc.employeeId,date:(doc.formData as any)?.date})) throw Object.assign(new Error('تم إلغاء الصلاحية أو الطلب خارج نطاقك'),{status:403});
+        }
         if(decision==='rejected'){
           const [updated]=await tx.update(schema.electronicDocuments).set({status:'rejected',managerName,managerSignature,managerSignedAt:new Date(),managerDecision:'rejected',reviewReason:reason,shareUsedAt:new Date(),shareTokenEncrypted:null,updatedAt:new Date()}).where(eq(schema.electronicDocuments.id,doc.id)).returning();
           await tx.insert(schema.electronicDocumentAudit).values({companyId:String(doc.companyId),documentId:doc.id,actorId,actorRole:'manager',action:'rejected',details:{reason,managerName,accountRole:manager.role}});
@@ -280,7 +307,7 @@ export function registerElectronicDocumentRoutes(
         await tx.insert(schema.electronicDocumentAudit).values({companyId:String(doc.companyId),documentId:doc.id,actorId,actorRole:'manager',action:'approved',details:{reason,managerName,accountRole:manager.role}});
         return updated;
       });
-      return res.json({success:true,status:result.status,documentId:result.id,finalHtml:result.finalHtml || null});
+      return res.json({success:true,status:result.status,documentId:result.id,...(manager.role==='employee'?{}:{finalHtml:result.finalHtml || null})});
     } catch(error:any){return res.status(error?.status || 500).json({error:error?.status?error.message:'تعذر اعتماد المستند'});}
   });
 
