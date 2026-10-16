@@ -15,9 +15,8 @@ fi
 
 module.exports = function withNativeIosRelease(config) {
   config = withInfoPlist(config, (mod) => {
-    // The app only reads GPS on a deliberate punch. No motion/background location APIs.
-    for (const key of ['NSLocationAlwaysUsageDescription', 'NSLocationAlwaysAndWhenInUseUsageDescription', 'NSMotionUsageDescription', 'LSMinimumSystemVersion']) delete mod.modResults[key];
-    if (Array.isArray(mod.modResults.UIBackgroundModes)) mod.modResults.UIBackgroundModes = mod.modResults.UIBackgroundModes.filter(mode => mode !== 'location');
+    // Precise GPS is used on deliberate punches; optional geofencing reminds without punching.
+    for (const key of ['NSLocationAlwaysUsageDescription', 'NSMotionUsageDescription', 'LSMinimumSystemVersion']) delete mod.modResults[key];
     return mod;
   });
   config = withEntitlementsPlist(config, (mod) => {

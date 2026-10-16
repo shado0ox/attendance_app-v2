@@ -15,7 +15,7 @@ import { useSession } from "../lib/session";
 export default function Login() {
   const [username, setUsername] = useState(""),
     [password, setPassword] = useState("");
-  const { login, storageError } = useSession();
+  const { login, storageError, locked, unlock } = useSession();
   const task = useTask();
   const insets = useSafeAreaInsets();
   return (
@@ -34,6 +34,8 @@ export default function Login() {
         <Body muted>بوابتك للعمل، من بداية الدوام إلى نهايته.</Body>
         <Card>
           <Title>دخول الموظف</Title>
+          {locked && <><Body muted>حسابك محفوظ بأمان على هذا الجهاز. افتحه بالبصمة أو استخدم كلمة المرور.</Body>
+            <Action label="الدخول بـ Face ID أو بصمة الجهاز" disabled={task.busy} onPress={() => { void task.run(unlock); }} /></>}
           <Field
             label="اسم المستخدم أو البريد الإلكتروني"
             value={username}

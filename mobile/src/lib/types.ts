@@ -41,6 +41,7 @@ export type Attendance = {
   breaks: BreakEntry[];
 };
 export type Bootstrap = {
+  attendanceLocations?: { id: string; name: string; lat: number; lng: number; radius: number }[];
   punchPlans?: { date: string; period: number; start: number; end: number }[];
   employee: {
     id: string;

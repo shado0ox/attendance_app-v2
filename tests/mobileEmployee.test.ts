@@ -85,3 +85,14 @@ test("native punch plans use published server period windows for overnight doubl
   assert.equal(plans[1].end, Date.parse("2026-10-01T05:00:00+03:00"));
   assert.deepEqual(mobilePunchPlans([{ date: "2026-09-30", shiftType: "OFF", shift: null }]), []);
 });
+
+test('native arrival locations expose only enabled work sites allowed for the employee', () => {
+  const data = { employees: [{ id: 'a', name: 'A', restrictAttendanceLocations: true, allowedAttendanceLocationIds: ['allowed', 'disabled'] }], settings: { attendanceLocations: [
+    { id: 'allowed', name: 'Office', lat: 26, lng: 50, radius: 150, internalSecret: 'SECRET' },
+    { id: 'other', name: 'Other department', lat: 27, lng: 51, radius: 150 },
+    { id: 'disabled', name: 'Old', lat: 26, lng: 50, radius: 150, enabled: false },
+  ] } };
+  const result = mobileEmployeeData(data, 'a', '2026-10-01', '2026-10-31')!;
+  assert.deepEqual(result.attendanceLocations, [{ id: 'allowed', name: 'Office', lat: 26, lng: 50, radius: 150 }]);
+  assert.ok(!JSON.stringify(result).includes('SECRET'));
+});

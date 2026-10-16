@@ -10,11 +10,12 @@ export function scopedApi(
   current: () => Session | null,
   transport: Transport,
   expired: (token: string) => Promise<void>,
+  generation?: { captured: number; current: () => number },
 ) {
   return async function api<T>(path: string, method?: string, body?: object, signal?: AbortSignal): Promise<T> {
     if (!captured) throw new ApiError("سجل الدخول أولًا", 401);
     const assertCurrent = () => {
-      if (current()?.token !== captured.token)
+      if (current()?.token !== captured.token || (generation && generation.current() !== generation.captured))
         throw new ApiError("تغير الحساب أثناء العملية؛ افتح العملية من حسابك الحالي وأعد المحاولة", 409);
     };
     assertCurrent();
@@ -23,7 +24,7 @@ export function scopedApi(
       assertCurrent();
       return result;
     } catch (error) {
-      if (error instanceof ApiError && error.status === 401 && current()?.token === captured.token)
+      if (error instanceof ApiError && error.status === 401 && current()?.token === captured.token && (!generation || generation.current() === generation.captured))
         await expired(captured.token);
       throw error;
     }

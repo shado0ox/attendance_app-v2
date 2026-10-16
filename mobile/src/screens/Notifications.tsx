@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Host, Switch } from "@expo/ui";
+import { Linking } from "react-native";
 import {
   Action,
+  SettingToggle,
   Body,
   Card,
   ErrorNote,
@@ -51,7 +52,7 @@ export default function Notifications() {
       await status.refetch();
     });
   return (
-    <Page>
+    <Page refresh={() => { void status.refetch(); }} refreshing={status.isRefetching}>
       <Card>
         <Title>تذكيرات الدوام</Title>
         <QueryState query={status}>
@@ -68,27 +69,24 @@ export default function Notifications() {
                   إعداد مفاتيح الإرسال.
                 </Body>
               )}
-              <Host
-                matchContents={{ vertical: true }}
-                layoutDirection="rightToLeft"
-              >
-                <Switch
+
+                <SettingToggle
                   label="تذكير الحضور"
                   value={status.data.registered && status.data.attendance}
                   disabled={task.busy || !status.data.configured}
-                  onValueChange={(value) => {
+                  onChange={(value) => {
                     void save(value, status.data!.departure);
                   }}
                 />
-                <Switch
+                <SettingToggle
                   label="تذكير الانصراف"
                   value={status.data.registered && status.data.departure}
                   disabled={task.busy || !status.data.configured}
-                  onValueChange={(value) => {
+                  onChange={(value) => {
                     void save(status.data!.attendance, value);
                   }}
                 />
-              </Host>
+
               <Body muted>
                 يتكرر تذكير الحضور كل 10 دقائق خلال أول ساعة من بداية الفترة،
                 ويتوقف عند تسجيل الحضور. تذكير الانصراف يتكرر خلال أول ساعة من
@@ -126,6 +124,7 @@ export default function Notifications() {
           وصول الإشعار يعتمد على إذن النظام واتصال الهاتف وإعدادات Apple
           وFirebase. تسجيل الجهاز لا يؤكد وصول الإشعارات.
         </Body>
+        <Action secondary label="فتح إعدادات إشعارات الهاتف" onPress={() => { void task.run(() => Linking.openSettings()); }} />
       </Card>
     </Page>
   );

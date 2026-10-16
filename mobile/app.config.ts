@@ -16,19 +16,19 @@ const config: ExpoConfig = {
   userInterfaceStyle: "light",
   ios: {
     bundleIdentifier: "com.xshadox.wafrdawam",
-    buildNumber: "2",
+    buildNumber: "3",
     supportsTablet: true,
     privacyManifests: privacyManifest,
     associatedDomains: [`webcredentials:${host}`],
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       NSLocalNetworkUsageDescription: "تستخدم نسخة التطوير الشبكة المحلية للاتصال بخادم التطوير على جهازك.",
-      NSFaceIDUsageDescription: "تأكيد هويتك بمفتاح الباس كي عند تسجيل البصمة.",
+      NSFaceIDUsageDescription: "افتح حسابك ببصمة الجهاز وأكّد هويتك عند تسجيل الحضور.",
     },
   },
   android: {
     package: "com.xshadox.wafrdawam",
-    versionCode: 3,
+    versionCode: 4,
     ...(googleServicesFile ? { googleServicesFile } : {}),
     adaptiveIcon: {
       foregroundImage: "./assets/icon.png",
@@ -40,7 +40,6 @@ const config: ExpoConfig = {
       "POST_NOTIFICATIONS",
     ],
     blockedPermissions: [
-      "android.permission.ACCESS_BACKGROUND_LOCATION",
       "android.permission.RECORD_AUDIO",
     ],
   },
@@ -48,17 +47,18 @@ const config: ExpoConfig = {
     "expo-router",
     "expo-font",
     ["expo-localization", { supportsRTL: true }],
-    "expo-secure-store",
+    ["expo-secure-store", { faceIDPermission: "افتح حساب الموظف ببصمة جهازك لتأمين بياناتك عند العودة إلى التطبيق." }],
     "expo-notifications",
     [
       "expo-location",
       {
         locationAlwaysPermission: false,
-        locationAlwaysAndWhenInUsePermission: false,
+        locationAlwaysAndWhenInUsePermission: "اسمح بالموقع دائمًا لتذكيرك محليًا بتسجيل الحضور عند الوصول إلى نطاق موقع العمل، حتى عند إخفاء التطبيق. لا يتم تسجيل حضورك تلقائيًا.",
         motionUsagePermission: false,
-        isIosBackgroundLocationEnabled: false,
-        isAndroidBackgroundLocationEnabled: false,
+        isIosBackgroundLocationEnabled: true,
+        isAndroidBackgroundLocationEnabled: true,
         isAndroidMotionActivityEnabled: false,
+        isAndroidForegroundServiceEnabled: false,
         locationFullAccuracyPermission: "يحتاج تسجيل الحضور والانصراف موقعًا دقيقًا للتحقق من وجودك في موقع العمل.",
         locationWhenInUsePermission:
           "يستخدم وفر دوام موقعك عند طلب تسجيل الحضور والانصراف للتحقق من موقع العمل.",

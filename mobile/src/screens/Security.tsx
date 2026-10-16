@@ -2,6 +2,7 @@ import React from "react";
 import { router } from "expo-router";
 import {
   Action,
+  SettingToggle,
   Body,
   Card,
   ErrorNote,
@@ -15,7 +16,7 @@ import { registerPasskey } from "../lib/passkey";
 import type { PasskeyStatus } from "../lib/types";
 export default function Security({ enforced = false }: { enforced?: boolean }) {
   const query = useApiQuery<PasskeyStatus>("/api/attendance-passkey/status"),
-    { session, api, refresh, logout } = useSession(),
+    { session, api, refresh, logout, biometricEnabled, setBiometric } = useSession(),
     task = useTask();
   return (
     <Page
@@ -25,8 +26,13 @@ export default function Security({ enforced = false }: { enforced?: boolean }) {
       }}
       refreshing={query.isRefetching}
     >
+      {!enforced && <Card><Title>الدخول ببصمة الجهاز</Title>
+        <SettingToggle label="فتح حسابي بـ Face ID أو البصمة" detail="يُقفل الحساب عند انتقال التطبيق للخلفية. كلمة المرور متاحة لاستعادة الدخول." value={biometricEnabled} disabled={task.busy}
+          onChange={enabled => { void task.run(() => setBiometric(enabled)); }} />
+        <ErrorNote error={task.error} />
+      </Card>}
       <Card>
-        <Title>مفتاح البصمة</Title>
+        <Title>الباس كي لتسجيل الحضور</Title>
         <Body>
           تأكيد آمن بقفل جهازك. يتم التحقق من المفتاح على السيرفر، ثم يعتمد
           مسؤول الشركة المفتاح قبل استخدامه في الحضور.

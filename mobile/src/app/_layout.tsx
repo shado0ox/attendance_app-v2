@@ -1,3 +1,4 @@
+import "../lib/backgroundLocation";
 import React from "react";
 import { Stack } from "expo-router/stack";
 import { StatusBar } from "expo-status-bar";
@@ -46,6 +47,7 @@ function Navigator() {
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="security" options={{ title: "أمان البصمة" }} />
+      <Stack.Screen name="location" options={{ title: "إعدادات الموقع" }} />
       <Stack.Screen name="notifications" options={{ title: "الإشعارات" }} />
       <Stack.Screen
         name="new-request"
