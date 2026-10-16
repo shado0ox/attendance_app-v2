@@ -16,7 +16,7 @@ const config: ExpoConfig = {
   userInterfaceStyle: "light",
   ios: {
     bundleIdentifier: "com.xshadox.wafrdawam",
-    buildNumber: "3",
+    buildNumber: "4",
     supportsTablet: true,
     privacyManifests: privacyManifest,
     associatedDomains: [`webcredentials:${host}`],
@@ -28,7 +28,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: "com.xshadox.wafrdawam",
-    versionCode: 4,
+    versionCode: 5,
     ...(googleServicesFile ? { googleServicesFile } : {}),
     adaptiveIcon: {
       foregroundImage: "./assets/icon.png",

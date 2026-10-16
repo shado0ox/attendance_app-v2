@@ -1,3 +1,4 @@
+import { EmployeeHeader } from "../components/EmployeeHeader";
 import React from "react";
 import Approvals from "../components/Approvals";
 import { Share } from "react-native";
@@ -39,7 +40,7 @@ export default function Requests() {
     { api, refresh } = useSession(),
     task = useTask();
   return (
-    <Page
+    <Page topInset header={<EmployeeHeader />}
       refresh={() => {
         void refresh();
       }}

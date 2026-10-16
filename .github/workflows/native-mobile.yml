@@ -190,3 +190,24 @@ jobs:
             native-artifacts/*.xml
             native-artifacts/*.log
           retention-days: 14
+  layout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npm ci --prefix mobile
+      - run: npx playwright install --with-deps chromium
+      - name: Check native component layouts with isolated browser adapters
+        run: node mobile/tests/visual/check.cjs
+        env:
+          WAFR_VISUAL_OUTPUT: mobile/build/layout
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafr-native-layout
+          path: mobile/build/layout/
+          retention-days: 14

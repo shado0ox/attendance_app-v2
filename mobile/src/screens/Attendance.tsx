@@ -1,4 +1,6 @@
+import { EmployeeHeader } from "../components/EmployeeHeader";
 import React, { useState } from "react";
+import { useLocalSearchParams } from "expo-router";
 import { View } from "react-native";
 import {
   Action,
@@ -11,12 +13,18 @@ import {
 } from "../components/ui";
 import { useApiQuery } from "../lib/session";
 import type { History } from "../lib/types";
-import { clock, displayDate, shiftMonth, today } from "../lib/dates";
+import { clock, displayDate, shiftMonth, today, validDate } from "../lib/dates";
 export default function Attendance() {
-  const [month, setMonth] = useState(today().slice(0, 7));
+  const params = useLocalSearchParams<{ date?: string }>();
+  const selectedDate = typeof params.date === "string" && validDate(params.date) ? params.date : null;
+  const [selection, setSelection] = useState(() => ({ source: selectedDate, month: selectedDate?.slice(0,7) || today().slice(0,7), day: selectedDate }));
+  if (selection.source !== selectedDate) setSelection({ source: selectedDate, month: selectedDate?.slice(0,7) || today().slice(0,7), day: selectedDate });
+  const { month, day } = selection;
+  const setMonth = (month: string) => setSelection(value => ({ ...value, month }));
+  const setDay = (day: string | null) => setSelection(value => ({ ...value, day }));
   const query = useApiQuery<History>(`/api/employee-attendance?month=${month}`);
   return (
-    <Page
+    <Page topInset header={<EmployeeHeader />}
       refresh={() => {
         void query.refetch();
       }}
@@ -26,16 +34,17 @@ export default function Attendance() {
         <Action
           label="السابق"
           secondary
-          onPress={() => setMonth(shiftMonth(month, -1))}
+          onPress={() => { setDay(null); setMonth(shiftMonth(month, -1)); }}
         />
         <Title>{month}</Title>
         <Action
           label="التالي"
           secondary
           disabled={month >= today().slice(0, 7)}
-          onPress={() => setMonth(shiftMonth(month, 1))}
+          onPress={() => { setDay(null); setMonth(shiftMonth(month, 1)); }}
         />
       </View>
+      {day && <><Body>سجل {displayDate(day)}</Body><Action secondary label="عرض الشهر بالكامل" onPress={() => setDay(null)}/></>}
       <QueryState query={query}>
         {query.data && (
           <>
@@ -49,8 +58,8 @@ export default function Attendance() {
                 {query.data.absentDays} يوم
               </Body>
             </Card>
-            {query.data.items.length ? (
-              query.data.items.map((item) => (
+            {query.data.items.some(item => !day || item.date === day) ? (
+              query.data.items.filter(item => !day || item.date === day).map((item) => (
                 <Card key={item.date}>
                   <Body>{displayDate(item.date)}</Body>
                   <View style={styles.row}>
@@ -75,7 +84,7 @@ export default function Attendance() {
               ))
             ) : (
               <Card>
-                <Body>لا توجد سجلات لهذا الشهر.</Body>
+                <Body>لا توجد سجلات للفترة المحددة.</Body>
               </Card>
             )}
           </>

@@ -9,7 +9,7 @@ export default function Tabs() {
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="attendance">
         <NativeTabs.Trigger.Icon sf="clock.fill" md="schedule" />
-        <NativeTabs.Trigger.Label>الحضور</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>سجل الحضور</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="schedule">
         <NativeTabs.Trigger.Icon sf="calendar" md="calendar_month" />
@@ -19,10 +19,7 @@ export default function Tabs() {
         <NativeTabs.Trigger.Icon sf="doc.text.fill" md="description" />
         <NativeTabs.Trigger.Label>الطلبات</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="profile">
-        <NativeTabs.Trigger.Icon sf="person.crop.circle" md="person" />
-        <NativeTabs.Trigger.Label>حسابي</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
+
     </NativeTabs>
   );
 }

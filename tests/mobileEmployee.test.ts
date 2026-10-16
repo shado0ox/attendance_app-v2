@@ -96,3 +96,20 @@ test('native arrival locations expose only enabled work sites allowed for the em
   assert.deepEqual(result.attendanceLocations, [{ id: 'allowed', name: 'Office', lat: 26, lng: 50, radius: 150 }]);
   assert.ok(!JSON.stringify(result).includes('SECRET'));
 });
+
+test('mobile company identity exposes only the authenticated employee photo and bounded raster branding', () => {
+  const data = {employees:[{id:'a',name:'A',photoDataUrl:'data:image/png;base64,AAAA'},{id:'b',name:'B',photoDataUrl:'data:image/png;base64,QkJC'}],settings:{companyName:'Own company',logoDataUrl:'data:image/webp;base64,Q0ND',secret:'SECRET'}};
+  const result = mobileEmployeeData(data,'a','2026-10-01','2026-10-31')!;
+  assert.equal(result.companyLogo,data.settings.logoDataUrl);
+  assert.equal(result.employee.photoDataUrl,data.employees[0].photoDataUrl);
+  assert.ok(!JSON.stringify(result).includes('QkJC'));
+  assert.ok(!JSON.stringify(result).includes('SECRET'));
+  data.settings.logoDataUrl='https://tracker.test/logo.png';
+  data.employees[0].photoDataUrl='data:image/svg+xml;base64,AAAA';
+  const rejected = mobileEmployeeData(data,'a','2026-10-01','2026-10-31')!;
+  assert.equal(rejected.companyLogo,''); assert.equal(rejected.employee.photoDataUrl,'');
+  data.settings.logoDataUrl='data:image/png;base64,'+'A'.repeat(1500000);
+  data.employees[0].photoDataUrl='data:image/png;base64,'+'A'.repeat(420000);
+  const oversized = mobileEmployeeData(data,'a','2026-10-01','2026-10-31')!;
+  assert.equal(oversized.companyLogo,''); assert.equal(oversized.employee.photoDataUrl,'');
+});

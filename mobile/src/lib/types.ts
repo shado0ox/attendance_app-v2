@@ -29,6 +29,7 @@ export type BreakEntry = {
   plannedEnd: number;
   endedAt: number | null;
   lateReturnMinutes: number;
+  allowedMinutes?: number;
 };
 export type Attendance = {
   id: number;
@@ -38,6 +39,13 @@ export type Attendance = {
   checkIn2: string | null;
   checkOut2: string | null;
   checkInTs: string | null;
+  checkOutTs?: string | null;
+  checkInTs2?: string | null;
+  checkOutTs2?: string | null;
+  checkInLocation?: string;
+  checkOutLocation?: string;
+  checkInLocation2?: string;
+  checkOutLocation2?: string;
   breaks: BreakEntry[];
 };
 export type Bootstrap = {
@@ -47,9 +55,11 @@ export type Bootstrap = {
     id: string;
     name: string;
     displayName: string;
+    photoDataUrl?: string;
     departmentName: string;
   };
   companyName: string;
+  companyLogo?: string;
   today: string;
   serverNow: number;
   schedule: Assignment[];
