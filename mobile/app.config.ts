@@ -1,4 +1,5 @@
 import type { ExpoConfig } from "expo/config";
+import privacyManifest from "./config/privacy-manifest.json";
 const apiUrl =
   process.env.EXPO_PUBLIC_API_URL || "https://attendance.xshadox.com";
 const host = new URL(apiUrl).hostname;
@@ -9,6 +10,7 @@ const config: ExpoConfig = {
   slug: "wafr-dawam",
   scheme: "wafrdawam",
   version: "1.0.0",
+  updates: { enabled: false },
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "light",
@@ -16,9 +18,11 @@ const config: ExpoConfig = {
     bundleIdentifier: "com.xshadox.wafrdawam",
     buildNumber: "2",
     supportsTablet: true,
+    privacyManifests: privacyManifest,
     associatedDomains: [`webcredentials:${host}`],
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
+      NSLocalNetworkUsageDescription: "تستخدم نسخة التطوير الشبكة المحلية للاتصال بخادم التطوير على جهازك.",
       NSFaceIDUsageDescription: "تأكيد هويتك بمفتاح الباس كي عند تسجيل البصمة.",
     },
   },
@@ -49,6 +53,13 @@ const config: ExpoConfig = {
     [
       "expo-location",
       {
+        locationAlwaysPermission: false,
+        locationAlwaysAndWhenInUsePermission: false,
+        motionUsagePermission: false,
+        isIosBackgroundLocationEnabled: false,
+        isAndroidBackgroundLocationEnabled: false,
+        isAndroidMotionActivityEnabled: false,
+        locationFullAccuracyPermission: "يحتاج تسجيل الحضور والانصراف موقعًا دقيقًا للتحقق من وجودك في موقع العمل.",
         locationWhenInUsePermission:
           "يستخدم وفر دوام موقعك عند طلب تسجيل الحضور والانصراف للتحقق من موقع العمل.",
       },
@@ -69,7 +80,8 @@ const config: ExpoConfig = {
         backgroundColor: "#F3F7F6",
       },
     ],
-    ["expo-build-properties", { android: { minSdkVersion: 28 } }],
+    ["expo-build-properties", { android: { minSdkVersion: 28 }, ios: { deploymentTarget: "16.4", privacyManifestAggregationEnabled: true } }],
+    "./plugins/withNativeIosRelease.cjs",
   ],
   extra: {
     apiUrl,
