@@ -124,7 +124,7 @@ export default function Home() {
         {assignment?.shift?.type === 'double' && <Body muted>الفترة الثانية: {assignment.shift.start2} — {assignment.shift.end2}</Body>}
         {record && record.date !== data.today && <Body muted>هذه الفترة تتبع دوام {displayDate(record.date)}</Body>}
       </View>
-      <PunchCircle size={Math.min(224, width - 64)} label={task.busy ? stage || 'جاري التحقق…' : resting ? 'في الاستراحة' : punch ? punchLabel[punch.field] : 'اكتملت البصمات'}
+      <PunchCircle size={Math.min(224, width - 64)} label={task.busy ? stage || 'جاري التحقق…' : resting ? 'في الاستراحة' : punch ? punchLabel[punch.field] : 'لا توجد بصمة متاحة'}
         busy={task.busy} disabled={!punch || task.busy || resting || breakUnknown || breaks.isFetching || !!query.error || query.isFetching}
         working={working} resting={resting} focused={focused && foreground} progress={metrics.progress} onPress={() => { void perform(); }}/>
       <View style={{ flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 8 }}>

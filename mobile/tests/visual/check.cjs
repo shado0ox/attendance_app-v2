@@ -8,12 +8,12 @@ const root = path.resolve(__dirname, '../../..');
 const output = path.resolve(process.env.WAFR_VISUAL_OUTPUT || '/tmp/wafr-native-layout');
 fs.mkdirSync(output,{recursive:true});
 const server = spawn(process.execPath,[path.join(root,'node_modules/vite/bin/vite.js'),'--config',path.join(__dirname,'vite.config.ts')],{cwd:root,stdio:['ignore','pipe','pipe']});
-let logs=''; server.stdout.on('data',chunk=>logs+=chunk); server.stderr.on('data',chunk=>logs+=chunk);
+let logs=''; const ready = () => logs.replace(/\x1B\[[0-9;]*m/g,'').includes('Local:'); server.stdout.on('data',chunk=>logs+=chunk); server.stderr.on('data',chunk=>logs+=chunk);
 (async()=>{
   let browser;
   try {
-    for(let i=0;i<100&&!logs.includes('Local:');i++) { if(server.exitCode!==null) throw new Error(logs); await new Promise(resolve=>setTimeout(resolve,100)); }
-    if(!logs.includes('Local:')) throw new Error('Layout server failed to start: '+logs);
+    for(let i=0;i<100&&!ready();i++) { if(server.exitCode!==null) throw new Error(logs); await new Promise(resolve=>setTimeout(resolve,100)); }
+    if(!ready()) throw new Error('Layout server failed to start: '+logs);
     browser = await chromium.launch({headless:true,timeout:20000,...(process.env.WAFR_BROWSER_EXECUTABLE?{executablePath:process.env.WAFR_BROWSER_EXECUTABLE}:{}),args:['--no-sandbox',...(process.env.WAFR_BROWSER_SINGLE_PROCESS?['--no-zygote','--single-process']:[])]});
     const page=await browser.newPage({viewport:{width:390,height:844},reducedMotion:'reduce'});
     const errors=[]; page.on('pageerror',error=>errors.push(error.message));
