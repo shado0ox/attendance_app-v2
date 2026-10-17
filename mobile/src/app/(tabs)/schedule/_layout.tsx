@@ -1,8 +1,9 @@
+import { TabTransition } from "../../../components/TabTransition";
 import { Stack } from "expo-router/stack";
 import { colors } from "../../../components/ui";
 export default function Layout() {
   return (
-    <Stack
+    <TabTransition><Stack
       screenOptions={{
         headerShown: false,
         headerTintColor: colors.ink,
@@ -11,6 +12,6 @@ export default function Layout() {
       }}
     >
       <Stack.Screen name="index" options={{ title: "جدول الدوام" }} />
-    </Stack>
+    </Stack></TabTransition>
   );
 }

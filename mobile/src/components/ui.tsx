@@ -18,6 +18,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 export const colors = {
   ink: "#142E36",
+  brandBackground: "#102C3A",
+  brandMark: "#16B8A6",
   muted: "#526970",
   accent: "#087D71",
   background: "#F6F8FA",

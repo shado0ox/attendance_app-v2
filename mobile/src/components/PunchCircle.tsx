@@ -1,20 +1,14 @@
-import React, { useEffect, useState } from 'react';
-import { AccessibilityInfo, ActivityIndicator, AppState, Pressable, Text, View, useWindowDimensions } from 'react-native';
+import React, { useEffect } from 'react';
+import { ActivityIndicator, Pressable, Text, View, useWindowDimensions } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import Animated, { cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import { useMotionPreferences } from '../hooks/useMotionPreferences';
 import { colors, styles } from './ui';
 import { Icon } from './Icon';
 /** One subtle work indicator; no loop while hidden, unfocused, or reduced-motion is enabled. */
 function WorkPulse({ active, size, color }: { active: boolean; size: number; color: string }) {
-  const [reduced, setReduced] = useState(true), [foreground, setForeground] = useState(AppState.currentState === 'active');
+  const { reduced, foreground } = useMotionPreferences();
   const pulse = useSharedValue(0);
-  useEffect(() => {
-    let live = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then(value => { if (live) setReduced(value); }).catch(() => undefined);
-    const motion = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduced);
-    const app = AppState.addEventListener('change', state => setForeground(state === 'active'));
-    return () => { live = false; motion.remove(); app.remove(); };
-  }, []);
   useEffect(() => {
     cancelAnimation(pulse);
     if (active && foreground && !reduced) pulse.value = withRepeat(withTiming(1, { duration: 1600 }), -1, true);

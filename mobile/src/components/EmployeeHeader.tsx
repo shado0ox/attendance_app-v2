@@ -20,8 +20,8 @@ export function EmployeeIdentity({ data, profile }: { data: Bootstrap; profile?:
         <Text style={[styles.text, { flex: 1, fontWeight: '700', fontSize: 15 }]}>{data.companyName}</Text>
       </View>
       <View style={{ flexDirection: 'row-reverse', gap: 8 }}>
-        <HeaderButton name="settings" label="الإعدادات" onPress={() => router.push('/settings')} />
-        <HeaderButton name="person" label="الملف الشخصي" onPress={() => router.push('/profile')} />
+        <HeaderButton name="settings" label="الإعدادات" onPress={() => router.navigate('/settings')} />
+        <HeaderButton name="person" label="الملف الشخصي" onPress={() => router.navigate('/profile')} />
       </View>
     </View>
     <View style={{ flexDirection: 'row-reverse', gap: 10, alignItems: 'center' }}>

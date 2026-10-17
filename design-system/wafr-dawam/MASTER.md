@@ -23,5 +23,11 @@ Approved reference: the user's eight-page attendance PDF, adapted to the existin
 - Gentle work pulse only while focused/foreground/working. Reduced motion has a static equivalent; stop loops on blur/background/unmount. No decorative continuous movement elsewhere.
 
 ## Release and review
-- Android versionCode 5; iOS buildNumber 4. Same application IDs and operator-provided Firebase/Expo/signing configuration.
+- Android versionCode 6; iOS buildNumber 5. Same application IDs and operator-provided Firebase/Expo/signing configuration.
 - Verify state transitions, overnight/double-period metrics, image scoping, API failures, large text, small screens, safe areas and native compilation.
+
+## Launch and motion
+- Dark launch canvas #102C3A and teal logo #16B8A6 match the existing app icon pixels.
+- Native OS launch frame matches the app's first frame; finite SVG clock/check tracing takes 850ms. Reduced motion skips the tracing duration. No startup API dependency or replay on resume.
+- Native stack gestures remain standard. Tab content gets a 160ms focus transition without remounting or resetting form/filter state; no motion offscreen or with reduced motion.
+- Employee preferences use plain user-facing wording. Keep real unavailable states; provider setup details belong in deployment documentation.

@@ -60,13 +60,12 @@ export default function Notifications() {
             <>
               <Body>
                 {status.data.registered
-                  ? "الجهاز مسجل لدى السيرفر"
-                  : "الجهاز غير مسجل للإشعارات"}
+                  ? "تذكيرات هذا الهاتف مرتبطة بحسابك"
+                  : "الهاتف غير مربوط بالتذكيرات"}
               </Body>
               {!status.data.configured && (
                 <Body muted>
-                  إرسال إشعارات الجوال غير مفعّل على السيرفر بعد. يلزم إكمال
-                  إعداد مفاتيح الإرسال.
+                  تذكيرات الدوام غير متاحة حاليًا. تواصل مع مسؤول الشركة.
                 </Body>
               )}
 
@@ -121,8 +120,7 @@ export default function Notifications() {
         </QueryState>
         <ErrorNote error={task.error} />
         <Body muted>
-          وصول الإشعار يعتمد على إذن النظام واتصال الهاتف وإعدادات Apple
-          وFirebase. تسجيل الجهاز لا يؤكد وصول الإشعارات.
+          لاستقبال التذكيرات، اسمح بإشعارات التطبيق وتأكد من اتصال هاتفك بالإنترنت.
         </Body>
         <Action secondary label="فتح إعدادات إشعارات الهاتف" onPress={() => { void task.run(() => Linking.openSettings()); }} />
       </Card>
