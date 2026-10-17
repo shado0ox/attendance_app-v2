@@ -46,6 +46,8 @@ function Navigator() {
       }}
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="settings" options={{ title: "الإعدادات" }} />
+      <Stack.Screen name="profile" options={{ title: "الملف الشخصي" }} />
       <Stack.Screen name="security" options={{ title: "أمان البصمة" }} />
       <Stack.Screen name="location" options={{ title: "إعدادات الموقع" }} />
       <Stack.Screen name="notifications" options={{ title: "الإشعارات" }} />

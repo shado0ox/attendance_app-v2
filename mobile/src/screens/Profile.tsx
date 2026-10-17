@@ -1,7 +1,6 @@
 import EmailVerification from "../components/EmailVerification";
 import React, { useState } from "react";
-import { Image, View } from "react-native";
-import { router } from "expo-router";
+import { Image } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import {
@@ -13,7 +12,6 @@ import {
   Page,
   QueryState,
   Title,
-  confirm,
   useTask,
 } from "../components/ui";
 import { useApiQuery, useSession } from "../lib/session";
@@ -36,7 +34,7 @@ export default function Profile() {
   );
 }
 function ProfileEditor({ profile }: { profile: ProfileData }) {
-  const { api, refresh, logout } = useSession(),
+  const { api, refresh } = useSession(),
     task = useTask();
   const [displayName, setDisplayName] = useState(profile.displayName || ""),
     [phone, setPhone] = useState(profile.phone || ""),
@@ -140,50 +138,7 @@ function ProfileEditor({ profile }: { profile: ProfileData }) {
         }
         saving={task.busy}
       />
-      <Card>
-        <Action
-          secondary
-          label="أمان البصمة والباس كي"
-          onPress={() => router.push("/security")}
-        />
-        <Action
-          secondary
-          label="الموقع وتذكير الوصول"
-          onPress={() => router.push("/location")}
-        />
-        <Action secondary
-          label="إعدادات الإشعارات"
-          onPress={() => router.push("/notifications")}
-        />
-        <Action
-          secondary
-          label="سياسة الخصوصية"
-          onPress={() => {
-            void task.run(async () => {
-              const { openURL } = await import("expo-linking");
-              const { API_ORIGIN } = await import("../lib/api");
-              await openURL(API_ORIGIN + "/privacy.html");
-            });
-          }}
-        />
-        <View style={{ height: 6 }} />
-        <Action
-          secondary
-          label="تسجيل الخروج"
-          disabled={task.busy}
-          onPress={() => {
-            void task.run(async () => {
-              if (
-                await confirm(
-                  "تسجيل الخروج",
-                  "هل تريد الخروج من حساب الموظف على هذا الجهاز؟",
-                )
-              )
-                await logout();
-            });
-          }}
-        />
-      </Card>
+
     </>
   );
 }

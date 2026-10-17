@@ -1,6 +1,9 @@
 import { getEmployeeLocations } from "./attendanceLocations";
 import { autoPeriodWindow } from "./autoPunch";
 import { employeeScheduleContent } from "./schedulePublication";
+/** Only inline raster images; no external tracking URLs or active SVG content. */
+export const mobileIdentityImage = (value: unknown, max = 1500000): string =>
+  typeof value === 'string' && value.length <= max && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value) ? value : '';
 /** A deliberately small projection: no colleague directory, credentials or company settings. */
 export function mobileEmployeeData(
   data: any,
@@ -29,10 +32,12 @@ export function mobileEmployeeData(
       id: employeeId,
       name: employee.name,
       displayName: employee.displayName || employee.name,
+      photoDataUrl: mobileIdentityImage(employee.photoDataUrl, 420000),
       departmentName:
         data.departments?.find((d: any) => d.id === employee.dept)?.name || "",
     },
     companyName: data.settings?.companyName || "وفر دوام",
+    companyLogo: mobileIdentityImage(data.settings?.logoDataUrl),
     attendanceLocations: getEmployeeLocations(data.settings, employee).map(({ id, name, lat, lng, radius }) => ({ id, name, lat, lng, radius })),
     schedule: schedule.sort((a, b) => a.date.localeCompare(b.date)),
   };

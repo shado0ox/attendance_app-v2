@@ -1,3 +1,4 @@
+import { EmployeeHeader } from "../components/EmployeeHeader";
 import React, { useState } from "react";
 import { View } from "react-native";
 import {
@@ -21,7 +22,7 @@ export default function Schedule() {
     item.date.startsWith(month),
   );
   return (
-    <Page
+    <Page topInset header={<EmployeeHeader />}
       refresh={() => {
         void query.refetch();
       }}

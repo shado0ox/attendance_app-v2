@@ -20,10 +20,14 @@ export const colors = {
   ink: "#142E36",
   muted: "#526970",
   accent: "#087D71",
-  background: "#F3F7F6",
+  background: "#F6F8FA",
   surface: "#FFFFFF",
   line: "#DFE9E6",
   error: "#B33342",
+  accentSoft: "#E7F3F0",
+  warning: "#875309",
+  warningSoft: "#FFF4DD",
+  faint: "#EDF1F4",
 };
 export const styles = StyleSheet.create({
   text: {
@@ -35,6 +39,7 @@ export const styles = StyleSheet.create({
   },
   title: {
     color: colors.ink,
+    flexShrink: 1,
     fontSize: 23,
     lineHeight: 32,
     fontWeight: "700",
@@ -148,10 +153,16 @@ export function Page({
   refresh,
   refreshing = false,
   topInset = false,
+  header,
+  scrollKey,
+  gap = 20,
 }: React.PropsWithChildren<{
   refresh?: () => void;
   refreshing?: boolean;
   topInset?: boolean;
+  header?: React.ReactNode;
+  scrollKey?: string;
+  gap?: number;
 }>) {
   const insets = useSafeAreaInsets();
   return (
@@ -159,8 +170,8 @@ export function Page({
       style={{ flex: 1, backgroundColor: colors.background }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
+      <ScrollView key={scrollKey}
+        contentInsetAdjustmentBehavior={topInset ? "never" : "automatic"}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{
           padding: 20,
@@ -169,7 +180,7 @@ export function Page({
           width: "100%",
           maxWidth: 700,
           alignSelf: "center",
-          gap: 20,
+          gap,
         }}
         refreshControl={
           refresh ? (
@@ -181,6 +192,7 @@ export function Page({
           ) : undefined
         }
       >
+        {header}
         {children}
       </ScrollView>
     </KeyboardAvoidingView>
