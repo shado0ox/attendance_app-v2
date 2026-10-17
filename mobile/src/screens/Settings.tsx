@@ -12,7 +12,7 @@ export default function Settings() {
     { label: 'الإشعارات', detail: 'تذكيرات الحضور والانصراف على هاتفك', icon: 'bell', route: '/notifications' },
   ];
   return <Page><Body muted>تفضيلات هذا الجهاز وأمان حساب الموظف</Body><Card>
-    {links.map(item => <Pressable key={item.route} accessibilityRole="button" accessibilityLabel={item.label} onPress={() => router.push(item.route)} style={({ pressed }) => ({ flexDirection: 'row-reverse', gap: 12, alignItems: 'center', minHeight: 72, paddingVertical: 12, opacity: pressed ? 0.6 : 1 })}>
+    {links.map(item => <Pressable key={item.route} accessibilityRole="button" accessibilityLabel={item.label} onPress={() => router.navigate(item.route)} style={({ pressed }) => ({ flexDirection: 'row-reverse', gap: 12, alignItems: 'center', minHeight: 72, paddingVertical: 12, opacity: pressed ? 0.6 : 1 })}>
       <View style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: colors.accentSoft }}><Icon name={item.icon} color={colors.accent}/></View>
       <View style={{ flex: 1 }}><Text style={[styles.text, { fontWeight: '600' }]}>{item.label}</Text><Body muted>{item.detail}</Body></View><Icon name="arrow" size={18} color={colors.muted}/>
     </Pressable>)}

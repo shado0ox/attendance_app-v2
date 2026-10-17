@@ -1,13 +1,21 @@
 import "../lib/backgroundLocation";
 import React from "react";
+import * as SplashScreen from "expo-splash-screen";
+import { AppLaunch } from "../components/LaunchScreen";
+import { useMotionPreferences } from "../hooks/useMotionPreferences";
+
 import { Stack } from "expo-router/stack";
-import { StatusBar } from "expo-status-bar";
 import { SessionProvider, useApiQuery, useSession } from "../lib/session";
 import type { PasskeyStatus } from "../lib/types";
 import { colors, Page, QueryState, Action, ErrorNote, useTask } from "../components/ui";
 import Login from "../screens/Login";
 import Security from "../screens/Security";
+void SplashScreen.preventAutoHideAsync().catch(() => undefined);
+SplashScreen.setOptions({ duration: 180, fade: true });
+export const unstable_settings = { initialRouteName: "(tabs)" };
+
 function Navigator() {
+  const motion = useMotionPreferences();
   const { session, ready, logout } = useSession();
   const logoutTask = useTask();
   const passkey = useApiQuery<PasskeyStatus>("/api/attendance-passkey/status");
@@ -39,6 +47,9 @@ function Navigator() {
   return (
     <Stack
       screenOptions={{
+        animation: motion.reduced ? "none" : "default",
+        gestureEnabled: true,
+        headerShadowVisible: false,
         headerTintColor: colors.ink,
         headerStyle: { backgroundColor: colors.background },
         headerBackButtonDisplayMode: "minimal",
@@ -61,8 +72,7 @@ function Navigator() {
 export default function RootLayout() {
   return (
     <SessionProvider>
-      <StatusBar style="dark" />
-      <Navigator />
+      <AppLaunch><Navigator /></AppLaunch>
     </SessionProvider>
   );
 }

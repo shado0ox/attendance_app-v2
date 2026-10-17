@@ -20,7 +20,7 @@ export default function LocationSettings() {
   useEffect(() => { void Promise.resolve().then(check).catch(() => undefined); const sub = AppState.addEventListener('change', s => { if (s === 'active') void check().catch(() => undefined); }); return () => sub.remove(); }, [check]);
   return <Page><Card><Title>الموقع وتذكير الوصول</Title>
     <Body>الموقع: {foreground}</Body><Body muted>الخلفية: {background}</Body>
-    {!isDevice && <Body muted>أنت على محاكي. من قائمة Simulator افتح Features ← Location وحدد موقعًا للتجربة. التحقق النهائي على هاتف حقيقي.</Body>}
+    {__DEV__ && !isDevice && <Body muted>أنت على محاكي. من قائمة Simulator افتح Features ← Location وحدد موقعًا للتجربة. التحقق النهائي على هاتف حقيقي.</Body>}
     <Action secondary label="السماح بالموقع أثناء الاستخدام" disabled={task.busy} onPress={() => { void task.run(async () => { await Location.requestForegroundPermissionsAsync(); await check(); }); }} />
     <QueryState query={query}><SettingToggle label="تذكير الوصول في الخلفية" value={enabled} disabled={task.busy || !query.data || !session || !!query.error || query.isFetching}
       detail="عند دخول نطاق موقع عملك خلال أول ساعة من الدوام، يصلك تذكير محلي لفتح التطبيق وتسجيل الحضور."
@@ -32,7 +32,7 @@ export default function LocationSettings() {
         } else await stopArrivalReminders();
         await check();
       }); }} /></QueryState>
-    <Body muted>التذكير اختياري ولا يحتاج مفاتيح إرسال السيرفر. يعتمد على نظام الهاتف وإذن «دائمًا» والإشعارات، وقد يتأخر أو يتوقف عند إغلاق التطبيق بالقوة. افتح التطبيق يوميًا لتجديد جدول التذكير؛ لا يستمر الجدول المخزن أكثر من 24 ساعة.</Body>
+    <Body muted>التذكير اختياري. اسمح بالموقع في الخلفية وفعّل الإشعارات، وافتح التطبيق يوميًا لتجديد التذكير. قد يتأخر التذكير أو يتوقف عند إغلاق التطبيق بالقوة.</Body>
     <Action secondary label="فتح إعدادات الموقع في الهاتف" onPress={() => { void task.run(() => Linking.openSettings()); }} />
     <ErrorNote error={task.error} />
   </Card></Page>;

@@ -54,7 +54,7 @@ export default function Home() {
   const resting = !!currentBreak || data?.workState.workStatus === 'break';
   const working = data?.workState.workStatus === 'working';
   const breakNow = breaks.data ? breaks.data.serverNow + Math.max(0, tick - breaks.dataUpdatedAt) : now;
-  const openHistory = (date?: string) => router.push({ pathname: '/attendance', params: date ? { date } : {} });
+  const openHistory = (date?: string) => router.navigate({ pathname: '/attendance', params: date ? { date } : {} });
   const perform = async () => {
     if (!punch || task.busy || resting || breakUnknown || breaks.isFetching || query.error || query.isFetching) return;
     await task.run(async () => {
@@ -131,7 +131,7 @@ export default function Home() {
         <Icon name="pin" size={18} color={colors.muted}/><Text style={[styles.subtitle, { flexShrink: 1, textAlign: 'center' }]}>{gps && Math.max(tick,gps.at)-gps.at <= 60000 ? gps.text : 'يتم فحص موقعك عند تسجيل البصمة'}</Text>
       </View>
       <ErrorNote error={task.error}/>
-      {!!task.error && <Action secondary label="فحص إعدادات الموقع" onPress={() => router.push('/location')}/>}
+      {!!task.error && <Action secondary label="فحص إعدادات الموقع" onPress={() => router.navigate('/location')}/>}
       {breakUnknown && <Card><Body muted>يلزم تحميل حالة الاستراحة قبل تسجيل البصمة.</Body><QueryState query={breaks}/>{breaks.data && <Action secondary label="تحديث حالة الاستراحة" onPress={() => { void breaks.refetch(); }}/>}</Card>}
       {!punch && <Body muted>لا توجد بصمة جديدة متاحة. إذا كان هناك سجل مفتوح قديم، اطلب تصحيحًا من الإدارة.</Body>}
       {resting && breakPanel}

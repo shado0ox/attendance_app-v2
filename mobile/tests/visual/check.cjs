@@ -21,6 +21,8 @@ let logs=''; const ready = () => logs.replace(/\x1B\[[0-9;]*m/g,'').includes('Lo
     await open('scenario=working');
     await page.getByRole('button',{name:'تسجيل الانصراف',exact:true}).waitFor();
     await page.screenshot({path:path.join(output,'home-working.png'),fullPage:true});
+    await page.getByRole('button',{name:'الإعدادات',exact:true}).click();assert.equal(await page.evaluate(()=>window.lastRoute),'/settings');
+    await page.getByRole('button',{name:'الملف الشخصي',exact:true}).click();assert.equal(await page.evaluate(()=>window.lastRoute),'/profile');
     for(const [width,height] of [[320,740],[375,812],[844,390]]) {
       await page.setViewportSize({width,height});await open('scenario=working&long=1');
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true,`overflow at ${width}`);
@@ -44,8 +46,31 @@ let logs=''; const ready = () => logs.replace(/\x1B\[[0-9;]*m/g,'').includes('Lo
     await page.getByText('تم تسجيل الانصراف',{exact:true}).waitFor();await page.getByText('تعذر تحميل إجمالي اليوم',{exact:false}).waitFor();
     await page.goto('http://127.0.0.1:5178/?screen=settings');await page.getByRole('button',{name:'أمان الدخول والباس كي',exact:true}).waitFor();
     await page.screenshot({path:path.join(output,'settings.png'),fullPage:true});
+    await page.getByRole('button',{name:'الموقع وتذكير الوصول',exact:true}).click();assert.equal(await page.evaluate(()=>window.lastRoute),'/location');
+    await page.goto('http://127.0.0.1:5178/?screen=notifications');
+    await page.getByText('تذكيرات الدوام غير متاحة حاليًا. تواصل مع مسؤول الشركة.',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'ربط أو تجديد إشعارات هذا الهاتف',exact:true}).isDisabled(),true);
+    assert.equal(await page.getByText(/Firebase|Apple|مفاتيح الإرسال|السيرفر/).count(),0);
+    await page.screenshot({path:path.join(output,'notifications.png'),fullPage:true});
+    await page.goto('http://127.0.0.1:5178/?screen=notifications&configured=1');
+    await page.getByText('الهاتف غير مربوط بالتذكيرات',{exact:true}).waitFor();
+    assert.equal(await page.getByText('تذكيرات الدوام غير متاحة حاليًا. تواصل مع مسؤول الشركة.',{exact:true}).count(),0);
+    await page.goto('http://127.0.0.1:5178/?screen=location&simulator=1');
+    await page.getByText('تذكير الوصول في الخلفية',{exact:true}).waitFor();
+    assert.equal(await page.getByText(/Simulator|محاكي|مفاتيح إرسال|24 ساعة/).count(),0);
+    await page.getByText(/وافتح التطبيق يوميًا/).waitFor();
+    await page.screenshot({path:path.join(output,'location.png'),fullPage:true});
+    await page.goto('http://127.0.0.1:5178/?screen=launch&motion=1');
+    await page.getByRole('progressbar',{name:'وفر دوام، جارٍ فتح التطبيق'}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'دخول الموظف',exact:true}).count(),0,'covered content is hidden from accessibility');
+    await page.screenshot({path:path.join(output,'launch.png'),fullPage:true});
+    await page.getByRole('button',{name:'دخول الموظف',exact:true}).waitFor({timeout:2500});
+    assert.equal(await page.evaluate(()=>window.splashHidden),true);
+    await page.goto('http://127.0.0.1:5178/?screen=launch');
+    await page.getByRole('button',{name:'دخول الموظف',exact:true}).waitFor({timeout:1500});
+    assert.equal(await page.getByRole('progressbar').count(),0,'reduced-motion launch never waits for a tracing animation');
     assert.deepEqual(errors,[]);
-    console.log('Native component layout checks passed: narrow/landscape, identity controls, breaks, saved receipt, report failure, settings. Screenshots: '+output);
+    console.log('Native component layout checks passed: narrow/landscape, identity controls, breaks, saved receipt, report failure, settings, notification/location wording, startup and reduced motion. Screenshots: '+output);
   } catch(error){ console.error(error); console.error(logs);process.exitCode=1; }
   finally { if(browser)await browser.close();server.kill(); }
 })();

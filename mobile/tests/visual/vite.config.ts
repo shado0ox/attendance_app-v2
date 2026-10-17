@@ -3,10 +3,11 @@ const root = resolve(import.meta.dirname, '../..');
 const stub = resolve(import.meta.dirname, 'native-stubs.tsx');
 export default {
   root: import.meta.dirname,
+  define: { __DEV__: 'false' },
   esbuild: { tsconfigRaw: '{"compilerOptions":{"jsx":"react-jsx","target":"ESNext"}}' },
   optimizeDeps: { esbuildOptions: { tsconfigRaw: '{"compilerOptions":{"jsx":"react-jsx"}}' } },
   plugins: [{ name: 'native-layout-fixtures', enforce: 'pre', resolveId(id: string) {
-    if (id === 'expo-router' || id === 'expo-router/react-navigation' || id === 'expo-location' || id === 'expo-linking' || /\/lib\/(session|backgroundLocation|gps|passkey|api)$/.test(id) || id === 'react-native-reanimated' || id === 'react-native-safe-area-context') return stub;
+    if (id === 'expo-router' || id === 'expo-router/react-navigation' || id === 'expo-location' || id === 'expo-linking' || id === 'expo-device' || id === 'expo-secure-store' || id === 'expo-splash-screen' || id === 'expo-status-bar' || /\/lib\/(session|backgroundLocation|gps|passkey|api|notifications)$/.test(id) || id === 'react-native-reanimated' || id === 'react-native-safe-area-context') return stub;
   } }],
   resolve: { alias: [
     { find: /^react-native$/, replacement: resolve(import.meta.dirname,'native-adapter.tsx') },
